@@ -1,16 +1,19 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/theme/app_theme.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../../core/utils/token_storage.dart';
-import '../../courts/data/courts_repository.dart'; // ← was missing
 import '../../courts/domain/courts_notifier.dart';
-import '../../courts/domain/court_sales_notifier.dart';
 import '../../sales/domain/sales_notifier.dart';
+
+const _white = Color(0xFFFFFFFF);
+const _black = Color(0xFF0A0A0A);
+const _grey = Color(0xFF888888);
+const _lightGrey = Color(0xFFF2F2F2);
+const _border = Color(0xFF1A1A1A);
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
-
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
@@ -24,9 +27,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+    );
     _fadeCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 500),
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
@@ -44,56 +50,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (name != null && mounted) setState(() => _managerName = name);
   }
 
-  String _greeting() {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good Morning';
-    if (h < 17) return 'Good Afternoon';
-    return 'Good Evening';
-  }
-
-  String _formattedDate() {
-    final now = DateTime.now();
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-    return '${days[now.weekday - 1]}, ${now.day} '
-        '${months[now.month - 1]} ${now.year}';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final allSalesState = ref.watch(salesNotifierProvider);
+    final salesState = ref.watch(salesNotifierProvider);
     final courtsAsync = ref.watch(courtsNotifierProvider);
 
+    final totalSales = salesState.summary?.totalSales ?? 0.0;
+    final totalCourts = courtsAsync.whenData((c) => c.length).value ?? 0;
+    final isLoadingSales = salesState.status == SalesLoadStatus.loading;
+    final isLoadingCourts = courtsAsync is AsyncLoading;
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: _white,
       body: SafeArea(
         child: FadeTransition(
           opacity: _fadeAnim,
           child: RefreshIndicator(
-            color: AppTheme.primary,
+            color: _black,
             strokeWidth: 2,
-            backgroundColor: AppTheme.surface,
+            backgroundColor: _white,
             onRefresh: () async {
               ref
                   .read(salesNotifierProvider.notifier)
@@ -102,48 +77,356 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Header ─────────────────────────────────────────
-                  _Header(
-                    greeting: _greeting(),
-                    managerName: _managerName,
-                    date: _formattedDate(),
+                  // ── Top Row ──────────────────────────────────────
+                  _TopRow(managerName: _managerName),
+                  const SizedBox(height: 8),
+
+                  // ── Display Heading ──────────────────────────────
+                  Text(
+                    'ETL FOOD\nCOURT',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 54,
+                      color: _black,
+                      height: 0.95,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Bento Row 1: Revenue + Courts ────────────────
+                  SizedBox(
+                    height: 120,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 55,
+                          child: _OutlineCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Revenue',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: _grey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                isLoadingSales
+                                    ? const _Skeleton(width: 100, height: 32)
+                                    : Text(
+                                        '₹${_fmt(totalSales)}',
+                                        style: GoogleFonts.antonSc(
+                                          fontSize: 30,
+                                          color: _black,
+                                          height: 1,
+                                        ),
+                                      ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 45,
+                          child: _FilledCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Courts',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: Colors.white60,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                isLoadingCourts
+                                    ? const _Skeleton(
+                                        width: 70,
+                                        height: 28,
+                                        dark: true,
+                                      )
+                                    : Text(
+                                        '$totalCourts Active',
+                                        style: GoogleFonts.antonSc(
+                                          fontSize: 24,
+                                          color: _white,
+                                          height: 1,
+                                        ),
+                                      ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ── Sales card ───────────────────────────────────
+                  _OutlineCard(
+                    height: 86,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 4,
+                          child: SizedBox(
+                            height: 46,
+                            child: CustomPaint(
+                              painter: _SparklinePainter(color: _black),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          width: 1,
+                          height: 46,
+                          color: _border.withOpacity(0.12),
+                          margin: const EdgeInsets.symmetric(horizontal: 14),
+                        ),
+                        Expanded(
+                          flex: 5,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Total Sales',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: _grey,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              isLoadingSales
+                                  ? const _Skeleton(width: 80, height: 24)
+                                  : Text(
+                                      '₹${_fmt(totalSales)}',
+                                      style: GoogleFonts.antonSc(
+                                        fontSize: 26,
+                                        color: _black,
+                                        height: 1,
+                                      ),
+                                    ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ── Bento Row 2: Complaints + Maintenance ────────
+                  SizedBox(
+                    height: 100,
+                    child: Row(
+                      children: [
+                        // Complaints
+                        Expanded(
+                          child: _OutlineCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Complaints',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        color: _grey,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.arrow_forward_ios_rounded,
+                                      size: 11,
+                                      color: _grey,
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      '3',
+                                      style: GoogleFonts.antonSc(
+                                        fontSize: 32,
+                                        color: _black,
+                                        height: 1,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 3),
+                                      child: Text(
+                                        'open',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          color: _grey,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // Maintenance
+                        Expanded(
+                          child: _FilledCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Maintenance',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        color: Colors.white60,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_forward_ios_rounded,
+                                      size: 11,
+                                      color: Colors.white.withOpacity(0.4),
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      '2',
+                                      style: GoogleFonts.antonSc(
+                                        fontSize: 32,
+                                        color: _white,
+                                        height: 1,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 3),
+                                      child: Text(
+                                        'pending',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          color: Colors.white60,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ── Housekeeping Progress Card ───────────────────
+                  _OutlineCard(
+                    height: 90,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Housekeeping',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: _grey,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              '8 / 12 zones',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: _black,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        // Progress bar
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: 8 / 12,
+                            minHeight: 8,
+                            backgroundColor: _lightGrey,
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              _black,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '4 zones pending',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: _grey,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 24),
 
-                  // ── Banner ─────────────────────────────────────────
-                  _AllCourtsBanner(salesState: allSalesState),
-                  const SizedBox(height: 28),
-
-                  // ── Courts ─────────────────────────────────────────
-                  _SectionHeader(title: 'Courts'),
+                  // ── Courts Section ───────────────────────────────
+                  _SectionHeader(title: 'Courts', onViewAll: () {}),
                   const SizedBox(height: 12),
                   courtsAsync.when(
-                    loading: () => _CourtsGridSkeleton(),
+                    loading: () => Column(
+                      children: List.generate(
+                        3,
+                        (_) => const Padding(
+                          padding: EdgeInsets.only(bottom: 10),
+                          child: _Skeleton(width: double.infinity, height: 72),
+                        ),
+                      ),
+                    ),
                     error: (_, __) =>
-                        _ErrorTile(message: 'Could not load courts'),
-                    data: (courts) => GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                            childAspectRatio: 1.05,
-                          ),
-                      itemCount: courts.length,
-                      itemBuilder: (_, i) =>
-                          _CourtCard(court: courts[i], index: i),
+                        const _ErrorRow(message: 'Could not load courts'),
+                    data: (courts) => Column(
+                      children: courts
+                          .map(
+                            (c) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _CourtRow(court: c),
+                            ),
+                          )
+                          .toList(),
                     ),
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 24),
 
-                  // ── Now Playing ────────────────────────────────────
-                  _SectionHeader(title: 'Now Playing'),
+                  // ── Now Playing ──────────────────────────────────
+                  _SectionHeader(title: 'Now Playing', onViewAll: null),
                   const SizedBox(height: 12),
                   const _NowPlayingCard(),
                 ],
@@ -154,414 +437,202 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ),
     );
   }
+
+  String _fmt(double v) {
+    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
+    return v.toStringAsFixed(0);
+  }
 }
 
-// ── Header ────────────────────────────────────────────────────────────────────
+// ── Top Row ───────────────────────────────────────────────────────────────────
 
-class _Header extends StatelessWidget {
-  final String greeting;
+class _TopRow extends StatelessWidget {
   final String managerName;
-  final String date;
-  const _Header({
-    required this.greeting,
-    required this.managerName,
-    required this.date,
-  });
+  const _TopRow({required this.managerName});
 
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$greeting, $managerName 👋',
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                date,
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                ),
-              ),
-            ],
+        Text(
+          'Hi, $managerName',
+          style: GoogleFonts.inter(
+            fontSize: 15,
+            color: _grey,
+            fontWeight: FontWeight.w500,
           ),
         ),
-        const SizedBox(width: 12),
-        // Notification button — glassmorphic
-        ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                gradient: AppTheme.glassGradient,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppTheme.borderGlass),
-              ),
-              child: const Icon(
-                Icons.notifications_outlined,
-                color: AppTheme.textSecondary,
-                size: 22,
-              ),
-            ),
+        Container(
+          width: 38,
+          height: 38,
+          decoration: const BoxDecoration(
+            color: _black,
+            shape: BoxShape.circle,
           ),
+          child: const Icon(Icons.person_rounded, color: _white, size: 20),
         ),
       ],
     );
   }
 }
 
-// ── All Courts Banner ─────────────────────────────────────────────────────────
+// ── Section Header ────────────────────────────────────────────────────────────
 
-class _AllCourtsBanner extends StatelessWidget {
-  final SalesState salesState;
-  const _AllCourtsBanner({required this.salesState});
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final VoidCallback? onViewAll;
+  const _SectionHeader({required this.title, this.onViewAll});
 
   @override
   Widget build(BuildContext context) {
-    final isLoaded = salesState.status == SalesLoadStatus.loaded;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF00BFA6), Color(0xFF006ECC)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: _black,
+            letterSpacing: -0.3,
+          ),
         ),
-        borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
-        boxShadow: AppTheme.primaryGlowShadow,
-      ),
-      child: Stack(
-        children: [
-          // Background decorative circles
-          Positioned(
-            right: -20,
-            top: -20,
-            child: Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.05),
+        if (onViewAll != null)
+          GestureDetector(
+            onTap: onViewAll,
+            child: Text(
+              'View All',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: _grey,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
-          Positioned(
-            right: 30,
-            bottom: -30,
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.04),
-              ),
-            ),
-          ),
-
-          // Content
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.store_mall_directory_rounded,
-                          color: Colors.white,
-                          size: 12,
-                        ),
-                        SizedBox(width: 5),
-                        Text(
-                          'Today — All Courts',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Big sales number
-              AnimatedSwitcher(
-                duration: AppTheme.durationNormal,
-                child: isLoaded
-                    ? Text(
-                        '₹${salesState.summary!.totalSales.toStringAsFixed(0)}',
-                        key: const ValueKey('loaded'),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 40,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -1.5,
-                        ),
-                      )
-                    : const _ShimmerText(
-                        key: ValueKey('loading'),
-                        width: 180,
-                        height: 44,
-                      ),
-              ),
-              const SizedBox(height: 10),
-
-              // Bills count
-              AnimatedSwitcher(
-                duration: AppTheme.durationNormal,
-                child: isLoaded
-                    ? Row(
-                        key: const ValueKey('bills'),
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(
-                                AppTheme.radiusFull,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.receipt_rounded,
-                                  color: Colors.white,
-                                  size: 12,
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  '${salesState.summary!.totalBills} bills today',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      )
-                    : const _ShimmerText(
-                        key: ValueKey('bills-loading'),
-                        width: 120,
-                        height: 28,
-                      ),
-              ),
-            ],
-          ),
-        ],
-      ),
+      ],
     );
   }
 }
 
-// ── Court Card ────────────────────────────────────────────────────────────────
+// ── Outline Card ──────────────────────────────────────────────────────────────
 
-class _CourtCard extends ConsumerStatefulWidget {
-  final Court court;
-  final int index;
-  const _CourtCard({required this.court, required this.index});
-
-  @override
-  ConsumerState<_CourtCard> createState() => _CourtCardState();
-}
-
-class _CourtCardState extends ConsumerState<_CourtCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _anim;
-  bool _pressed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    // Staggered entrance
-    Future.delayed(
-      Duration(milliseconds: 100 + widget.index * 80),
-      _ctrl.forward,
-    );
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+class _OutlineCard extends StatelessWidget {
+  final Widget child;
+  final double? height;
+  const _OutlineCard({required this.child, this.height});
 
   @override
   Widget build(BuildContext context) {
-    final courtSales = ref.watch(courtSalesProvider(widget.court.id));
-    final isLive = widget.court.status == 'live';
-    final statusColor = isLive ? AppTheme.success : AppTheme.textFaint;
+    return Container(
+      height: height,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border, width: 1.5),
+      ),
+      child: child,
+    );
+  }
+}
 
-    return FadeTransition(
-      opacity: _anim,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.15),
-          end: Offset.zero,
-        ).animate(_anim),
-        child: GestureDetector(
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapUp: (_) => setState(() => _pressed = false),
-          onTapCancel: () => setState(() => _pressed = false),
-          child: AnimatedScale(
-            scale: _pressed ? 0.96 : 1.0,
-            duration: AppTheme.durationFast,
-            curve: Curves.easeOutCubic,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF1A1F32), Color(0xFF111520)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-                    border: Border.all(
-                      color: isLive
-                          ? AppTheme.primary.withOpacity(0.2)
-                          : AppTheme.borderGlass,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                      if (isLive)
-                        BoxShadow(
-                          color: AppTheme.primary.withOpacity(0.08),
-                          blurRadius: 24,
-                          offset: const Offset(0, 4),
-                        ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Status pill
-                      Row(
-                        children: [
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: statusColor,
-                              shape: BoxShape.circle,
-                              boxShadow: isLive
-                                  ? [
-                                      BoxShadow(
-                                        color: AppTheme.success.withOpacity(
-                                          0.6,
-                                        ),
-                                        blurRadius: 6,
-                                      ),
-                                    ]
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            isLive ? 'Live' : 'Offline',
-                            style: TextStyle(
-                              color: statusColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
+// ── Filled Card ───────────────────────────────────────────────────────────────
 
-                      // Court name
-                      Text(
-                        widget.court.name,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.2,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 6),
+class _FilledCard extends StatelessWidget {
+  final Widget child;
+  final double? height;
+  const _FilledCard({required this.child, this.height});
 
-                      // Sales amount
-                      courtSales.when(
-                        loading: () =>
-                            const _ShimmerText(width: 80, height: 20),
-                        error: (_, __) => const Text(
-                          'No data',
-                          style: TextStyle(
-                            color: AppTheme.textFaint,
-                            fontSize: 12,
-                          ),
-                        ),
-                        data: (sales) => Text(
-                          '₹${sales.totalSales.toStringAsFixed(0)}',
-                          style: TextStyle(
-                            color: isLive
-                                ? AppTheme.primary
-                                : AppTheme.textSecondary,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5,
-                          ),
-                        ),
-                      ),
-                    ],
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _black,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: child,
+    );
+  }
+}
+
+// ── Court Row ─────────────────────────────────────────────────────────────────
+
+class _CourtRow extends StatelessWidget {
+  final dynamic court;
+  const _CourtRow({required this.court});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _lightGrey,
+              shape: BoxShape.circle,
+              border: Border.all(color: _border.withOpacity(0.12)),
+            ),
+            child: const Icon(
+              Icons.storefront_rounded,
+              color: _black,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  court.name ?? 'Court',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _black,
                   ),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  court.location ?? 'Food Court',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: _grey,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _black,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              'Active',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                color: _white,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -574,188 +645,68 @@ class _NowPlayingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1A1F32), Color(0xFF0F1320)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-            border: Border.all(color: AppTheme.primary.withOpacity(0.15)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.5),
-                blurRadius: 30,
-                offset: const Offset(0, 10),
-              ),
-              BoxShadow(
-                color: AppTheme.primary.withOpacity(0.06),
-                blurRadius: 40,
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              // Album art placeholder
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primary.withOpacity(0.25),
-                      AppTheme.primary.withOpacity(0.08),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.primary.withOpacity(0.2)),
-                ),
-                child: const Icon(
-                  Icons.music_note_rounded,
-                  color: AppTheme.primary,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 16),
-
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'ETL FOOD COURT',
-                      style: TextStyle(
-                        color: AppTheme.textFaint,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Connect music to see track',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'Tap to open Music controls',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Arrow button
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.glassGradient,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.borderGlass),
-                ),
-                child: const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppTheme.primary,
-                  size: 22,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Section Header ────────────────────────────────────────────────────────────
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-        color: AppTheme.textPrimary,
-        fontSize: 18,
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
-      ),
-    );
-  }
-}
-
-// ── Courts Grid Skeleton ──────────────────────────────────────────────────────
-
-class _CourtsGridSkeleton extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.05,
-      ),
-      itemCount: 4,
-      itemBuilder: (_, __) => Container(
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: const _SkeletonShimmer(),
-      ),
-    );
-  }
-}
-
-// ── Error Tile ────────────────────────────────────────────────────────────────
-
-class _ErrorTile extends StatelessWidget {
-  final String message;
-  const _ErrorTile({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.border),
+        color: _black,
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: AppTheme.danger,
-            size: 18,
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.music_note_rounded,
+              color: _white,
+              size: 22,
+            ),
           ),
-          const SizedBox(width: 10),
-          Text(
-            message,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Background Playlist',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Now Playing',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: Colors.white54,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(
+            Icons.skip_previous_rounded,
+            color: Colors.white.withOpacity(0.5),
+            size: 24,
+          ),
+          const SizedBox(width: 8),
+          const Icon(
+            Icons.pause_circle_filled_rounded,
+            color: _white,
+            size: 32,
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            Icons.skip_next_rounded,
+            color: Colors.white.withOpacity(0.5),
+            size: 24,
           ),
         ],
       ),
@@ -763,113 +714,81 @@ class _ErrorTile extends StatelessWidget {
   }
 }
 
-// ── Shimmer helpers ───────────────────────────────────────────────────────────
+// ── Sparkline Painter ─────────────────────────────────────────────────────────
 
-class _ShimmerText extends StatefulWidget {
-  final double width;
-  final double height;
-  const _ShimmerText({super.key, required this.width, required this.height});
+class _SparklinePainter extends CustomPainter {
+  final Color color;
+  const _SparklinePainter({required this.color});
 
   @override
-  State<_ShimmerText> createState() => _ShimmerTextState();
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.8
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    const pts = [0.55, 0.40, 0.65, 0.30, 0.70, 0.45, 0.35, 0.60, 0.50, 0.75];
+    final path = Path();
+    for (int i = 0; i < pts.length; i++) {
+      final x = (i / (pts.length - 1)) * size.width;
+      final y = size.height - (pts[i] * size.height);
+      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_) => false;
 }
 
-class _ShimmerTextState extends State<_ShimmerText>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+// ── Skeleton ──────────────────────────────────────────────────────────────────
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+class _Skeleton extends StatelessWidget {
+  final double width;
+  final double height;
+  final bool dark;
+  const _Skeleton({
+    required this.width,
+    required this.height,
+    this.dark = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (_, __) => Container(
-        width: widget.width,
-        height: widget.height,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: const [
-              Color(0xFF1E2235),
-              Color(0xFF252A40),
-              Color(0xFF1E2235),
-            ],
-            stops: [
-              (_ctrl.value - 0.3).clamp(0.0, 1.0),
-              _ctrl.value.clamp(0.0, 1.0),
-              (_ctrl.value + 0.3).clamp(0.0, 1.0),
-            ],
-          ),
-        ),
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: dark ? Colors.white.withOpacity(0.15) : _lightGrey,
+        borderRadius: BorderRadius.circular(8),
       ),
     );
   }
 }
 
-class _SkeletonShimmer extends StatefulWidget {
-  const _SkeletonShimmer();
+// ── Error Row ─────────────────────────────────────────────────────────────────
 
-  @override
-  State<_SkeletonShimmer> createState() => _SkeletonShimmerState();
-}
-
-class _SkeletonShimmerState extends State<_SkeletonShimmer>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+class _ErrorRow extends StatelessWidget {
+  final String message;
+  const _ErrorRow({required this.message});
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (_, __) => Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: const [
-              Color(0xFF161B2E),
-              Color(0xFF1E2438),
-              Color(0xFF161B2E),
-            ],
-            stops: [
-              (_ctrl.value - 0.3).clamp(0.0, 1.0),
-              _ctrl.value.clamp(0.0, 1.0),
-              (_ctrl.value + 0.3).clamp(0.0, 1.0),
-            ],
-          ),
-        ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.red, size: 18),
+          const SizedBox(width: 10),
+          Text(message, style: GoogleFonts.inter(fontSize: 13, color: _grey)),
+        ],
       ),
     );
   }

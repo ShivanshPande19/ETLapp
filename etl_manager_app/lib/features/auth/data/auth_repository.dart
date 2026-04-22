@@ -8,13 +8,18 @@ class AuthRepository {
   AuthRepository(this._dio);
 
   Future<Map<String, dynamic>> login(String email, String password) async {
-    final response = await _dio.post('/auth/login', data: {
-      'email': email,
-      'password': password,
-    });
+    final response = await _dio.post(
+      '/auth/login',
+      data: {'email': email, 'password': password},
+    );
     final data = response.data;
     await TokenStorage.saveToken(data['access_token']);
-    await TokenStorage.saveManagerInfo(data['manager_name'], data['manager_email']);
+    await TokenStorage.saveManagerInfo(
+      data['manager_name'],
+      data['manager_email'],
+    );
+    await TokenStorage.saveRole(data['role']);
+    await TokenStorage.saveZone(data['zone']);
     return data;
   }
 

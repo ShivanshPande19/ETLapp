@@ -81,7 +81,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     ref.listen<AuthState>(authNotifierProvider, (_, next) {
       if (next.status == AuthStatus.success) {
-        context.go('/home');
+        context.go(next.isStaff ? '/staff/home' : '/home');
       }
       if (next.status == AuthStatus.error) {
         _showErrorBar(context, next.errorMessage ?? 'Login failed');
