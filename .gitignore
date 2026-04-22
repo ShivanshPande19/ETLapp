@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Flutter / Dart
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+
+# Android / iOS generated
+**/android/.gradle/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+
+# Python / FastAPI
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+
+# IDE
+.idea/
+.vscode/
