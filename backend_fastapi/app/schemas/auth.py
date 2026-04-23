@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 class LoginRequest(BaseModel):
     email: str
@@ -9,3 +10,5 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     manager_name: str
     manager_email: str
+    role: str
+    zone: Optional[str] = None

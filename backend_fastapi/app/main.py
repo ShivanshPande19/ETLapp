@@ -1,8 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.config import settings
-from .api.routes import auth, dashboard
-from .api.routes import auth, dashboard, sales
 from .api.routes import auth, dashboard, sales, courts
 
 app = FastAPI(
@@ -25,5 +23,5 @@ def health():
 
 app.include_router(auth.router,      prefix="/auth",      tags=["Auth"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
-app.include_router(sales.router, prefix="/sales", tags=["Sales"])
-app.include_router(courts.router, prefix="/courts", tags=["Courts"])
+app.include_router(sales.router,     prefix="/sales",     tags=["Sales"])
+app.include_router(courts.router,    prefix="/courts",    tags=["Courts"])
