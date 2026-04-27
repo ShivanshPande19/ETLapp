@@ -1,51 +1,54 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum as SAEnum
-from app.database import Base                         # ← fixed
-from datetime import datetime
-import enum
+# app/models/housekeeping.py
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLAlchemy ORM models for housekeeping tables.
+# Imported in main.py so Base.metadata.create_all() picks them up on startup.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
+from sqlalchemy.orm import declarative_mixin
+
+from ..database import Base          # your existing Base from app/database.py
 
 
-class ShiftEnum(str, enum.Enum):
-    morning = "morning"
-    day     = "day"
-    night   = "night"
+class HkTask(Base):
+    """
+    One row per (court_id, shift, date, task_id).
+    UPSERT on re-submission — no duplicate rows.
+    """
+    __tablename__ = "hk_tasks"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    court_id     = Column(Integer,  nullable=False, index=True)
+    shift        = Column(String,   nullable=False)   # morning | day | night
+    date         = Column(String,   nullable=False)   # YYYY-MM-DD
+    task_id      = Column(String,   nullable=False)
+    task_title   = Column(String,   nullable=True)
+    is_done      = Column(Boolean,  nullable=False, default=False)
+    photo_url    = Column(String,   nullable=True)
+    done_at      = Column(String,   nullable=True)    # ISO-8601 from Flutter
+    submitted_at = Column(DateTime, server_default=func.now())
+
+    # Composite unique constraint — enforced at DB level
+    from sqlalchemy import UniqueConstraint
+    __table_args__ = (
+        UniqueConstraint("court_id", "shift", "date", "task_id",
+                         name="uq_hk_tasks_submission"),
+    )
 
 
-class HousekeepingRecord(Base):
-    __tablename__ = "housekeeping_records"
+class HkRecurring(Base):
+    """
+    Audit trail for weekly (flags washing) and monthly (fire safety) tasks.
+    Every completion adds a new row — the latest row per (court, type) is
+    used to compute next_due_at / is_overdue.
+    """
+    __tablename__ = "hk_recurring"
 
-    id           = Column(Integer, primary_key=True, index=True)
-    court_id     = Column(Integer, nullable=False, index=True)
-    shift        = Column(SAEnum(ShiftEnum), nullable=False)
-    task_id      = Column(String(32), nullable=False)
-    task_title   = Column(String(128), nullable=False)
-    is_done      = Column(Boolean, default=False)
-    photo_url    = Column(String(512), nullable=True)
-    done_at      = Column(DateTime, nullable=True)
-    submitted_by = Column(Integer, nullable=True)
-    date         = Column(String(10), nullable=False, index=True)
-    created_at   = Column(DateTime, default=datetime.utcnow)
-    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class WeeklyTaskRecord(Base):
-    __tablename__ = "weekly_task_records"
-
-    id           = Column(Integer, primary_key=True, index=True)
-    court_id     = Column(Integer, nullable=False, unique=True)
-    task_id      = Column(String(32), default="flags_washing")
-    last_done_at = Column(DateTime, nullable=True)
-    photo_url    = Column(String(512), nullable=True)
-    done_by      = Column(Integer, nullable=True)
-    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class MonthlyTaskRecord(Base):
-    __tablename__ = "monthly_task_records"
-
-    id           = Column(Integer, primary_key=True, index=True)
-    court_id     = Column(Integer, nullable=False, unique=True)
-    task_id      = Column(String(32), default="fire_safety_audit")
-    last_done_at = Column(DateTime, nullable=True)
-    photo_url    = Column(String(512), nullable=True)
-    done_by      = Column(Integer, nullable=True)
-    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id         = Column(Integer,  primary_key=True, autoincrement=True)
+    court_id   = Column(Integer,  nullable=False, index=True)
+    task_type  = Column(String,   nullable=False)   # weekly | monthly
+    task_id    = Column(String,   nullable=False)   # flagswash | fireaudit
+    done_at    = Column(String,   nullable=False)   # ISO-8601
+    photo_url  = Column(String,   nullable=True)
+    done_by    = Column(Integer,  nullable=True)    # staff user id
+    created_at = Column(DateTime, server_default=func.now())
