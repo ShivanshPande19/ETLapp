@@ -1,160 +1,119 @@
+// lib/app/shell_screen.dart
+// UPDATED — added Complaints tab at index 4, Settings moved to index 5
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class ShellScreen extends StatelessWidget {
-  final Widget child;
+class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key, required this.child});
+  final Widget child;
+  @override
+  State<ShellScreen> createState() => _ShellScreenState();
+}
 
-  int _selectedIndex(BuildContext context) {
-    final loc = GoRouterState.of(context).uri.toString();
-    if (loc.startsWith('/sales')) return 1;
-    if (loc.startsWith('/music')) return 2;
-    if (loc.startsWith('/housekeeping')) return 3;
-    if (loc.startsWith('/settings')) return 4;
-    return 0;
+class _ShellScreenState extends State<ShellScreen> {
+  static const _routes = [
+    '/home',
+    '/sales',
+    '/music',
+    '/housekeeping',
+    '/complaints', // ← NEW (index 4)
+    '/settings', // was index 4, now index 5
+  ];
+
+  static const _items = [
+    _NavItem(Icons.grid_view_rounded, 'Home'),
+    _NavItem(Icons.bar_chart_rounded, 'Sales'),
+    _NavItem(Icons.music_note_rounded, 'Music'),
+    _NavItem(Icons.cleaning_services_rounded, 'Tasks'), // shortened label
+    _NavItem(Icons.feedback_outlined, 'Issues'), // ← NEW
+    _NavItem(Icons.settings_rounded, 'Settings'),
+  ];
+
+  int get _selectedIndex {
+    final loc = GoRouterState.of(context).uri.path;
+    final idx = _routes.indexWhere((r) => loc.startsWith(r));
+    return idx < 0 ? 0 : idx;
   }
 
-  void _onTap(BuildContext context, int index) {
-    switch (index) {
-      case 0:
-        context.go('/home');
-        break;
-      case 1:
-        context.go('/sales');
-        break;
-      case 2:
-        context.go('/music');
-        break;
-      case 3:
-        context.go('/housekeeping');
-        break;
-      case 4:
-        context.go('/settings');
-        break;
+  void _onTap(int index) {
+    HapticFeedback.selectionClick();
+    if (index != _selectedIndex) {
+      context.go(_routes[index]);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final selectedIndex = _selectedIndex(context);
-
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
-    );
-
-    const items = [
-      _NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
-      _NavItem(icon: Icons.bar_chart_rounded, label: 'Sales'),
-      _NavItem(icon: Icons.music_note_rounded, label: 'Music'),
-      _NavItem(icon: Icons.cleaning_services_rounded, label: 'Housekeeping'),
-      _NavItem(icon: Icons.settings_rounded, label: 'Settings'),
-    ];
+    final sel = _selectedIndex;
+    final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFFFFF),
-      body: Stack(
-        children: [
-          child,
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: bottomPadding + 16,
-            child: _NavBar(
-              items: items,
-              selectedIndex: selectedIndex,
-              onTap: (i) => _onTap(context, i),
-            ),
+      backgroundColor: const Color(0xFF080808),
+      body: widget.child,
+      bottomNavigationBar: Container(
+        color: const Color(0xFF080808),
+        padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPad + 8),
+        child: Container(
+          height: 60,
+          decoration: BoxDecoration(
+            color: const Color(0xFF111111),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withOpacity(0.06)),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Nav Bar ───────────────────────────────────────────────────────────────────
-
-class _NavBar extends StatelessWidget {
-  final List<_NavItem> items;
-  final int selectedIndex;
-  final void Function(int) onTap;
-
-  const _NavBar({
-    required this.items,
-    required this.selectedIndex,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A0A0A),
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(_items.length, (i) {
+              final item = _items[i];
+              final active = sel == i;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => _onTap(i),
+                  behavior: HitTestBehavior.opaque,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutCubic,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: active
+                              ? Colors.white.withOpacity(0.12)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          item.icon,
+                          size: 20,
+                          color: active
+                              ? Colors.white
+                              : Colors.white.withOpacity(0.35),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        item.label,
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: active
+                              ? Colors.white
+                              : Colors.white.withOpacity(0.35),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
           ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: List.generate(items.length, (index) {
-          final isSelected = selectedIndex == index;
-          return GestureDetector(
-            onTap: () => onTap(index),
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              padding: EdgeInsets.symmetric(
-                horizontal: isSelected ? 14 : 12,
-                vertical: 6,
-              ),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.white : Colors.transparent,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    items[index].icon,
-                    size: 18,
-                    color: isSelected
-                        ? const Color(0xFF0A0A0A)
-                        : Colors.white.withOpacity(0.45),
-                  ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    child: isSelected
-                        ? Row(
-                            children: [
-                              const SizedBox(width: 6),
-                              Text(
-                                items[index].label,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: const Color(0xFF0A0A0A),
-                                ),
-                              ),
-                            ],
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
+        ),
       ),
     );
   }
@@ -163,5 +122,5 @@ class _NavBar extends StatelessWidget {
 class _NavItem {
   final IconData icon;
   final String label;
-  const _NavItem({required this.icon, required this.label});
+  const _NavItem(this.icon, this.label);
 }
