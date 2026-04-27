@@ -1,5 +1,6 @@
 // lib/features/housekeeping/presentation/manager_housekeeping_screen.dart
-import 'dart:ui';
+
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
-// ─── Colours ──────────────────────────────────────────────────
+// ─── Palette (matches app design language) ────────────────────────────────────
 const _white = Color(0xFFFFFFFF);
 const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
@@ -18,118 +19,1191 @@ const _warn = Color(0xFFE5A000);
 const _danger = Color(0xFFFF4444);
 const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
+const _bg = Color(0xFF080808);
 
-// ─── Local display models ─────────────────────────────────────
-enum TaskCat { cleaning, pest, laundry, audit }
+// ─── Task definitions (source of truth for task list — backend may not return
+//     pending tasks, so we always show these and overlay API status on top) ────
 
-enum TaskFreq { daily, weekly, monthly }
+enum _Cat { cleaning, pest, laundry, audit }
 
-enum TaskSt { done, pending, overdue }
-
-class HkTask {
-  final String id;
-  final String title;
-  final TaskCat category;
+class _TaskDef {
+  final String id, title;
   final IconData icon;
-  final TaskFreq frequency;
-  const HkTask({
-    required this.id,
-    required this.title,
-    required this.category,
-    required this.icon,
-    this.frequency = TaskFreq.daily,
-  });
-}
-
-class CourtTaskRecord {
-  final HkTask task;
-  final TaskSt status;
-  final String? doneBy;
-  final DateTime? doneAt;
-  final bool hasPhoto;
-  final String? photoUrl; // Cloudinary URL
-  const CourtTaskRecord({
-    required this.task,
-    required this.status,
-    this.doneBy,
-    this.doneAt,
-    this.hasPhoto = false,
-    this.photoUrl,
-  });
+  final _Cat cat;
+  const _TaskDef(this.id, this.title, this.icon, this.cat);
 }
 
 const _kDailyTasks = [
-  HkTask(
-    id: 'floorclean',
-    title: 'Floor Cleaning',
-    category: TaskCat.cleaning,
-    icon: Icons.cleaning_services_rounded,
+  _TaskDef(
+    'floorclean',
+    'Floor Cleaning',
+    Icons.cleaning_services_rounded,
+    _Cat.cleaning,
   ),
-  HkTask(
-    id: 'tablechairclean',
-    title: 'Table & Chair Clean',
-    category: TaskCat.cleaning,
-    icon: Icons.chair_rounded,
+  _TaskDef(
+    'tablechairclean',
+    'Table & Chair Clean',
+    Icons.chair_rounded,
+    _Cat.cleaning,
   ),
-  HkTask(
-    id: 'binclean',
-    title: 'Bins Cleaning (outside)',
-    category: TaskCat.cleaning,
-    icon: Icons.delete_forever_rounded,
+  _TaskDef(
+    'binclean',
+    'Bins Cleaning (outside)',
+    Icons.delete_forever_rounded,
+    _Cat.cleaning,
   ),
-  HkTask(
-    id: 'trayclean',
-    title: 'Tray Cleaning',
-    category: TaskCat.cleaning,
-    icon: Icons.restaurant_rounded,
+  _TaskDef(
+    'trayclean',
+    'Tray Cleaning',
+    Icons.restaurant_rounded,
+    _Cat.cleaning,
   ),
-  HkTask(
-    id: 'binempty',
-    title: 'Garbage Bin Empty',
-    category: TaskCat.cleaning,
-    icon: Icons.delete_outline_rounded,
+  _TaskDef(
+    'binempty',
+    'Garbage Bin Empty',
+    Icons.delete_outline_rounded,
+    _Cat.cleaning,
   ),
-  HkTask(
-    id: 'pestspray',
-    title: 'Pest Spray',
-    category: TaskCat.pest,
-    icon: Icons.pest_control_rounded,
-  ),
+  _TaskDef('pestspray', 'Pest Spray', Icons.pest_control_rounded, _Cat.pest),
 ];
-const _kFlags = HkTask(
-  id: 'flagswash',
-  title: 'Flags Washing',
-  category: TaskCat.laundry,
-  icon: Icons.flag_rounded,
-  frequency: TaskFreq.weekly,
-);
-const _kFire = HkTask(
-  id: 'fireaudit',
-  title: 'Fire Safety Audit',
-  category: TaskCat.audit,
-  icon: Icons.fire_extinguisher_rounded,
-  frequency: TaskFreq.monthly,
-);
 
-// ─── Helpers ──────────────────────────────────────────────────
-Color _catColor(TaskCat c) => switch (c) {
-  TaskCat.cleaning => _blue,
-  TaskCat.pest => _warn,
-  TaskCat.laundry => _purple,
-  TaskCat.audit => _danger,
+Color _catColor(_Cat c) => switch (c) {
+  _Cat.cleaning => _blue,
+  _Cat.pest => _warn,
+  _Cat.laundry => _purple,
+  _Cat.audit => _danger,
 };
 
-Color _stColor(TaskSt s) => switch (s) {
-  TaskSt.done => _ok,
-  TaskSt.pending => _warn,
-  TaskSt.overdue => _danger,
+// ─── Provider ─────────────────────────────────────────────────────────────────
+final managerHkProvider = FutureProvider.autoDispose
+    .family<hk.FullStatusResponse?, String>((ref, date) async {
+      return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
+    });
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+class ManagerHousekeepingScreen extends ConsumerStatefulWidget {
+  const ManagerHousekeepingScreen({super.key});
+
+  @override
+  ConsumerState<ManagerHousekeepingScreen> createState() =>
+      _ManagerHousekeepingScreenState();
+}
+
+class _ManagerHousekeepingScreenState
+    extends ConsumerState<ManagerHousekeepingScreen>
+    with SingleTickerProviderStateMixin {
+  DateTime _date = DateTime.now();
+  hk.Shift _shift = _autoShift();
+  int _court = 1;
+
+  late final AnimationController _fadeCtrl;
+  late final Animation<double> _fadeAnim;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
+    _fadeCtrl.forward();
+
+    // Auto-refresh every 30 s — manager sees staff updates without manual pull
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) ref.invalidate(managerHkProvider(_dateStr));
+    });
+
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _fadeCtrl.dispose();
+    super.dispose();
+  }
+
+  String get _dateStr => _date.toIso8601String().substring(0, 10);
+  void _refresh() => ref.invalidate(managerHkProvider(_dateStr));
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final statusAsync = ref.watch(managerHkProvider(_dateStr));
+    final navClearance = MediaQuery.of(context).padding.bottom + 92.0;
+
+    return Scaffold(
+      backgroundColor: _bg,
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: _white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
+                  ),
+                  child: RefreshIndicator(
+                    color: _black,
+                    backgroundColor: _white,
+                    onRefresh: () async => _refresh(),
+                    child: statusAsync.when(
+                      loading: () => const _Loader(),
+                      error: (e, _) => _ErrorView(onRetry: _refresh),
+                      data: (data) => data == null
+                          ? _ErrorView(onRetry: _refresh)
+                          : _buildContent(data, navClearance),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Header ─────────────────────────────────────────────────────────────────
+  Widget _buildHeader() => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Title row
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Housekeeping',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 30,
+                      color: _white,
+                      letterSpacing: -0.5,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'live task status · auto-refresh 30s',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: _grey,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _hdrBtn(Icons.refresh_rounded, _refresh),
+            const SizedBox(width: 8),
+            _hdrBtn(Icons.calendar_today_rounded, _pickDate),
+          ],
+        ),
+
+        const SizedBox(height: 20),
+
+        // Date strip
+        Row(
+          children: [
+            _hdrBtn(
+              Icons.chevron_left_rounded,
+              () => setState(
+                () => _date = _date.subtract(const Duration(days: 1)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: _white.withOpacity(0.07),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _dateHeader(_date),
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _white,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            _hdrBtn(Icons.chevron_right_rounded, () {
+              final cap = DateTime.now().add(const Duration(days: 1));
+              if (_date.isBefore(DateTime(cap.year, cap.month, cap.day))) {
+                setState(() => _date = _date.add(const Duration(days: 1)));
+              }
+            }),
+          ],
+        ),
+
+        const SizedBox(height: 14),
+
+        // Court tabs
+        Row(
+          children: List.generate(3, (i) {
+            final sel = _court == i + 1;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _court = i + 1);
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: EdgeInsets.only(right: i < 2 ? 6 : 0),
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: sel ? _white : _white.withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Court ${i + 1}',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: sel ? _black : _grey,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+
+        const SizedBox(height: 10),
+
+        // Shift tabs
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111111),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: hk.Shift.values.map((s) {
+              final sel = _shift == s;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _shift = s);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: sel ? _white : Colors.transparent,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _shiftIcon(s),
+                          size: 13,
+                          color: sel ? _black : _grey,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _shiftLabel(s),
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: sel ? _black : _grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+
+        const SizedBox(height: 18),
+      ],
+    ),
+  );
+
+  Widget _hdrBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: _white.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _white.withOpacity(0.08)),
+      ),
+      child: Icon(icon, size: 18, color: _grey),
+    ),
+  );
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2025),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: _white,
+            onPrimary: _black,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) setState(() => _date = picked);
+  }
+
+  // ── Content ────────────────────────────────────────────────────────────────
+  Widget _buildContent(hk.FullStatusResponse data, double navClearance) {
+    final courtData = data.courts.firstWhere(
+      (c) => c.courtId == _court,
+      orElse: () =>
+          hk.CourtDayStatus(courtId: _court, date: _dateStr, shifts: []),
+    );
+    final shiftData = courtData.shifts.firstWhere(
+      (s) => s.shift == _shift,
+      orElse: () => hk.ShiftStatus(
+        shift: _shift,
+        total: 0,
+        done: 0,
+        submitted: false,
+        tasks: [],
+      ),
+    );
+
+    // ── FIX: always show all expected tasks, overlay API status ───────────────
+    // Backend only stores tasks that were submitted, so pending ones won't appear
+    // in shiftData.tasks. We merge with the local task definitions to fill gaps.
+    final apiMap = {for (final t in shiftData.tasks) t.taskId: t};
+    final mergedTasks = _kDailyTasks.map((def) {
+      final api = apiMap[def.id];
+      return _MergedTask(
+        def: def,
+        isDone: api?.isDone ?? false,
+        photoUrl: api?.photoUrl,
+        doneAt: api?.doneAt,
+      );
+    }).toList();
+
+    final doneCount = mergedTasks.where((t) => t.isDone).length;
+    final total = mergedTasks.length;
+
+    final weekly = data.weeklyTasks.firstWhere(
+      (w) => w.courtId == _court,
+      orElse: () => hk.WeeklyTaskStatus(courtId: _court, isOverdue: true),
+    );
+    final monthly = data.monthlyTasks.firstWhere(
+      (m) => m.courtId == _court,
+      orElse: () => hk.MonthlyTaskStatus(courtId: _court, isOverdue: true),
+    );
+
+    return ListView(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
+      children: [
+        // Summary card
+        _SummaryCard(
+          done: doneCount,
+          total: total,
+          court: _court,
+          shift: _shift,
+        ),
+        const SizedBox(height: 16),
+
+        // Daily tasks section label
+        _SectionLabel(label: 'Daily Tasks', right: '$doneCount / $total done'),
+        const SizedBox(height: 10),
+
+        // Task tiles — all 6, always visible (done + pending)
+        ...mergedTasks.map(
+          (t) => _DailyTaskTile(
+            key: ValueKey(t.def.id),
+            task: t,
+            onPhotoTap: t.photoUrl != null
+                ? () => _openPhoto(t.photoUrl!, t.def.title)
+                : null,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        // Weekly
+        _SectionLabel(label: 'Weekly Task'),
+        const SizedBox(height: 10),
+        _RecurringTile(
+          icon: Icons.flag_rounded,
+          title: 'Flags Washing',
+          accentColor: _purple,
+          lastDoneAt: weekly.lastDoneAt,
+          nextDueAt: weekly.nextDueAt,
+          isOverdue: weekly.isOverdue,
+          photoUrl: weekly.photoUrl,
+          onPhotoTap: weekly.photoUrl != null
+              ? () => _openPhoto(weekly.photoUrl!, 'Flags Washing')
+              : null,
+        ),
+
+        const SizedBox(height: 10),
+
+        // Monthly
+        _SectionLabel(label: 'Monthly Task'),
+        const SizedBox(height: 10),
+        _RecurringTile(
+          icon: Icons.fire_extinguisher_rounded,
+          title: 'Fire Safety Audit',
+          accentColor: _danger,
+          lastDoneAt: monthly.lastDoneAt,
+          nextDueAt: monthly.nextDueAt,
+          isOverdue: monthly.isOverdue,
+          photoUrl: monthly.photoUrl,
+          onPhotoTap: monthly.photoUrl != null
+              ? () => _openPhoto(monthly.photoUrl!, 'Fire Safety Audit')
+              : null,
+        ),
+
+        const SizedBox(height: 20),
+
+        Center(
+          child: Text(
+            'Pull to refresh · auto-refreshes every 30s',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: _black.withOpacity(0.28),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openPhoto(String url, String title) => showDialog(
+    context: context,
+    barrierColor: Colors.black.withOpacity(0.92),
+    builder: (_) => _PhotoViewer(url: url, title: title),
+  );
+}
+
+// ─── Merged task model ────────────────────────────────────────────────────────
+class _MergedTask {
+  final _TaskDef def;
+  final bool isDone;
+  final String? photoUrl;
+  final DateTime? doneAt;
+  const _MergedTask({
+    required this.def,
+    required this.isDone,
+    this.photoUrl,
+    this.doneAt,
+  });
+}
+
+// ─── Summary Card (matches OutlineCard / FilledCard style from home_screen) ───
+class _SummaryCard extends StatelessWidget {
+  final int done, total, court;
+  final hk.Shift shift;
+  const _SummaryCard({
+    required this.done,
+    required this.total,
+    required this.court,
+    required this.shift,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total == 0 ? 0.0 : done / total;
+    final allDone = total > 0 && done == total;
+    final barColor = allDone ? _ok : (pct >= 0.5 ? _warn : _danger);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _black, // FilledCard style
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              // Icon
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  allDone
+                      ? Icons.verified_rounded
+                      : Icons.pending_actions_rounded,
+                  size: 18,
+                  color: allDone ? _ok : _white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Court $court · ${_shiftLabel(shift)} Shift',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _white.withOpacity(0.85),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          total == 0 ? '—' : '$done / $total',
+                          style: GoogleFonts.antonSc(
+                            fontSize: 17,
+                            color: allDone ? _ok : _white,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          total == 0 ? 'no tasks yet' : 'tasks done',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: _white.withOpacity(0.45),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Percentage
+              Text(
+                '${(pct * 100).round()}%',
+                style: GoogleFonts.antonSc(
+                  fontSize: 36,
+                  height: 1,
+                  color: allDone ? _ok : _white,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Progress bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 6,
+              backgroundColor: _white.withOpacity(0.1),
+              valueColor: AlwaysStoppedAnimation(barColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Daily Task Tile (OutlineCard style — white + dark 1.5px border) ──────────
+class _DailyTaskTile extends StatelessWidget {
+  final _MergedTask task;
+  final VoidCallback? onPhotoTap;
+  const _DailyTaskTile({super.key, required this.task, this.onPhotoTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final done = task.isDone;
+    final catColor = _catColor(task.def.cat);
+    final hasPhoto = task.photoUrl != null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: done ? _ok.withOpacity(0.35) : _border.withOpacity(0.15),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Category icon circle
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: done ? _ok.withOpacity(0.1) : catColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              done ? Icons.check_rounded : task.def.icon,
+              size: 18,
+              color: done ? _ok : catColor,
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Title + status
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  task.def.title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _black,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (done ? _ok : _warn).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        done ? 'Done' : 'Pending',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: done ? _ok : _warn,
+                        ),
+                      ),
+                    ),
+                    if (done && task.doneAt != null) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        _fmtTime(task.doneAt!.toLocal()),
+                        style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Photo thumbnail (only if done + has photo)
+          if (hasPhoto)
+            GestureDetector(
+              onTap: onPhotoTap,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _ok.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8.5),
+                      child: Image.network(
+                        task.photoUrl!,
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (_, child, prog) => prog == null
+                            ? child
+                            : Container(
+                                color: _ok.withOpacity(0.06),
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.5,
+                                      color: _ok,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                        errorBuilder: (_, __, ___) => Container(
+                          color: _lg,
+                          child: const Icon(
+                            Icons.broken_image_rounded,
+                            size: 18,
+                            color: _grey,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Expand hint
+                  Positioned(
+                    right: -3,
+                    bottom: -3,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: _black,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: _white, width: 1.5),
+                      ),
+                      child: const Icon(
+                        Icons.open_in_full_rounded,
+                        size: 8,
+                        color: _white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          // Camera icon hint when done but no photo
+          else if (done)
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: _lg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _border.withOpacity(0.1)),
+              ),
+              child: const Icon(
+                Icons.no_photography_outlined,
+                size: 16,
+                color: _grey,
+              ),
+            )
+          // Pending badge
+          else
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: _warn.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.hourglass_empty_rounded,
+                size: 16,
+                color: _warn.withOpacity(0.6),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Recurring Task Tile (weekly / monthly) ───────────────────────────────────
+class _RecurringTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final Color accentColor;
+  final DateTime? lastDoneAt, nextDueAt;
+  final bool isOverdue;
+  final String? photoUrl;
+  final VoidCallback? onPhotoTap;
+
+  const _RecurringTile({
+    required this.icon,
+    required this.title,
+    required this.accentColor,
+    this.lastDoneAt,
+    this.nextDueAt,
+    required this.isOverdue,
+    this.photoUrl,
+    this.onPhotoTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone = lastDoneAt != null && !isOverdue;
+    final stColor = isOverdue ? _danger : (isDone ? _ok : _warn);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: stColor.withOpacity(isOverdue ? 0.35 : 0.2),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: accentColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: accentColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _black,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: stColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        isOverdue ? 'Overdue' : (isDone ? 'Done' : 'Pending'),
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: stColor,
+                        ),
+                      ),
+                    ),
+                    if (lastDoneAt != null) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          isDone
+                              ? 'Done ${_fmtDateShort(lastDoneAt!.toLocal())}'
+                              : 'Last: ${_fmtDateShort(lastDoneAt!.toLocal())}',
+                          style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          if (photoUrl != null)
+            GestureDetector(
+              onTap: onPhotoTap,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: stColor.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8.5),
+                      child: Image.network(
+                        photoUrl!,
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (_, child, prog) => prog == null
+                            ? child
+                            : Container(
+                                color: stColor.withOpacity(0.06),
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                        errorBuilder: (_, __, ___) => Container(
+                          color: _lg,
+                          child: const Icon(
+                            Icons.broken_image_rounded,
+                            size: 18,
+                            color: _grey,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    right: -3,
+                    bottom: -3,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: _black,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: _white, width: 1.5),
+                      ),
+                      child: const Icon(
+                        Icons.open_in_full_rounded,
+                        size: 8,
+                        color: _white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: stColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                isOverdue ? '⚠ Overdue' : 'No photo',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: stColor,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Photo Viewer ──────────────────────────────────────────────────────────────
+class _PhotoViewer extends StatelessWidget {
+  final String url, title;
+  const _PhotoViewer({required this.url, required this.title});
+
+  @override
+  Widget build(BuildContext context) => Dialog.fullscreen(
+    backgroundColor: Colors.transparent,
+    child: Stack(
+      children: [
+        Center(
+          child: InteractiveViewer(
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              loadingBuilder: (_, child, prog) => prog == null
+                  ? child
+                  : const Center(
+                      child: CircularProgressIndicator(
+                        color: _white,
+                        strokeWidth: 2,
+                      ),
+                    ),
+              errorBuilder: (_, __, ___) => const Center(
+                child: Icon(Icons.broken_image_rounded, color: _grey, size: 48),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: _white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─── Utility Widgets ──────────────────────────────────────────────────────────
+class _SectionLabel extends StatelessWidget {
+  final String label;
+  final String? right;
+  const _SectionLabel({required this.label, this.right});
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+          color: _black,
+          letterSpacing: -0.3,
+        ),
+      ),
+      if (right != null)
+        Text(right!, style: GoogleFonts.antonSc(fontSize: 14, color: _grey)),
+    ],
+  );
+}
+
+class _Loader extends StatelessWidget {
+  const _Loader();
+  @override
+  Widget build(BuildContext context) => const Center(
+    child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+  );
+}
+
+class _ErrorView extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _ErrorView({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
+        const SizedBox(height: 12),
+        Text(
+          'Could not load status',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: _black,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Pull to refresh or tap Retry',
+          style: GoogleFonts.inter(fontSize: 12, color: _grey),
+        ),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: onRetry,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            decoration: BoxDecoration(
+              color: _black,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              'Retry',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: _white,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+hk.Shift _autoShift() {
+  final h = DateTime.now().hour;
+  if (h >= 6 && h < 12) return hk.Shift.morning;
+  if (h >= 12 && h < 17) return hk.Shift.day;
+  return hk.Shift.night;
+}
+
+String _shiftLabel(hk.Shift s) => const {
+  hk.Shift.morning: 'Morning',
+  hk.Shift.day: 'Day',
+  hk.Shift.night: 'Night',
+}[s]!;
+
+IconData _shiftIcon(hk.Shift s) => switch (s) {
+  hk.Shift.morning => Icons.wb_sunny_rounded,
+  hk.Shift.day => Icons.light_mode_rounded,
+  hk.Shift.night => Icons.nights_stay_rounded,
 };
 
-String _stLabel(TaskSt s) => switch (s) {
-  TaskSt.done => 'Done',
-  TaskSt.pending => 'Pending',
-  TaskSt.overdue => 'Overdue',
-};
+String _dateHeader(DateTime d) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(d.year, d.month, d.day);
+  final diff = today.difference(day).inDays;
+  final fmt = _fmtDate(d);
+  if (diff == 0) return 'Today · $fmt';
+  if (diff == 1) return 'Yesterday · $fmt';
+  return fmt;
+}
 
 String _fmtDate(DateTime d) {
   const m = [
@@ -149,1601 +1223,23 @@ String _fmtDate(DateTime d) {
   return '${d.day} ${m[d.month - 1]} ${d.year}';
 }
 
+String _fmtDateShort(DateTime d) {
+  const m = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${d.day} ${m[d.month - 1]}';
+}
+
 String _fmtTime(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-String _dateLabel(DateTime d) {
-  final diff = DateTime(
-    DateTime.now().year,
-    DateTime.now().month,
-    DateTime.now().day,
-  ).difference(DateTime(d.year, d.month, d.day)).inDays;
-  if (diff == 0) return 'Today';
-  if (diff == 1) return 'Yesterday';
-  return _fmtDate(d);
-}
-
-hk.Shift _autoShift() {
-  final h = DateTime.now().hour;
-  if (h >= 6 && h < 12) return hk.Shift.morning;
-  if (h >= 12 && h < 17) return hk.Shift.day;
-  return hk.Shift.night;
-}
-
-String _shiftLabel(hk.Shift s) => const {
-  hk.Shift.morning: 'Morning',
-  hk.Shift.day: 'Day',
-  hk.Shift.night: 'Night',
-}[s]!;
-IconData _shiftIcon(hk.Shift s) => switch (s) {
-  hk.Shift.morning => Icons.wb_sunny_rounded,
-  hk.Shift.day => Icons.light_mode_rounded,
-  hk.Shift.night => Icons.nights_stay_rounded,
-};
-
-/// Maps API TaskStatusItem → CourtTaskRecord using local HkTask definitions
-CourtTaskRecord _fromApi(hk.TaskStatusItem item) {
-  final allDefs = [..._kDailyTasks, _kFlags, _kFire];
-  final def =
-      allDefs.cast<HkTask?>().firstWhere(
-        (t) => t!.id == item.taskId,
-        orElse: () => null,
-      ) ??
-      HkTask(
-        id: item.taskId,
-        title: item.taskTitle,
-        category: TaskCat.cleaning,
-        icon: Icons.task_rounded,
-      );
-  return CourtTaskRecord(
-    task: def,
-    status: item.isDone ? TaskSt.done : TaskSt.pending,
-    doneAt: item.doneAt,
-    hasPhoto: item.photoUrl != null,
-    photoUrl: item.photoUrl,
-  );
-}
-
-CourtTaskRecord _fromWeekly(hk.WeeklyTaskStatus w) => CourtTaskRecord(
-  task: _kFlags,
-  status: w.isOverdue
-      ? TaskSt.overdue
-      : (w.lastDoneAt != null ? TaskSt.done : TaskSt.pending),
-  doneAt: w.lastDoneAt,
-  hasPhoto: w.photoUrl != null,
-  photoUrl: w.photoUrl,
-);
-
-CourtTaskRecord _fromMonthly(hk.MonthlyTaskStatus m) => CourtTaskRecord(
-  task: _kFire,
-  status: m.isOverdue
-      ? TaskSt.overdue
-      : (m.lastDoneAt != null ? TaskSt.done : TaskSt.pending),
-  doneAt: m.lastDoneAt,
-  hasPhoto: m.photoUrl != null,
-  photoUrl: m.photoUrl,
-);
-
-// ─── Provider ─────────────────────────────────────────────────
-final _managerHkProvider = FutureProvider.autoDispose
-    .family<hk.FullStatusResponse?, String>((ref, date) async {
-      return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
-    });
-
-// ─── Screen ───────────────────────────────────────────────────
-class ManagerHousekeepingScreen extends ConsumerStatefulWidget {
-  const ManagerHousekeepingScreen({super.key});
-
-  @override
-  ConsumerState<ManagerHousekeepingScreen> createState() =>
-      _ManagerHousekeepingScreenState();
-}
-
-class _ManagerHousekeepingScreenState
-    extends ConsumerState<ManagerHousekeepingScreen>
-    with SingleTickerProviderStateMixin {
-  DateTime _date = DateTime.now();
-  hk.Shift _shift = _autoShift();
-  int _court = 0; // 0 = all courts
-  late final AnimationController _fadeCtrl;
-  late final Animation<double> _fadeAnim;
-
-  final _courtNames = const ['All Courts', 'Court 1', 'Court 2', 'Court 3'];
-
-  @override
-  void initState() {
-    super.initState();
-    _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
-    _fadeCtrl.forward();
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
-    );
-  }
-
-  @override
-  void dispose() {
-    _fadeCtrl.dispose();
-    super.dispose();
-  }
-
-  String get _dateStr => _date.toIso8601String().substring(0, 10);
-
-  Future<void> _pickDate() async {
-    HapticFeedback.lightImpact();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _date,
-      firstDate: DateTime.now().subtract(const Duration(days: 90)),
-      lastDate: DateTime.now(),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: _black,
-            onPrimary: _white,
-            surface: _white,
-            onSurface: _black,
-          ),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      setState(() {
-        _date = picked;
-      });
-      _fadeCtrl.forward(from: 0);
-    }
-  }
-
-  void _refresh() => ref.invalidate(_managerHkProvider(_dateStr));
-
-  @override
-  Widget build(BuildContext context) {
-    final statusAsync = ref.watch(_managerHkProvider(_dateStr));
-
-    return Scaffold(
-      backgroundColor: _black,
-      body: SafeArea(
-        child: FadeTransition(
-          opacity: _fadeAnim,
-          child: statusAsync.when(
-            loading: () => _buildShell(
-              totalDone: 0,
-              totalTasks: 0,
-              body: const _LoadingBody(),
-            ),
-            error: (e, _) => _buildShell(
-              totalDone: 0,
-              totalTasks: 0,
-              body: _ErrorBody(error: e.toString(), onRetry: _refresh),
-            ),
-            data: (data) => _buildShell(
-              totalDone: _totalDone(data),
-              totalTasks: _totalTasks(data),
-              body: _DataBody(
-                data: data,
-                courtNames: _courtNames,
-                shift: _shift,
-                court: _court,
-                onShiftTap: (s) {
-                  HapticFeedback.selectionClick();
-                  setState(() {
-                    _shift = s;
-                  });
-                  _fadeCtrl.forward(from: 0);
-                },
-                onCourtTap: (i) {
-                  HapticFeedback.selectionClick();
-                  setState(() {
-                    _court = i;
-                  });
-                  _fadeCtrl.forward(from: 0);
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShell({
-    required int totalDone,
-    required int totalTasks,
-    required Widget body,
-  }) {
-    return Column(
-      children: [
-        // ── Black header ──────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Housekeeping',
-                    style: GoogleFonts.inter(
-                      fontSize: 15,
-                      color: Colors.white54,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      GestureDetector(
-                        onTap: _refresh,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _white.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: _white.withOpacity(0.1)),
-                          ),
-                          child: Icon(
-                            Icons.refresh_rounded,
-                            size: 14,
-                            color: _white.withOpacity(0.6),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _pickDate,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _white.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: _white.withOpacity(0.12)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.calendar_today_rounded,
-                                size: 12,
-                                color: _white.withOpacity(0.6),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _dateLabel(_date),
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: Colors.white70,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                size: 15,
-                                color: Colors.white54,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TweenAnimationBuilder<int>(
-                tween: IntTween(begin: 0, end: totalDone),
-                duration: const Duration(milliseconds: 600),
-                curve: Curves.easeOutCubic,
-                builder: (_, val, __) => Text(
-                  '$val/$totalTasks',
-                  style: GoogleFonts.antonSc(
-                    fontSize: 56,
-                    color: _white,
-                    height: 1,
-                    letterSpacing: -1,
-                  ),
-                ),
-              ),
-              Text(
-                'tasks completed',
-                style: GoogleFonts.inter(fontSize: 13, color: Colors.white54),
-              ),
-              const SizedBox(height: 16),
-              // Shift tabs
-              SizedBox(
-                height: 34,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: hk.Shift.values.map((s) {
-                    final isSel = s == _shift;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: GestureDetector(
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(() => _shift = s);
-                          _fadeCtrl.forward(from: 0);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOutCubic,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isSel ? _white : _white.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: isSel ? _white : _white.withOpacity(0.12),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _shiftIcon(s),
-                                size: 12,
-                                color: isSel ? _black : Colors.white54,
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                _shiftLabel(s),
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: isSel ? _black : Colors.white54,
-                                ),
-                              ),
-                              if (s == _autoShift() &&
-                                  _date.day == DateTime.now().day) ...[
-                                const SizedBox(width: 5),
-                                Container(
-                                  width: 5,
-                                  height: 5,
-                                  decoration: BoxDecoration(
-                                    color: isSel
-                                        ? _black.withOpacity(0.4)
-                                        : _ok,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
-          ),
-        ),
-        // ── White body ────────────────────────────────────
-        Expanded(
-          child: Container(
-            decoration: const BoxDecoration(
-              color: _white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: body,
-          ),
-        ),
-      ],
-    );
-  }
-
-  int _totalDone(hk.FullStatusResponse? d) {
-    if (d == null) return 0;
-    return d.courts
-        .expand((c) => c.shifts)
-        .fold<int>(0, (acc, s) => acc + s.done);
-  }
-
-  int _totalTasks(hk.FullStatusResponse? d) {
-    if (d == null) return 0;
-    return d.courts
-        .expand((c) => c.shifts)
-        .fold<int>(0, (acc, s) => acc + s.total);
-  }
-}
-
-// ─── Data Body ────────────────────────────────────────────────
-class _DataBody extends StatelessWidget {
-  final hk.FullStatusResponse? data;
-  final List<String> courtNames;
-  final hk.Shift shift;
-  final int court;
-  final ValueChanged<hk.Shift> onShiftTap;
-  final ValueChanged<int> onCourtTap;
-
-  const _DataBody({
-    required this.data,
-    required this.courtNames,
-    required this.shift,
-    required this.court,
-    required this.onShiftTap,
-    required this.onCourtTap,
-  });
-
-  List<CourtTaskRecord> _recordsForCourt(int courtId) {
-    if (data == null) return [];
-    final courtStatus = data!.courts.cast<hk.CourtDayStatus?>().firstWhere(
-      (c) => c!.courtId == courtId,
-      orElse: () => null,
-    );
-    if (courtStatus == null) return [];
-    final shiftStatus = courtStatus.shifts.cast<hk.ShiftStatus?>().firstWhere(
-      (s) => s!.shift == shift,
-      orElse: () => null,
-    );
-    return shiftStatus?.tasks.map(_fromApi).toList() ?? [];
-  }
-
-  CourtTaskRecord? _weeklyForCourt(int courtId) {
-    if (data == null) return null;
-    final w = data!.weeklyTasks.cast<hk.WeeklyTaskStatus?>().firstWhere(
-      (w) => w!.courtId == courtId,
-      orElse: () => null,
-    );
-    return w == null ? null : _fromWeekly(w);
-  }
-
-  CourtTaskRecord? _monthlyForCourt(int courtId) {
-    if (data == null) return null;
-    final m = data!.monthlyTasks.cast<hk.MonthlyTaskStatus?>().firstWhere(
-      (m) => m!.courtId == courtId,
-      orElse: () => null,
-    );
-    return m == null ? null : _fromMonthly(m);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final perCourt = [1, 2, 3].map(_recordsForCourt).toList();
-
-    return Column(
-      children: [
-        // Court tabs
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-          child: _CourtTabBar(
-            courtNames: courtNames,
-            selected: court,
-            recordsPerCourt: perCourt,
-            onSelect: onCourtTap,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Expanded(
-          child: court == 0
-              ? _AllCourtsView(
-                  courtNames: courtNames.skip(1).toList(),
-                  recordsPerCourt: perCourt,
-                  onCourtTap: (i) => onCourtTap(i + 1),
-                )
-              : _CourtDetailView(
-                  courtName: courtNames[court],
-                  courtId: court,
-                  records: perCourt[court - 1],
-                  weekly: _weeklyForCourt(court),
-                  monthly: _monthlyForCourt(court),
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Court Tab Bar ────────────────────────────────────────────
-class _CourtTabBar extends StatelessWidget {
-  final List<String> courtNames;
-  final int selected;
-  final List<List<CourtTaskRecord>> recordsPerCourt;
-  final ValueChanged<int> onSelect;
-
-  const _CourtTabBar({
-    required this.courtNames,
-    required this.selected,
-    required this.recordsPerCourt,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: _lg,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: List.generate(courtNames.length, (i) {
-          final isSel = i == selected;
-          int? done, total;
-          if (i > 0) {
-            final r = recordsPerCourt[i - 1];
-            done = r.where((x) => x.status == TaskSt.done).length;
-            total = r.length;
-          }
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onSelect(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                decoration: BoxDecoration(
-                  color: isSel ? _white : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  boxShadow: isSel
-                      ? [
-                          BoxShadow(
-                            color: _black.withOpacity(0.06),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : [],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      courtNames[i],
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: isSel ? _black : _grey,
-                      ),
-                    ),
-                    if (done != null && total != null) ...[
-                      const SizedBox(height: 1),
-                      Text(
-                        '$done/$total',
-                        style: GoogleFonts.inter(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: isSel ? _grey : const Color(0xFFBBBBBB),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}
-
-// ─── All Courts View ─────────────────────────────────────────
-class _AllCourtsView extends StatelessWidget {
-  final List<String> courtNames;
-  final List<List<CourtTaskRecord>> recordsPerCourt;
-  final ValueChanged<int> onCourtTap;
-
-  const _AllCourtsView({
-    required this.courtNames,
-    required this.recordsPerCourt,
-    required this.onCourtTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final all = recordsPerCourt.expand((r) => r).toList();
-    final done = all.where((r) => r.status == TaskSt.done).length;
-    final pending = all.where((r) => r.status == TaskSt.pending).length;
-    final overdue = all.where((r) => r.status == TaskSt.overdue).length;
-    final total = all.length;
-    final progress = total > 0 ? done / total : 0.0;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 110),
-      children: [
-        SizedBox(
-          height: 96,
-          child: Row(
-            children: [
-              Expanded(
-                flex: 55,
-                child: _OutlineCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Overall',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: _grey,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      Text(
-                        '${(progress * 100).round()}%',
-                        style: GoogleFonts.antonSc(
-                          fontSize: 30,
-                          color: _black,
-                          height: 1,
-                        ),
-                      ),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          minHeight: 3,
-                          backgroundColor: _lg,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            progress >= 1.0 ? _ok : _black,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 45,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: _FilledCard(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Done',
-                              style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: Colors.white60,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            Text(
-                              '$done',
-                              style: GoogleFonts.antonSc(
-                                fontSize: 20,
-                                color: _white,
-                                height: 1,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: _StatusCard(
-                        label: 'Pending',
-                        count: pending,
-                        color: _warn,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (overdue > 0) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: _danger.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _danger.withOpacity(0.2)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, size: 16, color: _danger),
-                const SizedBox(width: 8),
-                Text(
-                  '$overdue overdue task${overdue > 1 ? 's' : ''} across all courts',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _danger,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
-        ...courtNames.asMap().entries.map((e) {
-          final recs = recordsPerCourt[e.key];
-          final d = recs.where((r) => r.status == TaskSt.done).length;
-          final p = recs.where((r) => r.status == TaskSt.pending).length;
-          final ov = recs.where((r) => r.status == TaskSt.overdue).length;
-          final ct = recs.length;
-          final prog = ct > 0 ? d / ct : 0.0;
-
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: GestureDetector(
-              onTap: () => onCourtTap(e.key),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: _border.withOpacity(0.1),
-                    width: 1.2,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: prog >= 1.0
-                                ? _ok
-                                : ov > 0
-                                ? _danger
-                                : _warn,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          courtNames[e.key],
-                          style: GoogleFonts.inter(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: _black,
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '$d/$ct',
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: _grey,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: Color(0xFFCCCCCC),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        value: prog,
-                        minHeight: 4,
-                        backgroundColor: _lg,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          prog >= 1.0
-                              ? _ok
-                              : ov > 0
-                              ? _danger
-                              : _black,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _MiniChip(label: '$d Done', color: _ok),
-                        const SizedBox(width: 6),
-                        _MiniChip(label: '$p Pending', color: _warn),
-                        const SizedBox(width: 6),
-                        _MiniChip(label: '$ov Overdue', color: _danger),
-                      ],
-                    ),
-                    if (recs.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: recs
-                            .map(
-                              (r) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _stColor(r.status).withOpacity(0.07),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _stColor(r.status).withOpacity(0.18),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      r.task.icon,
-                                      size: 11,
-                                      color: _stColor(r.status),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      r.task.title,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                        color: _stColor(r.status),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-// ─── Court Detail View ────────────────────────────────────────
-class _CourtDetailView extends StatelessWidget {
-  final String courtName;
-  final int courtId;
-  final List<CourtTaskRecord> records;
-  final CourtTaskRecord? weekly;
-  final CourtTaskRecord? monthly;
-
-  const _CourtDetailView({
-    required this.courtName,
-    required this.courtId,
-    required this.records,
-    required this.weekly,
-    required this.monthly,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final done = records.where((r) => r.status == TaskSt.done).length;
-    final total = records.length;
-    final prog = total > 0 ? done / total : 0.0;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 110),
-      children: [
-        // Progress
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: _white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _border.withOpacity(0.1)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: prog,
-                    minHeight: 5,
-                    backgroundColor: _lg,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      prog >= 1.0 ? _ok : _black,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Text(
-                '$done/$total ${done == total ? '✓' : ''}',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: _black,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (records.isEmpty) ...[
-          const SizedBox(height: 20),
-          Center(
-            child: Column(
-              children: [
-                Icon(Icons.cleaning_services_rounded, size: 40, color: _lg),
-                const SizedBox(height: 12),
-                Text(
-                  'No tasks submitted for this shift yet.',
-                  style: GoogleFonts.inter(fontSize: 13, color: _grey),
-                ),
-              ],
-            ),
-          ),
-        ] else
-          ...records.asMap().entries.map(
-            (e) => _AnimatedTaskRow(record: e.value, index: e.key),
-          ),
-        // Weekly
-        const SizedBox(height: 8),
-        _SectionDiv(label: 'Weekly Task'),
-        const SizedBox(height: 8),
-        weekly != null
-            ? _PeriodicCard(
-                record: weekly!,
-                nextDue: weekly!.doneAt?.add(const Duration(days: 7)),
-              )
-            : _EmptyPeriodic(label: 'Flags Washing not submitted yet'),
-        // Monthly
-        const SizedBox(height: 8),
-        _SectionDiv(label: 'Monthly Task'),
-        const SizedBox(height: 8),
-        monthly != null
-            ? _PeriodicCard(
-                record: monthly!,
-                nextDue: monthly!.doneAt?.add(const Duration(days: 30)),
-              )
-            : _EmptyPeriodic(label: 'Fire Safety Audit not submitted yet'),
-      ],
-    );
-  }
-}
-
-// ─── Animated Task Row ────────────────────────────────────────
-class _AnimatedTaskRow extends StatefulWidget {
-  final CourtTaskRecord record;
-  final int index;
-  const _AnimatedTaskRow({required this.record, required this.index});
-
-  @override
-  State<_AnimatedTaskRow> createState() => _AnimatedTaskRowState();
-}
-
-class _AnimatedTaskRowState extends State<_AnimatedTaskRow>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _fade;
-  late final Animation<Offset> _slide;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _slide = Tween<Offset>(
-      begin: const Offset(0, 0.04),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
-    Future.delayed(Duration(milliseconds: 40 * widget.index), () {
-      if (mounted) _ctrl.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: _fade,
-    child: SlideTransition(
-      position: _slide,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: _TaskRow(record: widget.record),
-      ),
-    ),
-  );
-}
-
-// ─── Task Row ─────────────────────────────────────────────────
-class _TaskRow extends StatelessWidget {
-  final CourtTaskRecord record;
-  const _TaskRow({required this.record});
-
-  void _showPhoto(BuildContext context) {
-    if (record.photoUrl == null) return;
-    HapticFeedback.lightImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => Container(
-        margin: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: _white,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: _border.withOpacity(0.1)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: _lg,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Icon(
-                    record.task.icon,
-                    size: 18,
-                    color: _catColor(record.task.category),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    record.task.title,
-                    style: GoogleFonts.inter(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: _black,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              height: 220,
-              decoration: BoxDecoration(
-                color: _lg,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Image.network(
-                  record.photoUrl!,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  loadingBuilder: (_, child, progress) => progress == null
-                      ? child
-                      : const Center(
-                          child: CircularProgressIndicator(
-                            color: _black,
-                            strokeWidth: 2,
-                          ),
-                        ),
-                  errorBuilder: (_, __, ___) => Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.broken_image_rounded,
-                          size: 36,
-                          color: _grey,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Could not load photo',
-                          style: GoogleFonts.inter(fontSize: 12, color: _grey),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (record.doneAt != null) ...[
-              const SizedBox(height: 14),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  children: [
-                    Icon(Icons.access_time_rounded, size: 13, color: _grey),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${_fmtDate(record.doneAt!)} at ${_fmtTime(record.doneAt!)}',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: _grey,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 28),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final sc = _stColor(record.status);
-    final cc = _catColor(record.task.category);
-    final isDone = record.status == TaskSt.done;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDone ? _ok.withOpacity(0.25) : _border.withOpacity(0.12),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: cc.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(child: Icon(record.task.icon, size: 18, color: cc)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  record.task.title,
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: isDone ? _grey : _black,
-                    decoration: isDone ? TextDecoration.lineThrough : null,
-                    decorationColor: _grey,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    if (record.doneAt != null) ...[
-                      Text(
-                        _fmtTime(record.doneAt!),
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: const Color(0xFFBBBBBB),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        width: 3,
-                        height: 3,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFCCCCCC),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Text(
-                      _stLabel(record.status),
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        color: sc,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _MiniChip(label: _stLabel(record.status), color: sc),
-              if (record.hasPhoto) ...[
-                const SizedBox(height: 5),
-                GestureDetector(
-                  onTap: () => _showPhoto(context),
-                  child: _MiniChip(
-                    label: 'Photo',
-                    color: _blue,
-                    icon: Icons.photo_camera_rounded,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Periodic Card ────────────────────────────────────────────
-class _PeriodicCard extends StatelessWidget {
-  final CourtTaskRecord record;
-  final DateTime? nextDue;
-  const _PeriodicCard({required this.record, this.nextDue});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDone = record.status == TaskSt.done;
-    final sc = _stColor(record.status);
-    final cc = _catColor(record.task.category);
-    final isOverdue = nextDue != null && nextDue!.isBefore(DateTime.now());
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isOverdue
-              ? _danger.withOpacity(0.3)
-              : isDone
-              ? _ok.withOpacity(0.25)
-              : _border.withOpacity(0.12),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: cc.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Center(
-                  child: Icon(record.task.icon, size: 18, color: cc),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      record.task.title,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: _black,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    if (record.doneAt != null)
-                      Text(
-                        'Done on ${_fmtDate(record.doneAt!)}',
-                        style: GoogleFonts.inter(fontSize: 11, color: _grey),
-                      )
-                    else
-                      Text(
-                        'Not completed yet',
-                        style: GoogleFonts.inter(fontSize: 11, color: _danger),
-                      ),
-                  ],
-                ),
-              ),
-              _MiniChip(
-                label: isOverdue ? 'Overdue' : _stLabel(record.status),
-                color: isOverdue ? _danger : sc,
-              ),
-            ],
-          ),
-          if (record.hasPhoto) ...[
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () => _TaskRow(record: record)._showPhoto(context),
-              child: Row(
-                children: [
-                  Icon(Icons.photo_camera_rounded, size: 14, color: _blue),
-                  const SizedBox(width: 6),
-                  Text(
-                    'View photo proof',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: _blue,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (nextDue != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: isOverdue ? _danger.withOpacity(0.05) : _lg,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isOverdue
-                        ? Icons.warning_amber_rounded
-                        : Icons.event_rounded,
-                    size: 13,
-                    color: isOverdue ? _danger : _grey,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    isOverdue
-                        ? 'Was due on ${_fmtDate(nextDue!)}'
-                        : 'Next due ${_fmtDate(nextDue!)}',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isOverdue ? _danger : _grey,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyPeriodic extends StatelessWidget {
-  final String label;
-  const _EmptyPeriodic({required this.label});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: _white,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: _border.withOpacity(0.1)),
-    ),
-    child: Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: _lg,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(
-            Icons.hourglass_empty_rounded,
-            size: 18,
-            color: _grey,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Text(label, style: GoogleFonts.inter(fontSize: 13, color: _grey)),
-      ],
-    ),
-  );
-}
-
-// ─── Section Divider ─────────────────────────────────────────
-class _SectionDiv extends StatelessWidget {
-  final String label;
-  const _SectionDiv({required this.label});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(child: Container(height: 1, color: _border.withOpacity(0.08))),
-      const SizedBox(width: 10),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: _lg,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: _grey,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ),
-      const SizedBox(width: 10),
-      Expanded(child: Container(height: 1, color: _border.withOpacity(0.08))),
-    ],
-  );
-}
-
-// ─── Loading / Error / Shared widgets ────────────────────────
-class _LoadingBody extends StatelessWidget {
-  const _LoadingBody();
-
-  @override
-  Widget build(BuildContext context) => const Center(
-    child: CircularProgressIndicator(color: _black, strokeWidth: 2),
-  );
-}
-
-class _ErrorBody extends StatelessWidget {
-  final String error;
-  final VoidCallback onRetry;
-  const _ErrorBody({required this.error, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
-          const SizedBox(height: 12),
-          Text(
-            'Could not load housekeeping data.',
-            style: GoogleFonts.inter(fontSize: 14, color: _grey),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          GestureDetector(
-            onTap: onRetry,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              decoration: BoxDecoration(
-                color: _black,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                'Retry',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: _white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _OutlineCard extends StatelessWidget {
-  final Widget child;
-  final double? height;
-  const _OutlineCard({required this.child, this.height});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: height,
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: _white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: _border.withOpacity(0.1), width: 1.2),
-    ),
-    child: child,
-  );
-}
-
-class _FilledCard extends StatelessWidget {
-  final Widget child;
-  const _FilledCard({required this.child});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(
-      color: _black,
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: child,
-  );
-}
-
-class _StatusCard extends StatelessWidget {
-  final String label;
-  final int count;
-  final Color color;
-  const _StatusCard({
-    required this.label,
-    required this.count,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.07),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: color.withOpacity(0.2)),
-    ),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 11,
-            color: color,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        Text(
-          '$count',
-          style: GoogleFonts.antonSc(fontSize: 20, color: color, height: 1),
-        ),
-      ],
-    ),
-  );
-}
-
-class _MiniChip extends StatelessWidget {
-  final String label;
-  final Color color;
-  final IconData? icon;
-  const _MiniChip({required this.label, required this.color, this.icon});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: color.withOpacity(0.2), width: 0.8),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 10, color: color),
-          const SizedBox(width: 3),
-        ],
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: color,
-          ),
-        ),
-      ],
-    ),
-  );
-}
