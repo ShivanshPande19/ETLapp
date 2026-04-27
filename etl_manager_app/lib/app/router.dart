@@ -7,13 +7,13 @@ import '../features/home/presentation/home_screen.dart';
 import '../features/sales/presentation/sales_screen.dart';
 import '../features/music/presentation/music_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
+import '../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../features/staff/presentation/staff_shell_screen.dart';
 import '../features/staff/presentation/staff_home_screen.dart';
 import '../features/staff/presentation/staff_checklist_screen.dart';
 import '../features/staff/presentation/staff_report_screen.dart';
 import 'shell_screen.dart';
 
-// ── Custom fade + slide transition ────────────────────────────────────────────
 CustomTransitionPage<T> _buildPage<T>({
   required BuildContext context,
   required GoRouterState state,
@@ -35,21 +35,18 @@ CustomTransitionPage<T> _buildPage<T>({
           child: child,
         );
       }
-      // Slide up + fade for main navigation
       final slide = Tween<Offset>(
         begin: const Offset(0, 0.04),
         end: Offset.zero,
       ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
-
-      final fade_ = Tween<double>(begin: 0.0, end: 1.0).animate(
+      final fadeTween = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(
           parent: animation,
           curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
         ),
       );
-
       return FadeTransition(
-        opacity: fade_,
+        opacity: fadeTween,
         child: SlideTransition(position: slide, child: child),
       );
     },
@@ -64,7 +61,6 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final isLoggedIn = authState.status == AuthStatus.success;
       final onLogin = state.matchedLocation == '/login';
-
       if (!isLoggedIn && !onLogin) return '/login';
       if (isLoggedIn && onLogin) {
         return authState.isStaff ? '/staff/home' : '/home';
@@ -108,6 +104,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const MusicScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/housekeeping',
+            pageBuilder: (context, state) => _buildPage(
+              context: context,
+              state: state,
+              child: const ManagerHousekeepingScreen(),
             ),
           ),
           GoRoute(

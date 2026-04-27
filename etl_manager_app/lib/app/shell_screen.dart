@@ -11,7 +11,8 @@ class ShellScreen extends StatelessWidget {
     final loc = GoRouterState.of(context).uri.toString();
     if (loc.startsWith('/sales')) return 1;
     if (loc.startsWith('/music')) return 2;
-    if (loc.startsWith('/settings')) return 3;
+    if (loc.startsWith('/housekeeping')) return 3;
+    if (loc.startsWith('/settings')) return 4;
     return 0;
   }
 
@@ -27,6 +28,9 @@ class ShellScreen extends StatelessWidget {
         context.go('/music');
         break;
       case 3:
+        context.go('/housekeeping');
+        break;
+      case 4:
         context.go('/settings');
         break;
     }
@@ -45,6 +49,7 @@ class ShellScreen extends StatelessWidget {
       _NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
       _NavItem(icon: Icons.bar_chart_rounded, label: 'Sales'),
       _NavItem(icon: Icons.music_note_rounded, label: 'Music'),
+      _NavItem(icon: Icons.cleaning_services_rounded, label: 'Housekeeping'),
       _NavItem(icon: Icons.settings_rounded, label: 'Settings'),
     ];
 
@@ -109,7 +114,7 @@ class _NavBar extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOutCubic,
               padding: EdgeInsets.symmetric(
-                horizontal: isSelected ? 16 : 14,
+                horizontal: isSelected ? 14 : 12,
                 vertical: 6,
               ),
               decoration: BoxDecoration(
@@ -121,7 +126,7 @@ class _NavBar extends StatelessWidget {
                 children: [
                   Icon(
                     items[index].icon,
-                    size: 20,
+                    size: 18,
                     color: isSelected
                         ? const Color(0xFF0A0A0A)
                         : Colors.white.withOpacity(0.45),
@@ -132,11 +137,11 @@ class _NavBar extends StatelessWidget {
                     child: isSelected
                         ? Row(
                             children: [
-                              const SizedBox(width: 7),
+                              const SizedBox(width: 6),
                               Text(
                                 items[index].label,
                                 style: GoogleFonts.inter(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   color: const Color(0xFF0A0A0A),
                                 ),

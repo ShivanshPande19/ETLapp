@@ -41,6 +41,10 @@ dependencies:
   flutter_secure_storage: ^10.0.0
   url_launcher: ^6.3.0 
   google_fonts: ^6.2.1  
+  image_picker: ^1.1.2
+  cloudinary_public: ^0.23.0
+  intl: ^0.19.0
+  flutter_image_compress: ^2.3.0
 
 dev_dependencies:
   flutter_test:
