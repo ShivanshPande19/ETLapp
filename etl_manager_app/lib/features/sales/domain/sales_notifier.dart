@@ -11,7 +11,7 @@ class SalesState {
   final String? error;
   final int? selectedCourtId;
   final SalesPeriod period;
-  final String? customDateFrom; // "2025-04-01"
+  final String? customDateFrom;
   final String? customDateTo;
 
   const SalesState({
@@ -28,7 +28,12 @@ class SalesState {
 class SalesNotifier extends Notifier<SalesState> {
   @override
   SalesState build() {
-    fetchSummary(allCourts: true, period: SalesPeriod.yesterday);
+    // FIX: wrap in Future.microtask so build() returns first and state
+    // is initialized before fetchSummary() reads state.summary on line below.
+    // Without this: "Bad state: Tried to read state of uninitialized provider"
+    Future.microtask(
+      () => fetchSummary(allCourts: true, period: SalesPeriod.yesterday),
+    );
     return const SalesState(status: SalesLoadStatus.loading);
   }
 
@@ -43,7 +48,7 @@ class SalesNotifier extends Notifier<SalesState> {
 
     state = SalesState(
       status: SalesLoadStatus.loading,
-      summary: state.summary, // keep stale data while loading
+      summary: state.summary, // keep stale data visible while reloading
       selectedCourtId: nextCourtId,
       period: period,
       customDateFrom: customDateFrom,
@@ -55,7 +60,7 @@ class SalesNotifier extends Notifier<SalesState> {
           .read(salesRepositoryProvider)
           .getSalesSummary(
             courtId: nextCourtId,
-            period: period.name, // "yesterday", "week" etc.
+            period: period.name,
             dateFrom: customDateFrom,
             dateTo: customDateTo,
           );

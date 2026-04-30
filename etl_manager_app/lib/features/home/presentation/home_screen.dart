@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/utils/token_storage.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../sales/domain/sales_notifier.dart';
+import 'home_providers.dart';
 
 const _white = Color(0xFFFFFFFF);
 const _black = Color(0xFF0A0A0A);
@@ -50,15 +51,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (name != null && mounted) setState(() => _managerName = name);
   }
 
+  Future<void> _refreshAll() async {
+    ref
+        .read(salesNotifierProvider.notifier)
+        .fetchSummary(allCourts: true, period: SalesPeriod.yesterday);
+    ref.read(courtsNotifierProvider.notifier).fetchCourts();
+    ref.invalidate(homeHousekeepingProvider);
+    ref.invalidate(homeComplaintsProvider);
+    ref.invalidate(homeMaintenanceProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final salesState = ref.watch(salesNotifierProvider);
     final courtsAsync = ref.watch(courtsNotifierProvider);
+    final hkAsync = ref.watch(homeHousekeepingProvider);
+    final complaintsAsync = ref.watch(homeComplaintsProvider);
+    final maintenanceAsync = ref.watch(homeMaintenanceProvider);
 
     final totalSales = salesState.summary?.totalSales ?? 0.0;
     final totalCourts = courtsAsync.whenData((c) => c.length).value ?? 0;
     final isLoadingSales = salesState.status == SalesLoadStatus.loading;
     final isLoadingCourts = courtsAsync is AsyncLoading;
+
+    // Housekeeping resolved values
+    final hkSummary = hkAsync.maybeWhen(data: (v) => v, orElse: () => null);
+    final hkLoading = hkAsync is AsyncLoading;
+    final hkDone = hkSummary?.done ?? 0;
+    final hkTotal = hkSummary?.total ?? 0;
+    final hkPct = hkSummary?.pct ?? 0.0;
+    final hkPending = hkSummary?.pending ?? 0;
+    final hkLabel = hkTotal == 0
+        ? 'No submissions today'
+        : '${hkDone} / ${hkTotal} zones';
+
+    // Complaints & maintenance counts
+    final complaintsCount = complaintsAsync.maybeWhen(
+      data: (v) => v,
+      orElse: () => 0,
+    );
+    final maintenanceCount = maintenanceAsync.maybeWhen(
+      data: (v) => v,
+      orElse: () => 0,
+    );
 
     return Scaffold(
       backgroundColor: _white,
@@ -69,23 +104,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             color: _black,
             strokeWidth: 2,
             backgroundColor: _white,
-            onRefresh: () async {
-              ref
-                  .read(salesNotifierProvider.notifier)
-                  .fetchSummary(allCourts: true);
-              ref.read(courtsNotifierProvider.notifier).fetchCourts();
-            },
+            onRefresh: _refreshAll,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Top Row ──────────────────────────────────────
                   _TopRow(managerName: _managerName),
                   const SizedBox(height: 8),
 
-                  // ── Display Heading ──────────────────────────────
                   Text(
                     'ETL FOOD\nCOURT',
                     style: GoogleFonts.antonSc(
@@ -97,7 +125,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Bento Row 1: Revenue + Courts ────────────────
+                  // ── Row 1: Revenue + Courts ──────────────────────
                   SizedBox(
                     height: 120,
                     child: Row(
@@ -170,7 +198,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 10),
 
-                  // ── Sales card ───────────────────────────────────
+                  // ── Sales sparkline card ─────────────────────────
                   _OutlineCard(
                     height: 86,
                     child: Row(
@@ -223,7 +251,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 10),
 
-                  // ── Bento Row 2: Complaints + Maintenance ────────
+                  // ── Row 2: Complaints + Maintenance (REAL DATA) ──
                   SizedBox(
                     height: 100,
                     child: Row(
@@ -257,14 +285,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
-                                    Text(
-                                      '3',
-                                      style: GoogleFonts.antonSc(
-                                        fontSize: 32,
-                                        color: _black,
-                                        height: 1,
-                                      ),
-                                    ),
+                                    complaintsAsync is AsyncLoading
+                                        ? const _Skeleton(width: 36, height: 32)
+                                        : Text(
+                                            '$complaintsCount',
+                                            style: GoogleFonts.antonSc(
+                                              fontSize: 32,
+                                              color: _black,
+                                              height: 1,
+                                            ),
+                                          ),
                                     const SizedBox(width: 6),
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 3),
@@ -313,14 +343,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
-                                    Text(
-                                      '2',
-                                      style: GoogleFonts.antonSc(
-                                        fontSize: 32,
-                                        color: _white,
-                                        height: 1,
-                                      ),
-                                    ),
+                                    maintenanceAsync is AsyncLoading
+                                        ? const _Skeleton(
+                                            width: 36,
+                                            height: 32,
+                                            dark: true,
+                                          )
+                                        : Text(
+                                            '$maintenanceCount',
+                                            style: GoogleFonts.antonSc(
+                                              fontSize: 32,
+                                              color: _white,
+                                              height: 1,
+                                            ),
+                                          ),
                                     const SizedBox(width: 6),
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 3),
@@ -344,7 +380,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 10),
 
-                  // ── Housekeeping Progress Card ───────────────────
+                  // ── Housekeeping Progress Card (REAL DATA + BUG 3 FIX) ──
                   _OutlineCard(
                     height: 90,
                     child: Column(
@@ -362,30 +398,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            Text(
-                              '8 / 12 zones',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: _black,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
+                            hkLoading
+                                ? const _Skeleton(width: 70, height: 14)
+                                : Text(
+                                    hkLabel,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color: _black,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                           ],
                         ),
-                        // Progress bar
                         ClipRRect(
                           borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            value: 8 / 12,
-                            minHeight: 8,
-                            backgroundColor: _lightGrey,
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              _black,
-                            ),
-                          ),
+                          child: hkLoading
+                              ? const _Skeleton(
+                                  width: double.infinity,
+                                  height: 8,
+                                )
+                              : LinearProgressIndicator(
+                                  value: hkPct,
+                                  minHeight: 8,
+                                  backgroundColor: _lightGrey,
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                        _black,
+                                      ),
+                                ),
                         ),
                         Text(
-                          '4 zones pending',
+                          hkLoading
+                              ? 'Loading...'
+                              : hkTotal == 0
+                              ? 'No submissions today'
+                              : '$hkPending zones pending',
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             color: _grey,

@@ -4,7 +4,9 @@ import '../data/courts_repository.dart';
 class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
   @override
   AsyncValue<List<Court>> build() {
-    fetchCourts();
+    // FIX: same pattern — build() must return before fetchCourts()
+    // sets state = const AsyncValue.loading() on its first line.
+    Future.microtask(() => fetchCourts());
     return const AsyncValue.loading();
   }
 
@@ -21,5 +23,5 @@ class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
 
 final courtsNotifierProvider =
     NotifierProvider<CourtsNotifier, AsyncValue<List<Court>>>(() {
-  return CourtsNotifier();
-});
+      return CourtsNotifier();
+    });
