@@ -1,14 +1,23 @@
-import 'dart:ui';
+// lib/features/auth/presentation/login_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/theme/app_theme.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../domain/auth_notifier.dart';
 
+// ─── Palette ─────────────────────────────────────────────────────────────────
+const _bg = Color(0xFF080808);
+const _black = Color(0xFF0A0A0A);
+const _white = Color(0xFFFFFFFF);
+const _grey = Color(0xFF888888);
+const _danger = Color(0xFFEF4444);
+const _card = Color(0xFFF5F5F5);
+
+// ─── Screen ──────────────────────────────────────────────────────────────────
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
-
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
@@ -21,34 +30,138 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _passwordFocus = FocusNode();
   bool _obscure = true;
 
-  late final AnimationController _bgCtrl;
-  late final AnimationController _cardCtrl;
-  late final Animation<double> _bgAnim;
-  late final Animation<double> _cardFade;
-  late final Animation<Offset> _cardSlide;
+  // Declare controllers as nullable to avoid LateInitializationError
+  AnimationController? _logoCtrl;
+  AnimationController? _logoPulseCtrl;
+  AnimationController? _brandCtrl;
+  AnimationController? _cardCtrl;
+  AnimationController? _fieldsCtrl;
+  AnimationController? _dotCtrl;
+
+  // Animations — all nullable until initState completes
+  Animation<double>? _logoScale;
+  Animation<double>? _logoFade;
+  Animation<double>? _logoPulse;
+  Animation<double>? _brandFade;
+  Animation<Offset>? _brandSlide;
+  Animation<double>? _cardFade;
+  Animation<Offset>? _cardSlide;
+  Animation<double>? _field1Fade;
+  Animation<double>? _field2Fade;
+  Animation<double>? _btnFade;
+  Animation<Offset>? _field1Slide;
+  Animation<Offset>? _field2Slide;
+  Animation<Offset>? _btnSlide;
+
+  bool _ready = false; // guard: show content only after initState
 
   @override
   void initState() {
     super.initState();
 
-    _bgCtrl = AnimationController(
+    // ── Step 1: create ALL controllers (no side effects yet) ──────────────
+    _logoCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 600),
     );
-    _bgAnim = CurvedAnimation(parent: _bgCtrl, curve: Curves.easeOut);
-
+    _logoPulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
+    _brandCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
     _cardCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 550),
+    );
+    _fieldsCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    _cardFade = CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic);
-    _cardSlide = Tween<Offset>(
-      begin: const Offset(0, 0.08),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic));
+    _dotCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    );
 
-    _bgCtrl.forward();
-    Future.delayed(const Duration(milliseconds: 200), _cardCtrl.forward);
+    // ── Step 2: build animations referencing already-created controllers ──
+    _logoScale = Tween<double>(
+      begin: 0.6,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _logoCtrl!, curve: Curves.elasticOut));
+    _logoFade = CurvedAnimation(parent: _logoCtrl!, curve: Curves.easeOut);
+    _logoPulse = Tween<double>(begin: 1.0, end: 1.06).animate(
+      CurvedAnimation(parent: _logoPulseCtrl!, curve: Curves.easeInOut),
+    );
+
+    _brandFade = CurvedAnimation(parent: _brandCtrl!, curve: Curves.easeOut);
+    _brandSlide = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _brandCtrl!, curve: Curves.easeOutCubic));
+
+    _cardFade = CurvedAnimation(parent: _cardCtrl!, curve: Curves.easeOut);
+    _cardSlide = Tween<Offset>(
+      begin: const Offset(0, 0.14),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _cardCtrl!, curve: Curves.easeOutCubic));
+
+    _field1Fade = CurvedAnimation(
+      parent: _fieldsCtrl!,
+      curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
+    );
+    _field1Slide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _fieldsCtrl!,
+            curve: const Interval(0.0, 0.5, curve: Curves.easeOutCubic),
+          ),
+        );
+
+    _field2Fade = CurvedAnimation(
+      parent: _fieldsCtrl!,
+      curve: const Interval(0.2, 0.6, curve: Curves.easeOut),
+    );
+    _field2Slide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _fieldsCtrl!,
+            curve: const Interval(0.2, 0.7, curve: Curves.easeOutCubic),
+          ),
+        );
+
+    _btnFade = CurvedAnimation(
+      parent: _fieldsCtrl!,
+      curve: const Interval(0.45, 1.0, curve: Curves.easeOut),
+    );
+    _btnSlide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _fieldsCtrl!,
+            curve: const Interval(0.5, 1.0, curve: Curves.easeOutCubic),
+          ),
+        );
+
+    // ── Step 3: mark ready so build() can render, THEN start animations ──
+    // addPostFrameCallback ensures all controllers are set before any
+    // repeat/forward triggers a frame rebuild.
+    setState(() => _ready = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _logoPulseCtrl!.repeat(reverse: true);
+      _dotCtrl!.repeat();
+      _logoCtrl!.forward();
+      Future.delayed(const Duration(milliseconds: 180), () {
+        if (mounted) _brandCtrl!.forward();
+      });
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) _cardCtrl!.forward();
+      });
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) _fieldsCtrl!.forward();
+      });
+    });
 
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
@@ -61,8 +174,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _passwordCtrl.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
-    _bgCtrl.dispose();
-    _cardCtrl.dispose();
+    _logoCtrl?.dispose();
+    _logoPulseCtrl?.dispose();
+    _brandCtrl?.dispose();
+    _cardCtrl?.dispose();
+    _fieldsCtrl?.dispose();
+    _dotCtrl?.dispose();
     super.dispose();
   }
 
@@ -84,63 +201,182 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         context.go(next.isStaff ? '/staff/home' : '/home');
       }
       if (next.status == AuthStatus.error) {
-        _showErrorBar(context, next.errorMessage ?? 'Login failed');
+        _showError(next.errorMessage ?? 'Login failed');
       }
     });
 
+    // Show plain scaffold until controllers are ready (first frame only)
+    if (!_ready) {
+      return const Scaffold(backgroundColor: _bg);
+    }
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: _bg,
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          // ── Background glows ──────────────────────────────────
-          FadeTransition(opacity: _bgAnim, child: const _BackgroundGlows()),
+          // Floating dots background
+          _FloatingDots(animation: _dotCtrl!),
 
-          // ── Content ───────────────────────────────────────────
           SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 40,
+            bottom: false,
+            child: Column(
+              children: [
+                // ── Brand section (dark top) ──────────────────────
+                Expanded(
+                  flex: 4,
+                  child: _BrandSection(
+                    logoScale: _logoScale!,
+                    logoFade: _logoFade!,
+                    logoPulse: _logoPulse!,
+                    brandFade: _brandFade!,
+                    brandSlide: _brandSlide!,
+                  ),
                 ),
-                child: FadeTransition(
-                  opacity: _cardFade,
-                  child: SlideTransition(
-                    position: _cardSlide,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _BrandMark(),
-                        const SizedBox(height: 40),
 
-                        _LoginCard(
-                          emailCtrl: _emailCtrl,
-                          passwordCtrl: _passwordCtrl,
-                          emailFocus: _emailFocus,
-                          passwordFocus: _passwordFocus,
-                          obscure: _obscure,
-                          isLoading: isLoading,
-                          onToggleObscure: () =>
-                              setState(() => _obscure = !_obscure),
-                          onLogin: _login,
-                        ),
-
-                        const SizedBox(height: 32),
-
-                        const Text(
-                          'ETL Food Courts · Internal Use Only',
-                          style: TextStyle(
-                            color: AppTheme.textFaint,
-                            fontSize: 11,
-                            letterSpacing: 0.3,
+                // ── White form card ───────────────────────────────
+                Expanded(
+                  flex: 7,
+                  child: FadeTransition(
+                    opacity: _cardFade!,
+                    child: SlideTransition(
+                      position: _cardSlide!,
+                      child: Theme(
+                        // KEY FIX: override global dark theme inside white card
+                        data: ThemeData.light().copyWith(
+                          colorScheme: ColorScheme.light(
+                            primary: _black,
+                            onSurface: _black,
                           ),
                         ),
-                      ],
+                        child: Container(
+                          width: double.infinity,
+                          decoration: const BoxDecoration(
+                            color: _white,
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(28),
+                            ),
+                          ),
+                          child: SingleChildScrollView(
+                            padding: EdgeInsets.fromLTRB(
+                              24,
+                              28,
+                              24,
+                              MediaQuery.of(context).viewInsets.bottom + 32,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Heading
+                                Text(
+                                  'Welcome back',
+                                  style: GoogleFonts.antonSc(
+                                    fontSize: 26,
+                                    color: _black,
+                                    letterSpacing: -.5,
+                                    height: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Sign in to your manager account',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: _grey,
+                                  ),
+                                ),
+                                const SizedBox(height: 28),
+
+                                // Email
+                                FadeTransition(
+                                  opacity: _field1Fade!,
+                                  child: SlideTransition(
+                                    position: _field1Slide!,
+                                    child: _InputField(
+                                      label: 'Email',
+                                      hint: 'manager@etlfoodcourt.com',
+                                      icon: Icons.mail_outline_rounded,
+                                      controller: _emailCtrl,
+                                      focusNode: _emailFocus,
+                                      keyboardType: TextInputType.emailAddress,
+                                      textInputAction: TextInputAction.next,
+                                      onSubmitted: (_) =>
+                                          _passwordFocus.requestFocus(),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+
+                                // Password
+                                FadeTransition(
+                                  opacity: _field2Fade!,
+                                  child: SlideTransition(
+                                    position: _field2Slide!,
+                                    child: _InputField(
+                                      label: 'Password',
+                                      hint: '••••••••',
+                                      icon: Icons.lock_outline_rounded,
+                                      controller: _passwordCtrl,
+                                      focusNode: _passwordFocus,
+                                      obscureText: _obscure,
+                                      textInputAction: TextInputAction.done,
+                                      onSubmitted: (_) => _login(),
+                                      suffix: GestureDetector(
+                                        onTap: () => setState(
+                                          () => _obscure = !_obscure,
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 14,
+                                          ),
+                                          child: Icon(
+                                            _obscure
+                                                ? Icons.visibility_off_outlined
+                                                : Icons.visibility_outlined,
+                                            size: 20,
+                                            color: _grey,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 28),
+
+                                // Button
+                                FadeTransition(
+                                  opacity: _btnFade!,
+                                  child: SlideTransition(
+                                    position: _btnSlide!,
+                                    child: _SignInButton(
+                                      isLoading: isLoading,
+                                      onTap: _login,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+
+                                FadeTransition(
+                                  opacity: _btnFade!,
+                                  child: Center(
+                                    child: Text(
+                                      'ETL Food Courts  ·  Internal use only',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        color: _grey.withOpacity(0.5),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ],
@@ -148,44 +384,196 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  void _showErrorBar(BuildContext context, String message) {
+  void _showError(String message) {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
         backgroundColor: Colors.transparent,
         elevation: 0,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        content: ClipRRect(
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppTheme.danger.withOpacity(0.15),
-                    AppTheme.danger.withOpacity(0.06),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                border: Border.all(color: AppTheme.danger.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.error_outline_rounded,
-                    color: AppTheme.danger,
-                    size: 18,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: _danger.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _danger.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: _danger, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: _black,
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Floating Dots ────────────────────────────────────────────────────────────
+class _FloatingDots extends StatelessWidget {
+  final Animation<double> animation;
+  const _FloatingDots({required this.animation});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) => SizedBox.expand(
+        child: CustomPaint(painter: _DotsPainter(animation.value)),
+      ),
+    );
+  }
+}
+
+class _DotsPainter extends CustomPainter {
+  final double t;
+  _DotsPainter(this.t);
+
+  // [x%, y%, radius, speed, phase]
+  static const _dots = [
+    [0.12, 0.10, 2.5, 1.0, 0.0],
+    [0.80, 0.08, 2.0, 0.7, 0.4],
+    [0.55, 0.22, 3.0, 1.2, 0.8],
+    [0.25, 0.35, 1.8, 0.9, 1.2],
+    [0.90, 0.30, 2.2, 1.1, 0.2],
+    [0.07, 0.55, 2.8, 0.8, 1.6],
+    [0.70, 0.50, 1.5, 1.3, 0.6],
+    [0.40, 0.68, 2.0, 0.6, 2.0],
+    [0.85, 0.70, 2.5, 1.0, 1.0],
+    [0.15, 0.80, 1.8, 1.4, 0.3],
+    [0.60, 0.85, 2.2, 0.7, 1.8],
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+    for (final d in _dots) {
+      final val = (t * d[3] + d[4]) % 1.0;
+      final opacity = (0.5 - (val - 0.5).abs()) * 0.25;
+      final yOffset = (val - 0.5) * 18 * d[3];
+      paint.color = _white.withOpacity(opacity.clamp(0.0, 0.15));
+      canvas.drawCircle(
+        Offset(d[0] * size.width, d[1] * size.height + yOffset),
+        d[2],
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotsPainter old) => old.t != t;
+}
+
+// ─── Brand Section ────────────────────────────────────────────────────────────
+class _BrandSection extends StatelessWidget {
+  final Animation<double> logoScale;
+  final Animation<double> logoFade;
+  final Animation<double> logoPulse;
+  final Animation<double> brandFade;
+  final Animation<Offset> brandSlide;
+
+  const _BrandSection({
+    required this.logoScale,
+    required this.logoFade,
+    required this.logoPulse,
+    required this.brandFade,
+    required this.brandSlide,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Logo: pop-in scale + continuous breathe
+          FadeTransition(
+            opacity: logoFade,
+            child: ScaleTransition(
+              scale: logoScale,
+              child: AnimatedBuilder(
+                animation: logoPulse,
+                builder: (_, child) =>
+                    Transform.scale(scale: logoPulse.value, child: child),
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: _white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _white.withOpacity(0.12),
+                        blurRadius: 28,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: _white.withOpacity(0.05),
+                        blurRadius: 48,
+                        spreadRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.store_mall_directory_rounded,
+                    color: _black,
+                    size: 34,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          // Title + pill: slide up from below
+          FadeTransition(
+            opacity: brandFade,
+            child: SlideTransition(
+              position: brandSlide,
+              child: Column(
+                children: [
+                  Text(
+                    'ETL Management',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 32,
+                      color: _white,
+                      letterSpacing: -.5,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _white.withOpacity(0.07),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _white.withOpacity(0.1),
+                        width: 1,
+                      ),
+                    ),
                     child: Text(
-                      message,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13,
+                      'Food Court Management',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: _grey,
                       ),
                     ),
                   ),
@@ -193,269 +581,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Background Glows ──────────────────────────────────────────────────────────
-
-class _BackgroundGlows extends StatelessWidget {
-  const _BackgroundGlows();
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    return SizedBox.expand(
-      child: Stack(
-        children: [
-          // Top-left white glow
-          Positioned(
-            left: -80,
-            top: -60,
-            child: Container(
-              width: 280,
-              height: 280,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Colors.white.withOpacity(0.05), Colors.transparent],
-                ),
-              ),
-            ),
-          ),
-          // Bottom-right glow
-          Positioned(
-            right: -100,
-            bottom: size.height * 0.1,
-            child: Container(
-              width: 260,
-              height: 260,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Colors.white.withOpacity(0.04), Colors.transparent],
-                ),
-              ),
-            ),
-          ),
-          // Bottom centre soft glow
-          Positioned(
-            left: size.width * 0.2,
-            bottom: -40,
-            child: Container(
-              width: size.width * 0.6,
-              height: 180,
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  colors: [Colors.white.withOpacity(0.03), Colors.transparent],
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-// ── Brand Mark ────────────────────────────────────────────────────────────────
-
-class _BrandMark extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Logo — white fill, black icon
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            gradient: AppTheme.primaryGradient,
-            borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-            boxShadow: AppTheme.primaryGlowShadow,
-          ),
-          child: const Center(
-            child: Icon(
-              Icons.store_mall_directory_rounded,
-              color: Colors.black,
-              size: 34,
-            ),
-          ),
-        ),
-        const SizedBox(height: 18),
-
-        // App name
-        const Text(
-          'ETL Manager',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-          ),
-        ),
-        const SizedBox(height: 6),
-
-        // Subtitle pill
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceGlass,
-            borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-            border: Border.all(color: AppTheme.borderGlass),
-          ),
-          child: const Text(
-            'Food Court Management',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Login Card ────────────────────────────────────────────────────────────────
-
-class _LoginCard extends StatelessWidget {
-  final TextEditingController emailCtrl;
-  final TextEditingController passwordCtrl;
-  final FocusNode emailFocus;
-  final FocusNode passwordFocus;
-  final bool obscure;
-  final bool isLoading;
-  final VoidCallback onToggleObscure;
-  final VoidCallback onLogin;
-
-  const _LoginCard({
-    required this.emailCtrl,
-    required this.passwordCtrl,
-    required this.emailFocus,
-    required this.passwordFocus,
-    required this.obscure,
-    required this.isLoading,
-    required this.onToggleObscure,
-    required this.onLogin,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: const EdgeInsets.all(28),
-          decoration: BoxDecoration(
-            gradient: AppTheme.surfaceGradient,
-            borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
-            border: Border.all(color: AppTheme.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.6),
-                blurRadius: 48,
-                offset: const Offset(0, 16),
-              ),
-              BoxShadow(
-                color: Colors.white.withOpacity(0.02),
-                blurRadius: 1,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Welcome back',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Sign in to your ETL account',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 26),
-
-              // Email
-              _GlassField(
-                controller: emailCtrl,
-                focusNode: emailFocus,
-                label: 'Email',
-                hint: 'manager@etl.com',
-                icon: Icons.email_outlined,
-                keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => passwordFocus.requestFocus(),
-              ),
-              const SizedBox(height: 14),
-
-              // Password
-              _GlassField(
-                controller: passwordCtrl,
-                focusNode: passwordFocus,
-                label: 'Password',
-                hint: '••••••••',
-                icon: Icons.lock_outline_rounded,
-                obscureText: obscure,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => onLogin(),
-                suffix: GestureDetector(
-                  onTap: onToggleObscure,
-                  child: AnimatedSwitcher(
-                    duration: AppTheme.durationFast,
-                    child: Icon(
-                      obscure
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      key: ValueKey(obscure),
-                      color: AppTheme.textSecondary,
-                      size: 20,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 26),
-
-              _LoginButton(isLoading: isLoading, onTap: onLogin),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Glass Field ───────────────────────────────────────────────────────────────
-
-class _GlassField extends StatefulWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
+// ─── Input Field ──────────────────────────────────────────────────────────────
+class _InputField extends StatefulWidget {
   final String label;
   final String hint;
   final IconData icon;
+  final TextEditingController controller;
+  final FocusNode focusNode;
   final bool obscureText;
   final TextInputType keyboardType;
   final TextInputAction textInputAction;
   final ValueChanged<String>? onSubmitted;
   final Widget? suffix;
 
-  const _GlassField({
-    required this.controller,
-    required this.focusNode,
+  const _InputField({
     required this.label,
     required this.hint,
     required this.icon,
+    required this.controller,
+    required this.focusNode,
     this.obscureText = false,
     this.keyboardType = TextInputType.text,
     this.textInputAction = TextInputAction.next,
@@ -464,18 +614,18 @@ class _GlassField extends StatefulWidget {
   });
 
   @override
-  State<_GlassField> createState() => _GlassFieldState();
+  State<_InputField> createState() => _InputFieldState();
 }
 
-class _GlassFieldState extends State<_GlassField> {
+class _InputFieldState extends State<_InputField> {
   bool _focused = false;
 
   @override
   void initState() {
     super.initState();
-    widget.focusNode.addListener(
-      () => setState(() => _focused = widget.focusNode.hasFocus),
-    );
+    widget.focusNode.addListener(() {
+      if (mounted) setState(() => _focused = widget.focusNode.hasFocus);
+    });
   }
 
   @override
@@ -483,40 +633,48 @@ class _GlassFieldState extends State<_GlassField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Animated label
-        Padding(
-          padding: const EdgeInsets.only(left: 2, bottom: 8),
-          child: AnimatedDefaultTextStyle(
-            duration: AppTheme.durationFast,
-            style: TextStyle(
-              color: _focused ? AppTheme.textPrimary : AppTheme.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.3,
-            ),
-            child: Text(widget.label.toUpperCase()),
+        AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 180),
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: _focused ? _black : _grey,
+            letterSpacing: .6,
           ),
+          child: Text(widget.label.toUpperCase()),
         ),
-
-        // Input container
+        const SizedBox(height: 6),
         AnimatedContainer(
-          duration: AppTheme.durationNormal,
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
-            color: _focused ? AppTheme.surfaceLight : AppTheme.surface,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            color: _focused ? _white : _card,
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: _focused ? AppTheme.borderStrong : AppTheme.border,
-              width: 1,
+              color: _focused ? _black.withOpacity(0.3) : Colors.grey.shade200,
+              width: 1.5,
             ),
+            boxShadow: _focused
+                ? [
+                    BoxShadow(
+                      color: _black.withOpacity(0.07),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : [],
           ),
           child: Row(
             children: [
               const SizedBox(width: 14),
-              Icon(
-                widget.icon,
-                color: _focused ? AppTheme.textSecondary : AppTheme.textFaint,
-                size: 18,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: Icon(
+                  widget.icon,
+                  key: ValueKey(_focused),
+                  color: _focused ? _black : _grey,
+                  size: 18,
+                ),
               ),
               Expanded(
                 child: TextField(
@@ -526,16 +684,21 @@ class _GlassFieldState extends State<_GlassField> {
                   keyboardType: widget.keyboardType,
                   textInputAction: widget.textInputAction,
                   onSubmitted: widget.onSubmitted,
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
+                  // Explicit colors — not inherited from dark theme
+                  style: GoogleFonts.inter(
                     fontSize: 15,
+                    color: _black, // always black text on white bg
+                    fontWeight: FontWeight.w500,
                   ),
+                  cursorColor: _black,
                   decoration: InputDecoration(
                     hintText: widget.hint,
-                    hintStyle: const TextStyle(
-                      color: AppTheme.textFaint,
+                    hintStyle: GoogleFonts.inter(
                       fontSize: 14,
+                      color: _grey.withOpacity(0.55),
                     ),
+                    filled: true,
+                    fillColor: Colors.transparent,
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
@@ -546,10 +709,7 @@ class _GlassFieldState extends State<_GlassField> {
                   ),
                 ),
               ),
-              if (widget.suffix != null) ...[
-                widget.suffix!,
-                const SizedBox(width: 14),
-              ],
+              if (widget.suffix != null) widget.suffix!,
             ],
           ),
         ),
@@ -558,87 +718,138 @@ class _GlassFieldState extends State<_GlassField> {
   }
 }
 
-// ── Login Button ──────────────────────────────────────────────────────────────
-
-class _LoginButton extends StatefulWidget {
+// ─── Sign In Button ───────────────────────────────────────────────────────────
+class _SignInButton extends StatefulWidget {
   final bool isLoading;
   final VoidCallback onTap;
-
-  const _LoginButton({required this.isLoading, required this.onTap});
-
+  const _SignInButton({required this.isLoading, required this.onTap});
   @override
-  State<_LoginButton> createState() => _LoginButtonState();
+  State<_SignInButton> createState() => _SignInButtonState();
 }
 
-class _LoginButtonState extends State<_LoginButton> {
+class _SignInButtonState extends State<_SignInButton>
+    with SingleTickerProviderStateMixin {
   bool _pressed = false;
+  AnimationController? _shimmerCtrl;
+  Animation<double>? _shimmer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Init controller first, then start in post-frame
+    _shimmerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
+    _shimmer = CurvedAnimation(parent: _shimmerCtrl!, curve: Curves.easeInOut);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _shimmerCtrl!.repeat();
+    });
+  }
+
+  @override
+  void dispose() {
+    _shimmerCtrl?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: widget.isLoading ? null : widget.onTap,
+      onTap: widget.isLoading
+          ? null
+          : () {
+              HapticFeedback.mediumImpact();
+              widget.onTap();
+            },
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
         scale: _pressed ? 0.97 : 1.0,
-        duration: AppTheme.durationFast,
+        duration: const Duration(milliseconds: 120),
         curve: Curves.easeOutCubic,
         child: AnimatedContainer(
-          duration: AppTheme.durationNormal,
-          curve: Curves.easeOutCubic,
+          duration: const Duration(milliseconds: 180),
           width: double.infinity,
-          height: 52,
+          height: 54,
           decoration: BoxDecoration(
-            gradient: widget.isLoading
-                ? LinearGradient(
-                    colors: [
-                      AppTheme.primary.withOpacity(0.4),
-                      AppTheme.primary.withOpacity(0.2),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  )
-                : AppTheme.primaryGradient,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            boxShadow: (widget.isLoading || _pressed)
-                ? []
-                : AppTheme.primaryGlowShadow,
+            color: widget.isLoading ? _black.withOpacity(0.45) : _black,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: (!widget.isLoading && !_pressed)
+                ? [
+                    BoxShadow(
+                      color: _black.withOpacity(0.20),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
+                : [],
           ),
-          child: Center(
-            child: AnimatedSwitcher(
-              duration: AppTheme.durationFast,
-              child: widget.isLoading
-                  ? const SizedBox(
-                      key: ValueKey('loading'),
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.black,
-                        strokeWidth: 2.5,
-                      ),
-                    )
-                  : const Row(
-                      key: ValueKey('label'),
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'Sign In',
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.2,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(
+              children: [
+                // Shimmer sweep
+                if (!widget.isLoading && _shimmer != null)
+                  AnimatedBuilder(
+                    animation: _shimmer!,
+                    builder: (_, __) => Positioned.fill(
+                      child: FractionallySizedBox(
+                        widthFactor: 0.35,
+                        alignment: Alignment(_shimmer!.value * 3 - 1.5, 0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                _white.withOpacity(0.06),
+                                Colors.transparent,
+                              ],
+                            ),
                           ),
                         ),
-                        SizedBox(width: 8),
-                        Icon(
-                          Icons.arrow_forward_rounded,
-                          color: Colors.black,
-                          size: 17,
-                        ),
-                      ],
+                      ),
                     ),
+                  ),
+                // Label / spinner
+                Center(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: widget.isLoading
+                        ? const SizedBox(
+                            key: ValueKey('loading'),
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: _white,
+                              strokeWidth: 2.5,
+                            ),
+                          )
+                        : Row(
+                            key: const ValueKey('label'),
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Sign In',
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _white,
+                                  letterSpacing: .3,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(
+                                Icons.arrow_forward_rounded,
+                                color: _white,
+                                size: 17,
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

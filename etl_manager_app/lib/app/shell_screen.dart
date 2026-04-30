@@ -1,126 +1,176 @@
-// lib/app/shell_screen.dart
-// UPDATED — added Complaints tab at index 4, Settings moved to index 5
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class ShellScreen extends StatefulWidget {
-  const ShellScreen({super.key, required this.child});
+class ShellScreen extends StatelessWidget {
   final Widget child;
-  @override
-  State<ShellScreen> createState() => _ShellScreenState();
-}
+  const ShellScreen({super.key, required this.child});
 
-class _ShellScreenState extends State<ShellScreen> {
-  static const _routes = [
-    '/home',
-    '/sales',
-    '/music',
-    '/housekeeping',
-    '/complaints', // ← NEW (index 4)
-    '/settings', // was index 4, now index 5
-  ];
-
-  static const _items = [
-    _NavItem(Icons.grid_view_rounded, 'Home'),
-    _NavItem(Icons.bar_chart_rounded, 'Sales'),
-    _NavItem(Icons.music_note_rounded, 'Music'),
-    _NavItem(Icons.cleaning_services_rounded, 'Tasks'), // shortened label
-    _NavItem(Icons.feedback_outlined, 'Issues'), // ← NEW
-    _NavItem(Icons.settings_rounded, 'Settings'),
-  ];
-
-  int get _selectedIndex {
-    final loc = GoRouterState.of(context).uri.path;
-    final idx = _routes.indexWhere((r) => loc.startsWith(r));
-    return idx < 0 ? 0 : idx;
+  int _selectedIndex(BuildContext context) {
+    final loc = GoRouterState.of(context).uri.toString();
+    if (loc.startsWith('/sales')) return 1;
+    if (loc.startsWith('/music')) return 2;
+    if (loc.startsWith('/housekeeping')) return 3;
+    if (loc.startsWith('/complaints')) return 4;
+    if (loc.startsWith('/maintenance')) return 5;
+    if (loc.startsWith('/settings')) return 6;
+    return 0;
   }
 
-  void _onTap(int index) {
-    HapticFeedback.selectionClick();
-    if (index != _selectedIndex) {
-      context.go(_routes[index]);
+  void _onTap(BuildContext context, int index) {
+    switch (index) {
+      case 0:
+        context.go('/home');
+        break;
+      case 1:
+        context.go('/sales');
+        break;
+      case 2:
+        context.go('/music');
+        break;
+      case 3:
+        context.go('/housekeeping');
+        break;
+      case 4:
+        context.go('/complaints');
+        break;
+      case 5:
+        context.go('/maintenance');
+        break;
+      case 6:
+        context.go('/settings');
+        break;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final sel = _selectedIndex;
-    final bottomPad = MediaQuery.of(context).padding.bottom;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final selectedIndex = _selectedIndex(context);
+
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+    );
+
+    const items = [
+      NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
+      NavItem(icon: Icons.bar_chart_rounded, label: 'Sales'),
+      NavItem(icon: Icons.music_note_rounded, label: 'Music'),
+      NavItem(icon: Icons.cleaning_services_rounded, label: 'Tasks'),
+      NavItem(icon: Icons.feedback_rounded, label: 'Issues'),
+      NavItem(icon: Icons.handyman_rounded, label: 'Repairs'),
+      NavItem(icon: Icons.settings_rounded, label: 'Settings'),
+    ];
 
     return Scaffold(
-      backgroundColor: const Color(0xFF080808),
-      body: widget.child,
-      bottomNavigationBar: Container(
-        color: const Color(0xFF080808),
-        padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPad + 8),
-        child: Container(
-          height: 60,
-          decoration: BoxDecoration(
-            color: const Color(0xFF111111),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.06)),
+      backgroundColor: const Color(0xFFFFFFFF),
+      body: Stack(
+        children: [
+          child,
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: bottomPadding + 12,
+            child: NavBar(
+              items: items,
+              selectedIndex: selectedIndex,
+              onTap: (i) => _onTap(context, i),
+            ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(_items.length, (i) {
-              final item = _items[i];
-              final active = sel == i;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => _onTap(i),
-                  behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutCubic,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: active
-                              ? Colors.white.withOpacity(0.12)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          item.icon,
-                          size: 20,
-                          color: active
-                              ? Colors.white
-                              : Colors.white.withOpacity(0.35),
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        item.label,
-                        style: GoogleFonts.inter(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: active
-                              ? Colors.white
-                              : Colors.white.withOpacity(0.35),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-          ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _NavItem {
+class NavBar extends StatelessWidget {
+  final List<NavItem> items;
+  final int selectedIndex;
+  final void Function(int) onTap;
+
+  const NavBar({
+    super.key,
+    required this.items,
+    required this.selectedIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0A),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: List.generate(items.length, (index) {
+          final isSelected = selectedIndex == index;
+          return GestureDetector(
+            onTap: () => onTap(index),
+            behavior: HitTestBehavior.opaque,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.symmetric(
+                horizontal: isSelected ? 10.0 : 8.0,
+                vertical: 5,
+              ),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    items[index].icon,
+                    size: 17,
+                    color: isSelected
+                        ? const Color(0xFF0A0A0A)
+                        : Colors.white.withOpacity(0.45),
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: isSelected
+                        ? Row(
+                            children: [
+                              const SizedBox(width: 5),
+                              Text(
+                                items[index].label,
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF0A0A0A),
+                                ),
+                              ),
+                            ],
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class NavItem {
   final IconData icon;
   final String label;
-  const _NavItem(this.icon, this.label);
+  const NavItem({required this.icon, required this.label});
 }

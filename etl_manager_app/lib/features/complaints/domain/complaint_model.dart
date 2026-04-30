@@ -3,9 +3,9 @@
 class ComplaintModel {
   final int id;
   final int courtId;
-  final String category; // food | staff | cleanliness | other
+  final String category;
   final String description;
-  final String status; // open | in_progress | resolved
+  final String status;
   final DateTime? createdAt;
   final DateTime? resolvedAt;
 
@@ -26,10 +26,10 @@ class ComplaintModel {
     description: j['description'] as String,
     status: j['status'] as String,
     createdAt: j['created_at'] != null
-        ? DateTime.tryParse(j['created_at'] as String)?.toLocal()
+        ? DateTime.tryParse('${j['created_at']}Z')?.toLocal()
         : null,
     resolvedAt: j['resolved_at'] != null
-        ? DateTime.tryParse(j['resolved_at'] as String)?.toLocal()
+        ? DateTime.tryParse('${j['resolved_at']}Z')?.toLocal()
         : null,
   );
 

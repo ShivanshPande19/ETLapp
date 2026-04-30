@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from .core.config import settings
 from .api.routes import auth, dashboard, sales, courts
 from .api.routes import housekeeping
-from .api.routes import complaints                        # ← NEW
+from .api.routes import complaints
+from .api.routes import maintenance                          # ← maintenance routes
 
-from .models import housekeeping as _hk_models            # noqa — registers HK models
-from .models import complaint    as _complaint_models     # noqa — registers Complaint model   ← NEW
+from .models import housekeeping    as _hk_models           # noqa
+from .models import complaint       as _complaint_models    # noqa
+from .models import maintenance     as _maintenance_models  # noqa — registers table
 
 
 @asynccontextmanager
@@ -45,4 +47,5 @@ app.include_router(dashboard.router,    prefix="/dashboard",    tags=["Dashboard
 app.include_router(sales.router,        prefix="/sales",        tags=["Sales"])
 app.include_router(courts.router,       prefix="/courts",       tags=["Courts"])
 app.include_router(housekeeping.router, prefix="/housekeeping", tags=["Housekeeping"])
-app.include_router(complaints.router,   tags=["Complaints"])    # ← NEW (no prefix — /c/{id} must stay at root)
+app.include_router(complaints.router,   tags=["Complaints"])    # no prefix — /c/{id} at root
+app.include_router(maintenance.router,  tags=["Maintenance"])   # no prefix — /m/{id} at root

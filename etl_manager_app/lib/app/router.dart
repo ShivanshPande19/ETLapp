@@ -1,4 +1,3 @@
-// lib/app/router.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +8,8 @@ import '../features/sales/presentation/sales_screen.dart';
 import '../features/music/presentation/music_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/housekeeping/presentation/manager_housekeeping_screen.dart';
-import '../features/complaints/presentation/complaints_screen.dart'; // ← ADD THIS
+import '../features/complaints/presentation/complaints_screen.dart';
+import '../features/maintenance/presentation/maintenance_screen.dart'; // ← NEW
 import '../features/staff/presentation/staff_shell_screen.dart';
 import '../features/staff/presentation/staff_home_screen.dart';
 import '../features/staff/presentation/staff_checklist_screen.dart';
@@ -116,14 +116,22 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const ManagerHousekeepingScreen(),
             ),
           ),
-
-          // ── NEW ────────────────────────────────────────────────────────────
           GoRoute(
             path: '/complaints',
             pageBuilder: (context, state) => _buildPage(
               context: context,
               state: state,
               child: const ComplaintsScreen(),
+            ),
+          ),
+
+          // ── NEW: Maintenance ───────────────────────────────────────────────
+          GoRoute(
+            path: '/maintenance',
+            pageBuilder: (context, state) => _buildPage(
+              context: context,
+              state: state,
+              child: const MaintenanceScreen(),
             ),
           ),
 
