@@ -1,5 +1,6 @@
+// lib/features/staff/presentation/staff_checklist_screen.dart
+
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -32,7 +33,7 @@ class _TaskDef {
   final String title;
   final IconData icon;
   final Color color;
-  final List<hk.Shift> shifts; // empty = visible in all shifts
+  final List<hk.Shift> shifts;
   const _TaskDef({
     required this.id,
     required this.title,
@@ -111,6 +112,24 @@ IconData _shiftIcon(hk.Shift s) => switch (s) {
   hk.Shift.night => Icons.nights_stay_rounded,
 };
 
+bool _isShiftTimeActive(hk.Shift shift) {
+  final h = TimeOfDay.now().hour;
+  switch (shift) {
+    case hk.Shift.morning:
+      return h >= 6 && h < 12;
+    case hk.Shift.day:
+      return h >= 12 && h < 16;
+    case hk.Shift.night:
+      return h >= 16 && h < 24;
+  }
+}
+
+String _shiftTimeRange(hk.Shift shift) => const {
+  hk.Shift.morning: '6:00 AM – 12:00 PM',
+  hk.Shift.day: '12:00 PM – 4:00 PM',
+  hk.Shift.night: '4:00 PM – 12:00 AM',
+}[shift]!;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 class StaffChecklistScreen extends ConsumerStatefulWidget {
@@ -150,22 +169,296 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
       .where((t) => t.shifts.isEmpty || t.shifts.contains(shift))
       .toList();
 
-  // ── Task tap → photo → confirm → upload + lock ─────────────────────────────
+  // ── Shift not active dialog ───────────────────────────────────────────────
+
+  void _showShiftNotActiveDialog(hk.Shift shift) {
+    showDialog(
+      context: context,
+      useRootNavigator: true,
+      barrierColor: Colors.black.withOpacity(0.70),
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Container(
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _border),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: _danger.withOpacity(0.10),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _danger.withOpacity(0.25)),
+                ),
+                child: const Icon(
+                  Icons.block_rounded,
+                  color: _danger,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Not Possible',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: _white,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${_shiftLabel(shift)} shift tasks can only be\ncompleted during its active hours.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: _grey,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _warning.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _warning.withOpacity(0.22)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.schedule_rounded,
+                      size: 13,
+                      color: _warning,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_shiftLabel(shift)}  •  ${_shiftTimeRange(shift)}',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _warning,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              GestureDetector(
+                onTap: () => Navigator.of(dialogContext).pop(),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: _white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'OK, Got it',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: _black,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ NEW: Cooldown dialog for weekly/monthly tasks ─────────────────────────
+
+  void _showCooldownDialog({
+    required String taskTitle,
+    required int remainingDays,
+    required bool isWeekly,
+  }) {
+    showDialog(
+      context: context,
+      useRootNavigator: true,
+      barrierColor: Colors.black.withOpacity(0.70),
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Container(
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _border),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Countdown ring ───────────────────────────────────────
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: _warning.withOpacity(0.08),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _warning.withOpacity(0.35),
+                    width: 2,
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '$remainingDays',
+                      style: GoogleFonts.inter(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: _warning,
+                      ),
+                    ),
+                    Text(
+                      remainingDays == 1 ? 'day' : 'days',
+                      style: GoogleFonts.inter(fontSize: 10, color: _warning),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Not Available Yet',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: _white,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '"$taskTitle" was already completed.\nCome back in $remainingDays ${remainingDays == 1 ? 'day' : 'days'}.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: _grey,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: _white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _border),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      size: 14,
+                      color: _grey,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isWeekly
+                            ? 'Weekly tasks reset every 7 days after completion.'
+                            : 'Monthly tasks reset every 30 days after completion.',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: _grey,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              GestureDetector(
+                onTap: () => Navigator.of(dialogContext).pop(),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: _white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Got it',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: _black,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Task tap ───────────────────────────────────────────────────────────────
 
   Future<void> _handleTaskTap(_TaskDef task) async {
     final hkState = ref.read(housekeepingNotifierProvider);
-
-    // Locked or currently uploading → ignore
-    if (hkState.isTaskLocked(task.id)) return;
     if (hkState.isTaskLoading(task.id)) return;
 
     HapticFeedback.mediumImpact();
 
-    // Step 1: photo source picker sheet
+    // ✅ Weekly cooldown check
+    if (task.id == 'flagswash' && hkState.isWeeklyCooldown) {
+      _showCooldownDialog(
+        taskTitle: task.title,
+        remainingDays: hkState.weeklyRemainingDays,
+        isWeekly: true,
+      );
+      return;
+    }
+
+    // ✅ Monthly cooldown check
+    if (task.id == 'fireaudit' && hkState.isMonthlyCooldown) {
+      _showCooldownDialog(
+        taskTitle: task.title,
+        remainingDays: hkState.monthlyRemainingDays,
+        isWeekly: false,
+      );
+      return;
+    }
+
+    // Already locked (daily task already done)
+    if (hkState.isTaskLocked(task.id)) return;
+
+    if (!_isShiftTimeActive(hkState.shift)) {
+      _showShiftNotActiveDialog(hkState.shift);
+      return;
+    }
+
     final source = await _showPhotoSourceSheet(task);
     if (source == null || !mounted) return;
 
-    // Step 2: pick image
     final picker = ImagePicker();
     final xFile = source == ImageSource.camera
         ? await picker.pickImage(
@@ -177,11 +470,9 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     if (xFile == null || !mounted) return;
     final photo = File(xFile.path);
 
-    // Step 3: confirmation dialog
     final confirmed = await _showConfirmDialog(task, photo);
     if (!confirmed || !mounted) return;
 
-    // Step 4: upload to Cloudinary + POST single task to backend
     final ok = await ref
         .read(housekeepingNotifierProvider.notifier)
         .confirmTask(taskId: task.id, taskTitle: task.title, photo: photo);
@@ -201,19 +492,20 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
   Future<ImageSource?> _showPhotoSourceSheet(_TaskDef task) {
     return showModalBottomSheet<ImageSource>(
       context: context,
-      useRootNavigator: true, // ✅ renders above shell nav bar
+      useRootNavigator: true,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _PhotoPickerSheet(task: task),
+      builder: (sheetContext) => _PhotoPickerSheet(task: task),
     );
   }
 
   Future<bool> _showConfirmDialog(_TaskDef task, File photo) async {
     return await showDialog<bool>(
           context: context,
-          useRootNavigator: true, // ✅ renders above shell nav bar
+          useRootNavigator: true,
           barrierColor: Colors.black.withOpacity(0.80),
-          builder: (_) => _ConfirmTaskDialog(task: task, photo: photo),
+          builder: (dialogContext) =>
+              _ConfirmTaskDialog(task: task, photo: photo),
         ) ??
         false;
   }
@@ -295,14 +587,13 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     final hkState = ref.watch(housekeepingNotifierProvider);
     final shift = hkState.shift;
     final dailyTasks = _tasksForShift(shift);
-    final totalVisible = dailyTasks.length + 2; // +weekly +monthly
+    final totalVisible = dailyTasks.length + 2;
     final doneCount = hkState.lockedDoneCount;
     final courtLabel = hkState.courtId != null
         ? 'Court ${hkState.courtId}'
         : 'Unassigned Court';
-
-    // Shell nav bar clearance: bottomSafeArea + 16 (margin) + 60 (height)
     final navBarClearance = MediaQuery.of(context).padding.bottom + 92.0;
+    final shiftActive = _isShiftTimeActive(shift);
 
     return Scaffold(
       backgroundColor: _bg,
@@ -312,13 +603,12 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
           bottom: false,
           child: Column(
             children: [
-              // ── Dark header ───────────────────────────────────────────
+              // ── Header ──────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Court label + progress chip
                     Row(
                       children: [
                         Expanded(
@@ -381,7 +671,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
                     const SizedBox(height: 16),
 
-                    // Shift selector tabs
+                    // ── Shift selector tabs ──────────────────────────
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
@@ -391,6 +681,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                       child: Row(
                         children: hk.Shift.values.map((s) {
                           final selected = shift == s;
+                          final isActive = _isShiftTimeActive(s);
                           return Expanded(
                             child: GestureDetector(
                               onTap: () {
@@ -425,6 +716,17 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                                         color: selected ? _black : _grey,
                                       ),
                                     ),
+                                    if (!isActive) ...[
+                                      const SizedBox(width: 4),
+                                      Container(
+                                        width: 5,
+                                        height: 5,
+                                        decoration: BoxDecoration(
+                                          color: selected ? _danger : _faint,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -434,12 +736,48 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                       ),
                     ),
 
+                    // ── Inactive warning banner ──────────────────────
+                    if (!shiftActive) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _danger.withOpacity(0.07),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _danger.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.schedule_rounded,
+                              size: 14,
+                              color: _danger,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${_shiftLabel(shift)} shift is not active  •  ${_shiftTimeRange(shift)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: _danger,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     const SizedBox(height: 16),
                   ],
                 ),
               ),
 
-              // ── White task list ────────────────────────────────────────
+              // ── White task list ──────────────────────────────────────
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -449,12 +787,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                     ),
                   ),
                   child: ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      20,
-                      20,
-                      20,
-                      navBarClearance, // clears shell nav bar
-                    ),
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, navBarClearance),
                     children: [
                       // Daily tasks
                       ...dailyTasks.asMap().entries.map(
@@ -466,6 +799,9 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                           isLocked: hkState.isTaskLocked(e.value.id),
                           isLoading: hkState.isTaskLoading(e.value.id),
                           photo: hkState.taskPhoto(e.value.id),
+                          photoUrl: hkState.taskPhotoUrl(e.value.id),
+                          isShiftActive: shiftActive,
+                          cooldownDays: 0, // daily tasks have no cooldown
                           onTap: () => _handleTaskTap(e.value),
                         ),
                       ),
@@ -482,6 +818,9 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                         isLocked: hkState.isTaskLocked(_kWeeklyTask.id),
                         isLoading: hkState.isTaskLoading(_kWeeklyTask.id),
                         photo: hkState.taskPhoto(_kWeeklyTask.id),
+                        photoUrl: hkState.taskPhotoUrl(_kWeeklyTask.id),
+                        isShiftActive: shiftActive,
+                        cooldownDays: hkState.weeklyRemainingDays, // ✅
                         onTap: () => _handleTaskTap(_kWeeklyTask),
                       ),
 
@@ -497,12 +836,15 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                         isLocked: hkState.isTaskLocked(_kMonthlyTask.id),
                         isLoading: hkState.isTaskLoading(_kMonthlyTask.id),
                         photo: hkState.taskPhoto(_kMonthlyTask.id),
+                        photoUrl: hkState.taskPhotoUrl(_kMonthlyTask.id),
+                        isShiftActive: shiftActive,
+                        cooldownDays: hkState.monthlyRemainingDays, // ✅
                         onTap: () => _handleTaskTap(_kMonthlyTask),
                       ),
 
                       const SizedBox(height: 16),
 
-                      // Inline error banner
+                      // Error banner
                       if (hkState.error != null)
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -565,6 +907,9 @@ class _TaskTile extends StatefulWidget {
   final bool isLocked;
   final bool isLoading;
   final File? photo;
+  final String? photoUrl;
+  final bool isShiftActive;
+  final int cooldownDays; // ✅ 0 = no cooldown, >0 = locked with countdown
   final VoidCallback onTap;
 
   const _TaskTile({
@@ -575,6 +920,9 @@ class _TaskTile extends StatefulWidget {
     required this.isLocked,
     required this.isLoading,
     required this.photo,
+    required this.photoUrl,
+    required this.isShiftActive,
+    required this.cooldownDays,
     required this.onTap,
   });
 
@@ -611,11 +959,160 @@ class _TaskTileState extends State<_TaskTile>
     super.dispose();
   }
 
+  Widget _buildThumbnail() {
+    final hasLocal = widget.photo != null;
+    final hasNetwork = widget.photoUrl != null && widget.photoUrl!.isNotEmpty;
+
+    if (!hasLocal && !hasNetwork) {
+      return const Icon(Icons.lock_rounded, size: 16, color: _success);
+    }
+
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: hasLocal
+            ? Image.file(widget.photo!, fit: BoxFit.cover)
+            : Image.network(
+                widget.photoUrl!,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) {
+                  if (progress == null) return child;
+                  return Container(
+                    color: _success.withOpacity(0.08),
+                    child: const Center(
+                      child: SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: _success,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                errorBuilder: (_, __, ___) => Container(
+                  color: _success.withOpacity(0.08),
+                  child: const Icon(
+                    Icons.lock_rounded,
+                    size: 14,
+                    color: _success,
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final locked = widget.isLocked;
     final loading = widget.isLoading;
-    final hasPhoto = widget.photo != null;
+    final onCooldown = widget.cooldownDays > 0; // ✅
+    final dimmed = !widget.isShiftActive && !locked && !onCooldown;
+
+    // ── Tile appearance ────────────────────────────────────────────────────
+    final Color tileBg;
+    final Color tileBorder;
+    final Color iconBg;
+    final Color iconColor;
+    final Color titleColor;
+    final String subtitle;
+    final Widget rightWidget;
+
+    if (onCooldown) {
+      // ✅ Cooldown state — warning orange tint
+      tileBg = _warning.withOpacity(0.06);
+      tileBorder = _warning.withOpacity(0.22);
+      iconBg = _warning.withOpacity(0.10);
+      iconColor = _warning;
+      titleColor = _warning;
+      subtitle =
+          'Available in ${widget.cooldownDays} ${widget.cooldownDays == 1 ? 'day' : 'days'}';
+      rightWidget = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: _warning.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: _warning.withOpacity(0.28)),
+        ),
+        child: Text(
+          '${widget.cooldownDays}d',
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: _warning,
+          ),
+        ),
+      );
+    } else if (locked) {
+      // Done & locked
+      tileBg = _success.withOpacity(0.06);
+      tileBorder = _success.withOpacity(0.25);
+      iconBg = _success.withOpacity(0.12);
+      iconColor = _success;
+      titleColor = _success;
+      subtitle = 'Saved ✓ — cannot be undone';
+      rightWidget = _buildThumbnail();
+    } else if (dimmed) {
+      // Outside shift hours
+      tileBg = _light.withOpacity(0.5);
+      tileBorder = _black.withOpacity(0.03);
+      iconBg = widget.taskDef.color.withOpacity(0.05);
+      iconColor = widget.taskDef.color.withOpacity(0.35);
+      titleColor = _grey;
+      subtitle = 'Not available outside shift hours';
+      rightWidget = const Icon(
+        Icons.lock_clock_rounded,
+        size: 18,
+        color: _faint,
+      );
+    } else {
+      // Normal/available
+      tileBg = _light;
+      tileBorder = _black.withOpacity(0.06);
+      iconBg = widget.taskDef.color.withOpacity(0.10);
+      iconColor = widget.taskDef.color;
+      titleColor = _black;
+      subtitle = loading
+          ? 'Uploading & saving...'
+          : 'Tap to take photo & complete';
+      rightWidget = loading
+          ? const SizedBox(
+              width: 38,
+              height: 38,
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _grey,
+                  ),
+                ),
+              ),
+            )
+          : Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: _white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _black.withOpacity(0.07)),
+              ),
+              child: const Icon(
+                Icons.camera_alt_rounded,
+                size: 17,
+                color: _grey,
+              ),
+            );
+    }
 
     return FadeTransition(
       opacity: _fade,
@@ -628,25 +1125,19 @@ class _TaskTileState extends State<_TaskTile>
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             decoration: BoxDecoration(
-              color: locked ? _success.withOpacity(0.06) : _light,
+              color: tileBg,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: locked
-                    ? _success.withOpacity(0.25)
-                    : _black.withOpacity(0.06),
-              ),
+              border: Border.all(color: tileBorder),
             ),
             child: Row(
               children: [
-                // Left icon / spinner
+                // Left icon box
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    color: locked
-                        ? _success.withOpacity(0.12)
-                        : widget.taskDef.color.withOpacity(0.10),
+                    color: iconBg,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: loading
@@ -658,9 +1149,13 @@ class _TaskTileState extends State<_TaskTile>
                           ),
                         )
                       : Icon(
-                          locked ? Icons.check_rounded : widget.taskDef.icon,
+                          locked
+                              ? Icons.check_rounded
+                              : onCooldown
+                              ? Icons.hourglass_top_rounded
+                              : widget.taskDef.icon,
                           size: 18,
-                          color: locked ? _success : widget.taskDef.color,
+                          color: iconColor,
                         ),
                 ),
 
@@ -676,24 +1171,18 @@ class _TaskTileState extends State<_TaskTile>
                         style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: loading
-                              ? _grey
-                              : locked
-                              ? _success
-                              : _black,
+                          color: loading ? _grey : titleColor,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        loading
-                            ? 'Uploading & saving...'
-                            : locked
-                            ? 'Saved ✓ — cannot be undone'
-                            : 'Tap to take photo & complete',
+                        loading ? 'Uploading & saving...' : subtitle,
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: loading
                               ? _grey
+                              : onCooldown
+                              ? _warning.withOpacity(0.75)
                               : locked
                               ? _success.withOpacity(0.65)
                               : _grey,
@@ -705,55 +1194,8 @@ class _TaskTileState extends State<_TaskTile>
 
                 const SizedBox(width: 10),
 
-                // Right: loading spinner / thumbnail / lock / camera
-                if (loading)
-                  const SizedBox(
-                    width: 38,
-                    height: 38,
-                    child: Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: _grey,
-                        ),
-                      ),
-                    ),
-                  )
-                else if (locked && hasPhoto)
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(9),
-                      border: Border.all(
-                        color: _success.withOpacity(0.3),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(widget.photo!, fit: BoxFit.cover),
-                    ),
-                  )
-                else if (locked)
-                  const Icon(Icons.lock_rounded, size: 16, color: _success)
-                else
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: _white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _black.withOpacity(0.07)),
-                    ),
-                    child: const Icon(
-                      Icons.camera_alt_rounded,
-                      size: 17,
-                      color: _grey,
-                    ),
-                  ),
+                // Right widget
+                rightWidget,
               ],
             ),
           ),
@@ -828,8 +1270,6 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 14),
-
-              // Drag handle
               Container(
                 width: 36,
                 height: 4,
@@ -838,10 +1278,7 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
-
               const SizedBox(height: 24),
-
-              // Task identity chip
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
@@ -868,9 +1305,7 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                   ],
                 ),
               ),
-
               const SizedBox(height: 18),
-
               Text(
                 'Add Photo Proof',
                 style: GoogleFonts.inter(
@@ -885,10 +1320,7 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                 'A photo is required to mark this task done.',
                 style: GoogleFonts.inter(fontSize: 13, color: _grey),
               ),
-
               const SizedBox(height: 28),
-
-              // Camera (primary)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _SheetOptionButton(
@@ -896,13 +1328,10 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                   label: 'Take Photo',
                   sublabel: 'Open camera now',
                   isPrimary: true,
-                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                  onTap: () => Navigator.of(context).pop(ImageSource.camera),
                 ),
               ),
-
               const SizedBox(height: 10),
-
-              // Gallery (secondary)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _SheetOptionButton(
@@ -910,15 +1339,12 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                   label: 'Choose from Gallery',
                   sublabel: 'Pick an existing photo',
                   isPrimary: false,
-                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                  onTap: () => Navigator.of(context).pop(ImageSource.gallery),
                 ),
               ),
-
               const SizedBox(height: 8),
-
-              // Cancel
               GestureDetector(
-                onTap: () => Navigator.pop(context, null),
+                onTap: () => Navigator.of(context).pop(null),
                 behavior: HitTestBehavior.opaque,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),
@@ -932,7 +1358,6 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                   ),
                 ),
               ),
-
               SizedBox(height: bottomPad + 4),
             ],
           ),
@@ -996,7 +1421,6 @@ class _SheetOptionButtonState extends State<_SheetOptionButton> {
           ),
           child: Row(
             children: [
-              // Icon box
               Container(
                 width: 44,
                 height: 44,
@@ -1013,8 +1437,6 @@ class _SheetOptionButtonState extends State<_SheetOptionButton> {
                 ),
               ),
               const SizedBox(width: 14),
-
-              // Labels
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1038,7 +1460,6 @@ class _SheetOptionButtonState extends State<_SheetOptionButton> {
                   ],
                 ),
               ),
-
               Icon(
                 Icons.arrow_forward_ios_rounded,
                 size: 13,
@@ -1074,7 +1495,6 @@ class _ConfirmTaskDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Photo preview with task chip overlay
             Stack(
               children: [
                 Image.file(
@@ -1115,7 +1535,6 @@ class _ConfirmTaskDialog extends StatelessWidget {
                 ),
               ],
             ),
-
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
               child: Column(
@@ -1131,8 +1550,6 @@ class _ConfirmTaskDialog extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-
-                  // Warning banner
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -1165,15 +1582,12 @@ class _ConfirmTaskDialog extends StatelessWidget {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 18),
-
-                  // Cancel / Confirm buttons
                   Row(
                     children: [
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => Navigator.pop(context, false),
+                          onTap: () => Navigator.of(context).pop(false),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             decoration: BoxDecoration(
@@ -1197,7 +1611,7 @@ class _ConfirmTaskDialog extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => Navigator.pop(context, true),
+                          onTap: () => Navigator.of(context).pop(true),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             decoration: BoxDecoration(

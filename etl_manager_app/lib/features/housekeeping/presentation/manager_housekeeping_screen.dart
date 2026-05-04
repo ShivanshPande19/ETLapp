@@ -8,7 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
-// ─── Palette (matches app design language) ────────────────────────────────────
+// Palette
 const _white = Color(0xFFFFFFFF);
 const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
@@ -21,9 +21,7 @@ const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
 const _bg = Color(0xFF080808);
 
-// ─── Task definitions (source of truth for task list — backend may not return
-//     pending tasks, so we always show these and overlay API status on top) ────
-
+// Task definitions
 enum _Cat { cleaning, pest, laundry, audit }
 
 class _TaskDef {
@@ -74,13 +72,13 @@ Color _catColor(_Cat c) => switch (c) {
   _Cat.audit => _danger,
 };
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
+// Provider
 final managerHkProvider = FutureProvider.autoDispose
     .family<hk.FullStatusResponse?, String>((ref, date) async {
       return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
     });
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
+// Screen
 class ManagerHousekeepingScreen extends ConsumerStatefulWidget {
   const ManagerHousekeepingScreen({super.key});
 
@@ -110,7 +108,6 @@ class _ManagerHousekeepingScreenState
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
 
-    // Auto-refresh every 30 s — manager sees staff updates without manual pull
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) ref.invalidate(managerHkProvider(_dateStr));
     });
@@ -130,7 +127,37 @@ class _ManagerHousekeepingScreenState
   String get _dateStr => _date.toIso8601String().substring(0, 10);
   void _refresh() => ref.invalidate(managerHkProvider(_dateStr));
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // Date-aware recurring task filter
+  T _effectiveRecurring<T>({
+    required dynamic raw,
+    required DateTime viewDate,
+    required int cooldownDays,
+    required T Function() makeEmpty,
+    required T Function(
+      DateTime? lastDone,
+      DateTime? nextDue,
+      bool isOverdue,
+      String? photoUrl,
+    )
+    makeFiltered,
+  }) {
+    final DateTime? lastDoneAt = raw.lastDoneAt as DateTime?;
+    final String? photoUrl = raw.photoUrl as String?;
+
+    if (lastDoneAt == null) return makeEmpty();
+    if (lastDoneAt.isAfter(viewDate)) return makeEmpty();
+
+    final computedNextDue = lastDoneAt.add(Duration(days: cooldownDays));
+    final isOverdueForView = viewDate.isAfter(computedNextDue);
+
+    return makeFiltered(
+      lastDoneAt,
+      computedNextDue,
+      isOverdueForView,
+      photoUrl,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final statusAsync = ref.watch(managerHkProvider(_dateStr));
@@ -174,190 +201,192 @@ class _ManagerHousekeepingScreenState
     );
   }
 
-  // ── Header ─────────────────────────────────────────────────────────────────
-  Widget _buildHeader() => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Title row
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Housekeeping',
-                    style: GoogleFonts.antonSc(
-                      fontSize: 30,
-                      color: _white,
-                      letterSpacing: -0.5,
-                      height: 1.1,
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Housekeeping',
+                      style: GoogleFonts.antonSc(
+                        fontSize: 30,
+                        color: _white,
+                        letterSpacing: -0.5,
+                        height: 1.1,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'live task status · auto-refresh 30s',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: _grey,
-                      letterSpacing: 0.2,
+                    const SizedBox(height: 2),
+                    Text(
+                      'live task status · auto-refresh 30s',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: _grey,
+                        letterSpacing: 0.2,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            _hdrBtn(Icons.refresh_rounded, _refresh),
-            const SizedBox(width: 8),
-            _hdrBtn(Icons.calendar_today_rounded, _pickDate),
-          ],
-        ),
-
-        const SizedBox(height: 20),
-
-        // Date strip
-        Row(
-          children: [
-            _hdrBtn(
-              Icons.chevron_left_rounded,
-              () => setState(
-                () => _date = _date.subtract(const Duration(days: 1)),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                decoration: BoxDecoration(
-                  color: _white.withOpacity(0.07),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _dateHeader(_date),
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _white,
-                  ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
-            _hdrBtn(Icons.chevron_right_rounded, () {
-              final cap = DateTime.now().add(const Duration(days: 1));
-              if (_date.isBefore(DateTime(cap.year, cap.month, cap.day))) {
-                setState(() => _date = _date.add(const Duration(days: 1)));
-              }
-            }),
-          ],
-        ),
+              _hdrBtn(Icons.refresh_rounded, _refresh),
+              const SizedBox(width: 8),
+              _hdrBtn(Icons.calendar_today_rounded, _pickDate),
+            ],
+          ),
 
-        const SizedBox(height: 14),
+          const SizedBox(height: 20),
 
-        // Court tabs
-        Row(
-          children: List.generate(3, (i) {
-            final sel = _court == i + 1;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _court = i + 1);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: EdgeInsets.only(right: i < 2 ? 6 : 0),
+          // Date strip
+          Row(
+            children: [
+              _hdrBtn(
+                Icons.chevron_left_rounded,
+                () => setState(
+                  () => _date = _date.subtract(const Duration(days: 1)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 9),
                   decoration: BoxDecoration(
-                    color: sel ? _white : _white.withOpacity(0.07),
+                    color: _white.withOpacity(0.07),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'Court ${i + 1}',
+                    _dateHeader(_date),
                     textAlign: TextAlign.center,
                     style: GoogleFonts.inter(
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: sel ? _black : _grey,
+                      color: _white,
                     ),
                   ),
                 ),
               ),
-            );
-          }),
-        ),
-
-        const SizedBox(height: 10),
-
-        // Shift tabs
-        Container(
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: const Color(0xFF111111),
-            borderRadius: BorderRadius.circular(12),
+              const SizedBox(width: 10),
+              _hdrBtn(Icons.chevron_right_rounded, () {
+                final cap = DateTime.now().add(const Duration(days: 1));
+                if (_date.isBefore(DateTime(cap.year, cap.month, cap.day))) {
+                  setState(() => _date = _date.add(const Duration(days: 1)));
+                }
+              }),
+            ],
           ),
-          child: Row(
-            children: hk.Shift.values.map((s) {
-              final sel = _shift == s;
+
+          const SizedBox(height: 14),
+
+          // Court tabs
+          Row(
+            children: List.generate(3, (i) {
+              final sel = _court == i + 1;
               return Expanded(
                 child: GestureDetector(
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    setState(() => _shift = s);
+                    setState(() => _court = i + 1);
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
+                    margin: EdgeInsets.only(right: i < 2 ? 6 : 0),
                     padding: const EdgeInsets.symmetric(vertical: 9),
                     decoration: BoxDecoration(
-                      color: sel ? _white : Colors.transparent,
-                      borderRadius: BorderRadius.circular(9),
+                      color: sel ? _white : _white.withOpacity(0.07),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          _shiftIcon(s),
-                          size: 13,
-                          color: sel ? _black : _grey,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          _shiftLabel(s),
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: sel ? _black : _grey,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      'Court ${i + 1}',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: sel ? _black : _grey,
+                      ),
                     ),
                   ),
                 ),
               );
-            }).toList(),
+            }),
           ),
-        ),
 
-        const SizedBox(height: 18),
-      ],
-    ),
-  );
+          const SizedBox(height: 10),
 
-  Widget _hdrBtn(IconData icon, VoidCallback onTap) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: _white.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _white.withOpacity(0.08)),
+          // Shift tabs
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: hk.Shift.values.map((s) {
+                final sel = _shift == s;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _shift = s);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      decoration: BoxDecoration(
+                        color: sel ? _white : Colors.transparent,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _shiftIcon(s),
+                            size: 13,
+                            color: sel ? _black : _grey,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            _shiftLabel(s),
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: sel ? _black : _grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+        ],
       ),
-      child: Icon(icon, size: 18, color: _grey),
-    ),
-  );
+    );
+  }
+
+  Widget _hdrBtn(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: _white.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _white.withOpacity(0.08)),
+        ),
+        child: Icon(icon, size: 18, color: _grey),
+      ),
+    );
+  }
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -378,7 +407,6 @@ class _ManagerHousekeepingScreenState
     if (picked != null) setState(() => _date = picked);
   }
 
-  // ── Content ────────────────────────────────────────────────────────────────
   Widget _buildContent(hk.FullStatusResponse data, double navClearance) {
     final courtData = data.courts.firstWhere(
       (c) => c.courtId == _court,
@@ -396,9 +424,6 @@ class _ManagerHousekeepingScreenState
       ),
     );
 
-    // ── FIX: always show all expected tasks, overlay API status ───────────────
-    // Backend only stores tasks that were submitted, so pending ones won't appear
-    // in shiftData.tasks. We merge with the local task definitions to fill gaps.
     final apiMap = {for (final t in shiftData.tasks) t.taskId: t};
     final mergedTasks = _kDailyTasks.map((def) {
       final api = apiMap[def.id];
@@ -413,19 +438,49 @@ class _ManagerHousekeepingScreenState
     final doneCount = mergedTasks.where((t) => t.isDone).length;
     final total = mergedTasks.length;
 
-    final weekly = data.weeklyTasks.firstWhere(
+    // End-of-viewing-day timestamp
+    final viewDate = DateTime(_date.year, _date.month, _date.day, 23, 59, 59);
+
+    final rawWeekly = data.weeklyTasks.firstWhere(
       (w) => w.courtId == _court,
       orElse: () => hk.WeeklyTaskStatus(courtId: _court, isOverdue: true),
     );
-    final monthly = data.monthlyTasks.firstWhere(
+    final rawMonthly = data.monthlyTasks.firstWhere(
       (m) => m.courtId == _court,
       orElse: () => hk.MonthlyTaskStatus(courtId: _court, isOverdue: true),
+    );
+
+    final effectiveWeekly = _effectiveRecurring<hk.WeeklyTaskStatus>(
+      raw: rawWeekly,
+      viewDate: viewDate,
+      cooldownDays: 7,
+      makeEmpty: () => hk.WeeklyTaskStatus(courtId: _court, isOverdue: true),
+      makeFiltered: (lastDone, nextDue, overdue, photo) => hk.WeeklyTaskStatus(
+        courtId: _court,
+        lastDoneAt: lastDone,
+        nextDueAt: nextDue,
+        isOverdue: overdue,
+        photoUrl: photo,
+      ),
+    );
+
+    final effectiveMonthly = _effectiveRecurring<hk.MonthlyTaskStatus>(
+      raw: rawMonthly,
+      viewDate: viewDate,
+      cooldownDays: 30,
+      makeEmpty: () => hk.MonthlyTaskStatus(courtId: _court, isOverdue: true),
+      makeFiltered: (lastDone, nextDue, overdue, photo) => hk.MonthlyTaskStatus(
+        courtId: _court,
+        lastDoneAt: lastDone,
+        nextDueAt: nextDue,
+        isOverdue: overdue,
+        photoUrl: photo,
+      ),
     );
 
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
       children: [
-        // Summary card
         _SummaryCard(
           done: doneCount,
           total: total,
@@ -434,11 +489,9 @@ class _ManagerHousekeepingScreenState
         ),
         const SizedBox(height: 16),
 
-        // Daily tasks section label
         _SectionLabel(label: 'Daily Tasks', right: '$doneCount / $total done'),
         const SizedBox(height: 10),
 
-        // Task tiles — all 6, always visible (done + pending)
         ...mergedTasks.map(
           (t) => _DailyTaskTile(
             key: ValueKey(t.def.id),
@@ -451,37 +504,36 @@ class _ManagerHousekeepingScreenState
 
         const SizedBox(height: 10),
 
-        // Weekly
-        _SectionLabel(label: 'Weekly Task'),
+        const _SectionLabel(label: 'Weekly Task'),
         const SizedBox(height: 10),
         _RecurringTile(
           icon: Icons.flag_rounded,
           title: 'Flags Washing',
           accentColor: _purple,
-          lastDoneAt: weekly.lastDoneAt,
-          nextDueAt: weekly.nextDueAt,
-          isOverdue: weekly.isOverdue,
-          photoUrl: weekly.photoUrl,
-          onPhotoTap: weekly.photoUrl != null
-              ? () => _openPhoto(weekly.photoUrl!, 'Flags Washing')
+          lastDoneAt: effectiveWeekly.lastDoneAt,
+          nextDueAt: effectiveWeekly.nextDueAt,
+          isOverdue: effectiveWeekly.isOverdue,
+          photoUrl: effectiveWeekly.photoUrl,
+          onPhotoTap: effectiveWeekly.photoUrl != null
+              ? () => _openPhoto(effectiveWeekly.photoUrl!, 'Flags Washing')
               : null,
         ),
 
         const SizedBox(height: 10),
 
-        // Monthly
-        _SectionLabel(label: 'Monthly Task'),
+        const _SectionLabel(label: 'Monthly Task'),
         const SizedBox(height: 10),
         _RecurringTile(
           icon: Icons.fire_extinguisher_rounded,
           title: 'Fire Safety Audit',
           accentColor: _danger,
-          lastDoneAt: monthly.lastDoneAt,
-          nextDueAt: monthly.nextDueAt,
-          isOverdue: monthly.isOverdue,
-          photoUrl: monthly.photoUrl,
-          onPhotoTap: monthly.photoUrl != null
-              ? () => _openPhoto(monthly.photoUrl!, 'Fire Safety Audit')
+          lastDoneAt: effectiveMonthly.lastDoneAt,
+          nextDueAt: effectiveMonthly.nextDueAt,
+          isOverdue: effectiveMonthly.isOverdue,
+          photoUrl: effectiveMonthly.photoUrl,
+          onPhotoTap: effectiveMonthly.photoUrl != null
+              ? () =>
+                    _openPhoto(effectiveMonthly.photoUrl!, 'Fire Safety Audit')
               : null,
         ),
 
@@ -507,7 +559,7 @@ class _ManagerHousekeepingScreenState
   );
 }
 
-// ─── Merged task model ────────────────────────────────────────────────────────
+// Merged task model
 class _MergedTask {
   final _TaskDef def;
   final bool isDone;
@@ -521,7 +573,7 @@ class _MergedTask {
   });
 }
 
-// ─── Summary Card (matches OutlineCard / FilledCard style from home_screen) ───
+// Summary Card
 class _SummaryCard extends StatelessWidget {
   final int done, total, court;
   final hk.Shift shift;
@@ -541,7 +593,7 @@ class _SummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _black, // FilledCard style
+        color: _black,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
@@ -549,7 +601,6 @@ class _SummaryCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              // Icon
               Container(
                 width: 38,
                 height: 38,
@@ -602,7 +653,6 @@ class _SummaryCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Percentage
               Text(
                 '${(pct * 100).round()}%',
                 style: GoogleFonts.antonSc(
@@ -614,7 +664,6 @@ class _SummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Progress bar
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
@@ -630,7 +679,7 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-// ─── Daily Task Tile (OutlineCard style — white + dark 1.5px border) ──────────
+// Daily Task Tile
 class _DailyTaskTile extends StatelessWidget {
   final _MergedTask task;
   final VoidCallback? onPhotoTap;
@@ -655,7 +704,6 @@ class _DailyTaskTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Category icon circle
           Container(
             width: 38,
             height: 38,
@@ -670,8 +718,6 @@ class _DailyTaskTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-
-          // Title + status
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -717,8 +763,6 @@ class _DailyTaskTile extends StatelessWidget {
               ],
             ),
           ),
-
-          // Photo thumbnail (only if done + has photo)
           if (hasPhoto)
             GestureDetector(
               onTap: onPhotoTap,
@@ -768,7 +812,6 @@ class _DailyTaskTile extends StatelessWidget {
                       ),
                     ),
                   ),
-                  // Expand hint
                   Positioned(
                     right: -3,
                     bottom: -3,
@@ -790,7 +833,6 @@ class _DailyTaskTile extends StatelessWidget {
                 ],
               ),
             )
-          // Camera icon hint when done but no photo
           else if (done)
             Container(
               width: 38,
@@ -806,7 +848,6 @@ class _DailyTaskTile extends StatelessWidget {
                 color: _grey,
               ),
             )
-          // Pending badge
           else
             Container(
               width: 38,
@@ -827,12 +868,13 @@ class _DailyTaskTile extends StatelessWidget {
   }
 }
 
-// ─── Recurring Task Tile (weekly / monthly) ───────────────────────────────────
+// Recurring Task Tile
 class _RecurringTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final Color accentColor;
-  final DateTime? lastDoneAt, nextDueAt;
+  final DateTime? lastDoneAt;
+  final DateTime? nextDueAt;
   final bool isOverdue;
   final String? photoUrl;
   final VoidCallback? onPhotoTap;
@@ -848,10 +890,58 @@ class _RecurringTile extends StatelessWidget {
     this.onPhotoTap,
   });
 
+  bool get _isCooldownActive =>
+      nextDueAt != null && DateTime.now().isBefore(nextDueAt!);
+
+  int get _cooldownDays {
+    if (nextDueAt == null) return 0;
+    final diff = nextDueAt!.difference(DateTime.now());
+    if (diff.isNegative) return 0;
+    return diff.inDays + (diff.inHours.remainder(24) > 0 ? 1 : 0);
+  }
+
+  int get _overdueDays {
+    if (nextDueAt == null) return 0;
+    final diff = DateTime.now().difference(nextDueAt!);
+    return diff.isNegative ? 0 : diff.inDays;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isDone = lastDoneAt != null && !isOverdue;
-    final stColor = isOverdue ? _danger : (isDone ? _ok : _warn);
+    final cooldown = _isCooldownActive;
+    final overdue = isOverdue && !cooldown;
+    final neverDone = lastDoneAt == null;
+    final justDone = cooldown;
+
+    final Color stColor;
+    if (overdue || neverDone) {
+      stColor = _danger;
+    } else if (justDone) {
+      stColor = _ok;
+    } else {
+      stColor = _warn;
+    }
+
+    final String stLabel;
+    if (neverDone) {
+      stLabel = 'Never Done';
+    } else if (overdue) {
+      final d = _overdueDays;
+      stLabel = d > 0 ? 'Overdue by $d ${d == 1 ? 'day' : 'days'}' : 'Overdue';
+    } else if (justDone) {
+      stLabel = 'Done';
+    } else {
+      stLabel = 'Pending';
+    }
+
+    String? subInfo;
+    if (justDone && nextDueAt != null) {
+      subInfo = 'Next due ${_fmtDateShort(nextDueAt!.toLocal())}';
+    } else if (overdue && lastDoneAt != null) {
+      subInfo = 'Last done ${_fmtDateShort(lastDoneAt!.toLocal())}';
+    } else if (!neverDone && lastDoneAt != null) {
+      subInfo = 'Last done ${_fmtDateShort(lastDoneAt!.toLocal())}';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -860,7 +950,7 @@ class _RecurringTile extends StatelessWidget {
         color: _white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: stColor.withOpacity(isOverdue ? 0.35 : 0.2),
+          color: stColor.withOpacity(overdue || neverDone ? 0.40 : 0.22),
           width: 1.5,
         ),
       ),
@@ -870,7 +960,7 @@ class _RecurringTile extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.1),
+              color: accentColor.withOpacity(0.10),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 18, color: accentColor),
@@ -888,20 +978,23 @@ class _RecurringTile extends StatelessWidget {
                     color: _black,
                   ),
                 ),
-                const SizedBox(height: 3),
-                Row(
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
+                    // Main status badge
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 7,
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: stColor.withOpacity(0.1),
+                        color: stColor.withOpacity(0.10),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        isOverdue ? 'Overdue' : (isDone ? 'Done' : 'Pending'),
+                        stLabel,
                         style: GoogleFonts.inter(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
@@ -909,24 +1002,82 @@ class _RecurringTile extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (lastDoneAt != null) ...[
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          isDone
-                              ? 'Done ${_fmtDateShort(lastDoneAt!.toLocal())}'
-                              : 'Last: ${_fmtDateShort(lastDoneAt!.toLocal())}',
-                          style: GoogleFonts.inter(fontSize: 11, color: _grey),
-                          overflow: TextOverflow.ellipsis,
+                    // Cooldown remaining badge
+                    if (justDone)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _ok.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _ok.withOpacity(0.20)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.hourglass_top_rounded,
+                              size: 9,
+                              color: _ok,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${_cooldownDays}d remaining',
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: _ok,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
+                    // Overdue-by badge
+                    if (overdue && _overdueDays > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _danger.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _danger.withOpacity(0.22)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.warning_amber_rounded,
+                              size: 9,
+                              color: _danger,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${_overdueDays}d overdue',
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: _danger,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    // Sub info
+                    if (subInfo != null)
+                      Text(
+                        subInfo,
+                        style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                      ),
                   ],
                 ),
               ],
             ),
           ),
-
+          const SizedBox(width: 8),
           if (photoUrl != null)
             GestureDetector(
               onTap: onPhotoTap,
@@ -998,13 +1149,14 @@ class _RecurringTile extends StatelessWidget {
             )
           else
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: stColor.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: stColor.withOpacity(0.20)),
               ),
               child: Text(
-                isOverdue ? '⚠ Overdue' : 'No photo',
+                overdue || neverDone ? 'No photo' : 'No photo',
                 style: GoogleFonts.inter(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
@@ -1018,112 +1170,125 @@ class _RecurringTile extends StatelessWidget {
   }
 }
 
-// ─── Photo Viewer ──────────────────────────────────────────────────────────────
+// Photo Viewer
 class _PhotoViewer extends StatelessWidget {
   final String url, title;
   const _PhotoViewer({required this.url, required this.title});
 
   @override
-  Widget build(BuildContext context) => Dialog.fullscreen(
-    backgroundColor: Colors.transparent,
-    child: Stack(
-      children: [
-        Center(
-          child: InteractiveViewer(
-            child: Image.network(
-              url,
-              fit: BoxFit.contain,
-              loadingBuilder: (_, child, prog) => prog == null
-                  ? child
-                  : const Center(
-                      child: CircularProgressIndicator(
-                        color: _white,
-                        strokeWidth: 2,
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      backgroundColor: Colors.transparent,
+      child: Stack(
+        children: [
+          Center(
+            child: InteractiveViewer(
+              child: Image.network(
+                url,
+                fit: BoxFit.contain,
+                loadingBuilder: (_, child, prog) => prog == null
+                    ? child
+                    : const Center(
+                        child: CircularProgressIndicator(
+                          color: _white,
+                          strokeWidth: 2,
+                        ),
                       ),
-                    ),
-              errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.broken_image_rounded, color: _grey, size: 48),
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Icon(
+                    Icons.broken_image_rounded,
+                    color: _grey,
+                    size: 48,
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.55),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: _white,
-                        size: 18,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _white,
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.55),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          color: _white,
+                          size: 18,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: _white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
-// ─── Utility Widgets ──────────────────────────────────────────────────────────
+// Utility Widgets
 class _SectionLabel extends StatelessWidget {
   final String label;
   final String? right;
   const _SectionLabel({required this.label, this.right});
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-    children: [
-      Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: FontWeight.w800,
-          color: _black,
-          letterSpacing: -0.3,
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: _black,
+            letterSpacing: -0.3,
+          ),
         ),
-      ),
-      if (right != null)
-        Text(right!, style: GoogleFonts.antonSc(fontSize: 14, color: _grey)),
-    ],
-  );
+        if (right != null)
+          Text(right!, style: GoogleFonts.antonSc(fontSize: 14, color: _grey)),
+      ],
+    );
+  }
 }
 
 class _Loader extends StatelessWidget {
   const _Loader();
   @override
-  Widget build(BuildContext context) => const Center(
-    child: CircularProgressIndicator(color: _black, strokeWidth: 2),
-  );
+  Widget build(BuildContext context) {
+    return const Center(
+      child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+    );
+  }
 }
 
 class _ErrorView extends StatelessWidget {
@@ -1131,50 +1296,52 @@ class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.onRetry});
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
-        const SizedBox(height: 12),
-        Text(
-          'Could not load status',
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: _black,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Pull to refresh or tap Retry',
-          style: GoogleFonts.inter(fontSize: 12, color: _grey),
-        ),
-        const SizedBox(height: 16),
-        GestureDetector(
-          onTap: onRetry,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-            decoration: BoxDecoration(
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
+          const SizedBox(height: 12),
+          Text(
+            'Could not load status',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
               color: _black,
-              borderRadius: BorderRadius.circular(999),
             ),
-            child: Text(
-              'Retry',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _white,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Pull to refresh or tap Retry',
+            style: GoogleFonts.inter(fontSize: 12, color: _grey),
+          ),
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: onRetry,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              decoration: BoxDecoration(
+                color: _black,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Retry',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: _white,
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 hk.Shift _autoShift() {
   final h = DateTime.now().hour;
   if (h >= 6 && h < 12) return hk.Shift.morning;

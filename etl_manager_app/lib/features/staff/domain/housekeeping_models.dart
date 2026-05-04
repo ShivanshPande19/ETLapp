@@ -226,7 +226,6 @@ class ShiftStatus {
   double get pct => total == 0 ? 0.0 : done / total;
 
   factory ShiftStatus.fromJson(Map<String, dynamic> j) => ShiftStatus(
-    // ✅ case-insensitive match + safe fallback — fixes the crash
     shift: Shift.values.firstWhere(
       (s) =>
           s.name.toLowerCase() == (j['shift'] as String? ?? '').toLowerCase(),
@@ -261,6 +260,8 @@ class CourtDayStatus {
   );
 }
 
+// ─── Weekly Task Status ───────────────────────────────────────────────────────
+
 class WeeklyTaskStatus {
   final int courtId;
   final DateTime? lastDoneAt;
@@ -276,6 +277,18 @@ class WeeklyTaskStatus {
     required this.isOverdue,
   });
 
+  // ✅ Cooldown active — next_due_at is in future
+  bool get isCooldownActive =>
+      nextDueAt != null && DateTime.now().isBefore(nextDueAt!);
+
+  // ✅ Days remaining until task is available again
+  int get remainingDays {
+    if (nextDueAt == null) return 0;
+    final diff = nextDueAt!.difference(DateTime.now());
+    if (diff.isNegative) return 0;
+    return diff.inDays + (diff.inHours.remainder(24) > 0 ? 1 : 0);
+  }
+
   factory WeeklyTaskStatus.fromJson(Map<String, dynamic> j) => WeeklyTaskStatus(
     courtId: j['court_id'] as int? ?? 0,
     lastDoneAt: j['last_done_at'] != null
@@ -288,6 +301,8 @@ class WeeklyTaskStatus {
     isOverdue: j['is_overdue'] as bool? ?? false,
   );
 }
+
+// ─── Monthly Task Status ──────────────────────────────────────────────────────
 
 class MonthlyTaskStatus {
   final int courtId;
@@ -304,6 +319,18 @@ class MonthlyTaskStatus {
     required this.isOverdue,
   });
 
+  // ✅ Cooldown active — next_due_at is in future
+  bool get isCooldownActive =>
+      nextDueAt != null && DateTime.now().isBefore(nextDueAt!);
+
+  // ✅ Days remaining until task is available again
+  int get remainingDays {
+    if (nextDueAt == null) return 0;
+    final diff = nextDueAt!.difference(DateTime.now());
+    if (diff.isNegative) return 0;
+    return diff.inDays + (diff.inHours.remainder(24) > 0 ? 1 : 0);
+  }
+
   factory MonthlyTaskStatus.fromJson(Map<String, dynamic> j) =>
       MonthlyTaskStatus(
         courtId: j['court_id'] as int? ?? 0,
@@ -317,6 +344,8 @@ class MonthlyTaskStatus {
         isOverdue: j['is_overdue'] as bool? ?? false,
       );
 }
+
+// ─── Full Status Response ─────────────────────────────────────────────────────
 
 class FullStatusResponse {
   final String date;

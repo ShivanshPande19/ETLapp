@@ -30,9 +30,6 @@ _SHIFTS     = ["morning", "day", "night"]
 _WEEKLY_ID  = "flagswash"
 _MONTHLY_ID = "fireaudit"
 
-# ─── Single source of truth for task count ────────────────────────────────────
-# Must stay in sync with Flutter's kDailyTasks list.
-# When you add/remove tasks on Flutter side, update this list too.
 _DAILY_TASK_IDS = [
     "floorclean",
     "tablechairclean",
@@ -42,7 +39,6 @@ _DAILY_TASK_IDS = [
     "pestspray",
 ]
 TASKS_PER_SHIFT = len(_DAILY_TASK_IDS)  # = 6
-
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
 
@@ -94,9 +90,8 @@ def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
     ]
 
     done  = sum(1 for t in tasks if t["is_done"])
-    total = TASKS_PER_SHIFT  # ← always 6, never len(rows)
+    total = TASKS_PER_SHIFT  # always 6
 
-    # submitted = all tasks completed
     submitted = (done == total) and (total > 0)
 
     return {
@@ -108,14 +103,11 @@ def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
     }
 
 
-def _recurring_status(
-    db: Session,
-    court_id: int,
-    task_type: str,
-    task_id: str,
-    interval_days: int,
-) -> dict:
-    row = (
+def _get_latest_recurring(
+    db: Session, court_id: int, task_type: str, task_id: str
+) -> Optional[HkRecurring]:
+    """Get the most recent recurring task entry for a court."""
+    return (
         db.query(HkRecurring)
         .filter(
             HkRecurring.court_id  == court_id,
@@ -126,15 +118,30 @@ def _recurring_status(
         .first()
     )
 
-    last_done: Optional[datetime] = None
-    if row and row.done_at:
-        try:
-            last_done = datetime.fromisoformat(row.done_at)
-        except ValueError:
-            pass
+
+def _parse_done_at(row: Optional[HkRecurring]) -> Optional[datetime]:
+    """Safely parse done_at from a recurring row."""
+    if row is None or not row.done_at:
+        return None
+    try:
+        return datetime.fromisoformat(row.done_at)
+    except (ValueError, TypeError):
+        return None
+
+
+def _recurring_status(
+    db: Session,
+    court_id: int,
+    task_type: str,
+    task_id: str,
+    interval_days: int,
+) -> dict:
+    row       = _get_latest_recurring(db, court_id, task_type, task_id)
+    last_done = _parse_done_at(row)
 
     next_due   = (last_done + timedelta(days=interval_days)) if last_done else None
-    is_overdue = (next_due < datetime.now()) if next_due else True
+    now        = datetime.now()
+    is_overdue = (next_due < now) if next_due else True
 
     return {
         "court_id":     court_id,
@@ -154,7 +161,9 @@ def submit_shift(
     _user=Depends(get_current_user),
 ):
     if not body.tasks:
-        raise HTTPException(status_code=422, detail="tasks list must not be empty")
+        raise HTTPException(
+            status_code=422, detail="tasks list must not be empty"
+        )
 
     for task in body.tasks:
         stmt = (
@@ -202,8 +211,14 @@ def get_status(
         for cid in _COURTS
     ]
 
-    weekly_tasks  = [_recurring_status(db, cid, "weekly",  _WEEKLY_ID,  7)  for cid in _COURTS]
-    monthly_tasks = [_recurring_status(db, cid, "monthly", _MONTHLY_ID, 30) for cid in _COURTS]
+    weekly_tasks  = [
+        _recurring_status(db, cid, "weekly",  _WEEKLY_ID,  7)
+        for cid in _COURTS
+    ]
+    monthly_tasks = [
+        _recurring_status(db, cid, "monthly", _MONTHLY_ID, 30)
+        for cid in _COURTS
+    ]
 
     return {
         "date":          target,
@@ -219,8 +234,33 @@ def mark_weekly_done(
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
+    # ✅ Cooldown check — 7 days from last done
+    row       = _get_latest_recurring(db, body.court_id, "weekly", _WEEKLY_ID)
+    last_done = _parse_done_at(row)
+    now       = datetime.now()
+
+    if last_done:
+        next_due = last_done + timedelta(days=7)
+        if now < next_due:
+            remaining = (next_due - now).days + (
+                1 if (next_due - now).seconds > 0 else 0
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code":           "COOLDOWN_ACTIVE",
+                    "message":        f"Weekly task available again in {remaining} days.",
+                    "remaining_days": remaining,
+                    "next_due_at":    next_due.isoformat(),
+                },
+            )
+
     _add_recurring(db, body, "weekly", _WEEKLY_ID)
-    return {"status": "ok", "task": "flags_washing", "court_id": body.court_id}
+    return {
+        "status":   "ok",
+        "task":     "flags_washing",
+        "court_id": body.court_id,
+    }
 
 
 @router.patch("/monthly", status_code=status.HTTP_200_OK)
@@ -229,13 +269,41 @@ def mark_monthly_done(
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
+    # ✅ Cooldown check — 30 days from last done
+    row       = _get_latest_recurring(db, body.court_id, "monthly", _MONTHLY_ID)
+    last_done = _parse_done_at(row)
+    now       = datetime.now()
+
+    if last_done:
+        next_due = last_done + timedelta(days=30)
+        if now < next_due:
+            remaining = (next_due - now).days + (
+                1 if (next_due - now).seconds > 0 else 0
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code":           "COOLDOWN_ACTIVE",
+                    "message":        f"Monthly task available again in {remaining} days.",
+                    "remaining_days": remaining,
+                    "next_due_at":    next_due.isoformat(),
+                },
+            )
+
     _add_recurring(db, body, "monthly", _MONTHLY_ID)
-    return {"status": "ok", "task": "fire_safety_audit", "court_id": body.court_id}
+    return {
+        "status":   "ok",
+        "task":     "fire_safety_audit",
+        "court_id": body.court_id,
+    }
 
 
 def _add_recurring(
-    db: Session, body: RecurringTaskRequest, task_type: str, task_id: str
-):
+    db: Session,
+    body: RecurringTaskRequest,
+    task_type: str,
+    task_id: str,
+) -> None:
     row = HkRecurring(
         court_id  = body.court_id,
         task_type = task_type,

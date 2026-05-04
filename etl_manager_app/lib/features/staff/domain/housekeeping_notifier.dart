@@ -18,14 +18,17 @@ class HousekeepingState {
   final bool isInitialized;
   final String? error;
 
-  // All maps are keyed as "${shift.name}_${taskId}" (e.g. "night_floorclean").
-  // This lets all shifts coexist in the same state — switching shifts just
-  // changes which slice is visible, nothing is ever wiped mid-session.
   final Map<String, bool> taskDoneMap;
   final Map<String, File?> taskPhotoMap;
   final Map<String, String?> photoUrlMap;
   final Set<String> lockedTasks;
   final Set<String> loadingTasks;
+
+  // ✅ Cooldown fields
+  final int weeklyRemainingDays;
+  final int monthlyRemainingDays;
+  final DateTime? weeklyNextDue;
+  final DateTime? monthlyNextDue;
 
   const HousekeepingState({
     this.courtId,
@@ -39,18 +42,26 @@ class HousekeepingState {
     this.photoUrlMap = const <String, String?>{},
     this.lockedTasks = const <String>{},
     this.loadingTasks = const <String>{},
+    this.weeklyRemainingDays = 0,
+    this.monthlyRemainingDays = 0,
+    this.weeklyNextDue,
+    this.monthlyNextDue,
   });
 
-  // ── Internal key: "shift_taskId" ──────────────────────────────────────────
+  // ── Internal key ──────────────────────────────────────────────────────────
   String _k(String taskId) => '${shift.name}_$taskId';
 
-  // ── Per-task helpers called by the checklist screen ───────────────────────
+  // ── Per-task helpers ──────────────────────────────────────────────────────
   bool isTaskDone(String taskId) => taskDoneMap[_k(taskId)] == true;
   bool isTaskLocked(String taskId) => lockedTasks.contains(_k(taskId));
   bool isTaskLoading(String taskId) => loadingTasks.contains(_k(taskId));
   File? taskPhoto(String taskId) => taskPhotoMap[_k(taskId)];
+  String? taskPhotoUrl(String taskId) => photoUrlMap[_k(taskId)];
 
-  /// Count of locked tasks for the CURRENT shift only.
+  // ✅ Cooldown helpers
+  bool get isWeeklyCooldown => weeklyRemainingDays > 0;
+  bool get isMonthlyCooldown => monthlyRemainingDays > 0;
+
   int get lockedDoneCount =>
       lockedTasks.where((k) => k.startsWith('${shift.name}_')).length;
 
@@ -66,6 +77,10 @@ class HousekeepingState {
     Map<String, String?>? photoUrlMap,
     Set<String>? lockedTasks,
     Set<String>? loadingTasks,
+    int? weeklyRemainingDays,
+    int? monthlyRemainingDays,
+    DateTime? weeklyNextDue,
+    DateTime? monthlyNextDue,
   }) {
     return HousekeepingState(
       courtId: courtId ?? this.courtId,
@@ -73,12 +88,16 @@ class HousekeepingState {
       shift: shift ?? this.shift,
       date: date ?? this.date,
       isInitialized: isInitialized ?? this.isInitialized,
-      error: error, // null intentionally clears error
+      error: error,
       taskDoneMap: taskDoneMap ?? this.taskDoneMap,
       taskPhotoMap: taskPhotoMap ?? this.taskPhotoMap,
       photoUrlMap: photoUrlMap ?? this.photoUrlMap,
       lockedTasks: lockedTasks ?? this.lockedTasks,
       loadingTasks: loadingTasks ?? this.loadingTasks,
+      weeklyRemainingDays: weeklyRemainingDays ?? this.weeklyRemainingDays,
+      monthlyRemainingDays: monthlyRemainingDays ?? this.monthlyRemainingDays,
+      weeklyNextDue: weeklyNextDue ?? this.weeklyNextDue,
+      monthlyNextDue: monthlyNextDue ?? this.monthlyNextDue,
     );
   }
 }
@@ -92,16 +111,155 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
     return HousekeepingState(shift: _autoShift, date: _today);
   }
 
-  // ── Init: load courtId from token storage ─────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> _init() async {
     final zone = await TokenStorage.getZone();
     final name = await TokenStorage.getManagerName();
-    state = state.copyWith(
-      courtId: _parseZone(zone),
-      courtName: name ?? 'Staff',
-      isInitialized: true,
+    final courtId = _parseZone(zone);
+
+    state = state.copyWith(courtId: courtId, courtName: name ?? 'Staff');
+
+    if (courtId != null) {
+      await _rehydrateFromBackend(courtId);
+    }
+
+    state = state.copyWith(isInitialized: true);
+  }
+
+  // ── Rehydrate ─────────────────────────────────────────────────────────────
+
+  Future<void> _rehydrateFromBackend(int courtId) async {
+    try {
+      final status = await ref
+          .read(housekeepingRepoProvider)
+          .getFullStatus(date: _today);
+
+      if (status == null) return;
+
+      final newDoneMap = Map<String, bool>.from(state.taskDoneMap);
+      final newLocked = Set<String>.from(state.lockedTasks);
+      final newPhotoUrls = Map<String, String?>.from(state.photoUrlMap);
+
+      // ── 1. Daily shift tasks ─────────────────────────────────────────────
+      final courtData = status.courts
+          .where((c) => c.courtId == courtId)
+          .firstOrNull;
+
+      if (courtData != null) {
+        for (final shiftStatus in courtData.shifts) {
+          final shiftName = shiftStatus.shift.name;
+          for (final task in shiftStatus.tasks) {
+            if (task.isDone) {
+              final key = '${shiftName}_${task.taskId}';
+              newDoneMap[key] = true;
+              newLocked.add(key);
+              if (task.photoUrl != null) newPhotoUrls[key] = task.photoUrl;
+            }
+          }
+        }
+      }
+
+      // ── 2. Weekly — cooldown logic ───────────────────────────────────────
+      final weeklyEntry = status.weeklyTasks
+          .where((w) => w.courtId == courtId)
+          .firstOrNull;
+
+      int weeklyRemaining = 0;
+      DateTime? weeklyNextDue;
+
+      if (weeklyEntry != null) {
+        if (weeklyEntry.isCooldownActive) {
+          // ✅ Still in 7-day cooldown — lock + show countdown
+          weeklyRemaining = weeklyEntry.remainingDays;
+          weeklyNextDue = weeklyEntry.nextDueAt;
+          for (final s in ['morning', 'day', 'night']) {
+            final key = '${s}_flagswash';
+            newDoneMap[key] = true;
+            newLocked.add(key);
+            if (weeklyEntry.photoUrl != null) {
+              newPhotoUrls[key] = weeklyEntry.photoUrl;
+            }
+          }
+        } else if (_isDoneThisWeek(weeklyEntry.lastDoneAt)) {
+          // Done this week but cooldown expired — still show as done/locked
+          for (final s in ['morning', 'day', 'night']) {
+            final key = '${s}_flagswash';
+            newDoneMap[key] = true;
+            newLocked.add(key);
+            if (weeklyEntry.photoUrl != null) {
+              newPhotoUrls[key] = weeklyEntry.photoUrl;
+            }
+          }
+        }
+      }
+
+      // ── 3. Monthly — cooldown logic ──────────────────────────────────────
+      final monthlyEntry = status.monthlyTasks
+          .where((m) => m.courtId == courtId)
+          .firstOrNull;
+
+      int monthlyRemaining = 0;
+      DateTime? monthlyNextDue;
+
+      if (monthlyEntry != null) {
+        if (monthlyEntry.isCooldownActive) {
+          // ✅ Still in 30-day cooldown — lock + show countdown
+          monthlyRemaining = monthlyEntry.remainingDays;
+          monthlyNextDue = monthlyEntry.nextDueAt;
+          for (final s in ['morning', 'day', 'night']) {
+            final key = '${s}_fireaudit';
+            newDoneMap[key] = true;
+            newLocked.add(key);
+            if (monthlyEntry.photoUrl != null) {
+              newPhotoUrls[key] = monthlyEntry.photoUrl;
+            }
+          }
+        } else if (_isDoneThisMonth(monthlyEntry.lastDoneAt)) {
+          // Done this month but cooldown expired
+          for (final s in ['morning', 'day', 'night']) {
+            final key = '${s}_fireaudit';
+            newDoneMap[key] = true;
+            newLocked.add(key);
+            if (monthlyEntry.photoUrl != null) {
+              newPhotoUrls[key] = monthlyEntry.photoUrl;
+            }
+          }
+        }
+      }
+
+      state = state.copyWith(
+        taskDoneMap: newDoneMap,
+        lockedTasks: newLocked,
+        photoUrlMap: newPhotoUrls,
+        weeklyRemainingDays: weeklyRemaining,
+        monthlyRemainingDays: monthlyRemaining,
+        weeklyNextDue: weeklyNextDue,
+        monthlyNextDue: monthlyNextDue,
+      );
+    } catch (e) {
+      debugPrint('_rehydrateFromBackend error: $e');
+    }
+  }
+
+  // ── Date helpers ──────────────────────────────────────────────────────────
+
+  bool _isDoneThisWeek(DateTime? lastDoneAt) {
+    if (lastDoneAt == null) return false;
+    final now = DateTime.now();
+    final weekStart = DateTime(
+      now.year,
+      now.month,
+      now.day - (now.weekday - 1),
     );
+    final done = DateTime(lastDoneAt.year, lastDoneAt.month, lastDoneAt.day);
+    return !done.isBefore(weekStart);
+  }
+
+  bool _isDoneThisMonth(DateTime? lastDoneAt) {
+    if (lastDoneAt == null) return false;
+    final now = DateTime.now();
+    return lastDoneAt.year == now.year && lastDoneAt.month == now.month;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -119,30 +277,22 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
     if (zone == null) return null;
     final z = zone.trim().toUpperCase();
 
-    // Direct number: "1", "2", "3"
     final direct = int.tryParse(z);
     if (direct != null && direct >= 1 && direct <= 3) return direct;
 
-    // Letter-based: "Zone A" → 1, "Zone B" → 2, "Zone C" → 3
     final letter = RegExp(r'[ABC]').firstMatch(z)?.group(0);
-    if (letter != null) {
-      return const {'A': 1, 'B': 2, 'C': 3}[letter];
-    }
+    if (letter != null) return const {'A': 1, 'B': 2, 'C': 3}[letter];
 
-    // Digit in string: "Zone 1", "court-2"
     final match = RegExp(r'(\d)').firstMatch(z);
     if (match != null) {
       final n = int.tryParse(match.group(1)!);
       if (n != null && n >= 1 && n <= 3) return n;
     }
-
     return null;
   }
 
   // ── Public mutations ──────────────────────────────────────────────────────
 
-  /// Switch shift — state for ALL shifts is preserved in the same maps.
-  /// Switching back to night after visiting day still shows night completions.
   void changeShift(hk.Shift shift) {
     if (state.shift == shift) return;
     state = state.copyWith(shift: shift, error: null);
@@ -151,7 +301,6 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
   void clearError() => state = state.copyWith(error: null);
 
   // ── confirmTask ───────────────────────────────────────────────────────────
-  // flow: mark loading → upload photo to Cloudinary → POST backend → lock.
 
   Future<bool> confirmTask({
     required String taskId,
@@ -163,9 +312,8 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       return false;
     }
 
-    final key = state._k(taskId); // e.g. "night_floorclean"
+    final key = state._k(taskId);
 
-    // Step 1: mark loading
     state = state.copyWith(
       loadingTasks: Set<String>.from(state.loadingTasks)..add(key),
       error: null,
@@ -175,7 +323,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       final date = state.date;
       final courtId = state.courtId!;
 
-      // Step 2: upload photo to Cloudinary
+      // ── Upload photo to Cloudinary ───────────────────────────────────────
       String? photoUrl;
       if (taskId == 'flagswash') {
         photoUrl = await HousekeepingStorageService.uploadWeeklyPhoto(
@@ -199,7 +347,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
         );
       }
 
-      // Step 3: POST to backend
+      // ── POST to backend ──────────────────────────────────────────────────
       bool success;
       if (taskId == 'flagswash') {
         success = await ref
@@ -222,10 +370,64 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             );
       }
 
-      // Step 4: update state with shift-prefixed key
       final newLoading = Set<String>.from(state.loadingTasks)..remove(key);
 
       if (success) {
+        // ✅ Weekly — set 7-day cooldown immediately in state
+        if (taskId == 'flagswash') {
+          final nextDue = DateTime.now().add(const Duration(days: 7));
+          final newLocked = Set<String>.from(state.lockedTasks);
+          final newDoneMap = Map<String, bool>.from(state.taskDoneMap);
+          final newPhotoMap = Map<String, String?>.from(state.photoUrlMap);
+
+          for (final s in ['morning', 'day', 'night']) {
+            newLocked.add('${s}_flagswash');
+            newDoneMap['${s}_flagswash'] = true;
+            newPhotoMap['${s}_flagswash'] = photoUrl;
+          }
+
+          state = state.copyWith(
+            loadingTasks: newLoading,
+            lockedTasks: newLocked,
+            taskDoneMap: newDoneMap,
+            photoUrlMap: newPhotoMap,
+            taskPhotoMap: Map<String, File?>.from(state.taskPhotoMap)
+              ..[key] = photo,
+            weeklyRemainingDays: 7,
+            weeklyNextDue: nextDue,
+            error: null,
+          );
+          return true;
+        }
+
+        // ✅ Monthly — set 30-day cooldown immediately in state
+        if (taskId == 'fireaudit') {
+          final nextDue = DateTime.now().add(const Duration(days: 30));
+          final newLocked = Set<String>.from(state.lockedTasks);
+          final newDoneMap = Map<String, bool>.from(state.taskDoneMap);
+          final newPhotoMap = Map<String, String?>.from(state.photoUrlMap);
+
+          for (final s in ['morning', 'day', 'night']) {
+            newLocked.add('${s}_fireaudit');
+            newDoneMap['${s}_fireaudit'] = true;
+            newPhotoMap['${s}_fireaudit'] = photoUrl;
+          }
+
+          state = state.copyWith(
+            loadingTasks: newLoading,
+            lockedTasks: newLocked,
+            taskDoneMap: newDoneMap,
+            photoUrlMap: newPhotoMap,
+            taskPhotoMap: Map<String, File?>.from(state.taskPhotoMap)
+              ..[key] = photo,
+            monthlyRemainingDays: 30,
+            monthlyNextDue: nextDue,
+            error: null,
+          );
+          return true;
+        }
+
+        // ── Regular daily task ───────────────────────────────────────────
         state = state.copyWith(
           loadingTasks: newLoading,
           lockedTasks: Set<String>.from(state.lockedTasks)..add(key),
@@ -246,8 +448,18 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       }
     } catch (e) {
       debugPrint('confirmTask error: $e');
+
+      final newLoading = Set<String>.from(state.loadingTasks)..remove(key);
+
+      // ✅ Backend cooldown error — re-fetch to get updated days
+      if (e.toString().contains('COOLDOWN_ACTIVE') && state.courtId != null) {
+        await _rehydrateFromBackend(state.courtId!);
+        state = state.copyWith(loadingTasks: newLoading, error: null);
+        return false;
+      }
+
       state = state.copyWith(
-        loadingTasks: Set<String>.from(state.loadingTasks)..remove(key),
+        loadingTasks: newLoading,
         error: 'Network error. Check your connection.',
       );
       return false;
