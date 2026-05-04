@@ -1,27 +1,51 @@
-// NEW FILE — create at: lib/features/home/presentation/home_providers.dart
-// This is the debug file for Bug 3 — wires up real API data for the home screen.
+// lib/features/home/presentation/home_providers.dart
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../staff/data/housekeeping_repository.dart';
+import '../../staff/domain/housekeeping_models.dart';
 
-// ─── Housekeeping summary model ───────────────────────────────────────────────
+// ─── Models ───────────────────────────────────────────────────────────────────
 
-class HkHomeSummary {
+class ShiftPillData {
+  final String label;
   final int done;
   final int total;
-  const HkHomeSummary({required this.done, required this.total});
+
+  const ShiftPillData({
+    required this.label,
+    required this.done,
+    required this.total,
+  });
 
   double get pct => total == 0 ? 0.0 : done / total;
-  int get pending => total - done;
-  String get label => '$done / $total zones';
+  bool get isComplete => total > 0 && done == total;
 }
 
-// ─── Housekeeping provider (Bug 3 — full debug) ───────────────────────────────
+class CourtHkRow {
+  final String courtName;
+  final ShiftPillData morning;
+  final ShiftPillData day;
+  final ShiftPillData night;
 
-final homeHousekeepingProvider = FutureProvider.autoDispose<HkHomeSummary>((
+  const CourtHkRow({
+    required this.courtName,
+    required this.morning,
+    required this.day,
+    required this.night,
+  });
+}
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+ShiftPillData _emptyPill(String label) =>
+    ShiftPillData(label: label, done: 0, total: 0);
+
+// ─── Housekeeping provider ────────────────────────────────────────────────────
+
+final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
   ref,
 ) async {
   final today = DateTime.now().toIso8601String().substring(0, 10);
@@ -31,69 +55,45 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<HkHomeSummary>((
     final repo = ref.read(housekeepingRepoProvider);
     final status = await repo.getFullStatus(date: today);
 
-    // ── Bug 3 checkpoint 1: did the API return null? ──────────────────────
-    if (status == null) {
-      debugPrint('🧹 [HK] ❌ getFullStatus() returned NULL');
-      debugPrint(
-        '🧹 [HK]    Cause: API call failed silently (check Dio logs above)',
-      );
-      return const HkHomeSummary(done: 0, total: 0);
-    }
+    if (status == null || status.courts.isEmpty) return [];
 
-    debugPrint('🧹 [HK] ✅ API returned — date: ${status.date}');
+    return status.courts.map((court) {
+      ShiftPillData morning = _emptyPill('M');
+      ShiftPillData day = _emptyPill('D');
+      ShiftPillData night = _emptyPill('N');
 
-    // ── Bug 3 checkpoint 2: are courts empty? ────────────────────────────
-    if (status.courts.isEmpty) {
-      debugPrint('🧹 [HK] ⚠️  courts list is EMPTY');
-      debugPrint(
-        '🧹 [HK]    Cause A: No housekeeping submissions exist for $today',
-      );
-      debugPrint(
-        '🧹 [HK]    Cause B: Backend /housekeeping/status returned courts:[]',
-      );
-      debugPrint('🧹 [HK]    Raw response date field: ${status.date}');
-      return const HkHomeSummary(done: 0, total: 0);
-    }
-
-    debugPrint('🧹 [HK] courts count: ${status.courts.length}');
-
-    int done = 0, total = 0;
-    for (final court in status.courts) {
-      // ── Bug 3 checkpoint 3: are shifts empty per court? ────────────────
-      if (court.shifts.isEmpty) {
-        debugPrint('🧹 [HK]   Court ${court.courtId} has NO shifts for $today');
-        continue;
-      }
-      for (final shift in court.shifts) {
-        debugPrint(
-          '🧹 [HK]   Court ${court.courtId} | ${shift.shift.name} '
-          '| done=${shift.done} total=${shift.total} submitted=${shift.submitted}',
+      for (final s in court.shifts) {
+        final pill = ShiftPillData(
+          label: s.shift == Shift.morning
+              ? 'M'
+              : s.shift == Shift.day
+              ? 'D'
+              : 'N',
+          done: s.done,
+          total: s.total,
         );
-        done += shift.done;
-        total += shift.total;
+        if (s.shift == Shift.morning) {
+          morning = pill;
+        } else if (s.shift == Shift.day) {
+          day = pill;
+        } else {
+          night = pill;
+        }
       }
-    }
 
-    // ── Bug 3 checkpoint 4: totals are both 0 even with courts data ───────
-    if (total == 0) {
-      debugPrint('🧹 [HK] ⚠️  total=0 despite ${status.courts.length} courts');
-      debugPrint(
-        '🧹 [HK]    Cause: All shifts have total=0 — no tasks configured for today',
+      return CourtHkRow(
+        courtName: 'Court ${court.courtId}',
+        morning: morning,
+        day: day,
+        night: night,
       );
-    }
-
-    final pct = total == 0 ? 0 : (done / total * 100).round();
-    debugPrint('🧹 [HK] ✅ RESULT: done=$done total=$total ($pct%)');
-    return HkHomeSummary(done: done, total: total);
+    }).toList();
   } on DioException catch (e) {
-    debugPrint('🧹 [HK] ❌ DioException: ${e.response?.statusCode} ${e.type}');
-    debugPrint('🧹 [HK]    URL: ${e.requestOptions.uri}');
-    debugPrint('🧹 [HK]    Message: ${e.message}');
-    return const HkHomeSummary(done: 0, total: 0);
-  } catch (e, st) {
+    debugPrint('🧹 [HK] ❌ DioError: ${e.response?.statusCode} ${e.message}');
+    return [];
+  } catch (e) {
     debugPrint('🧹 [HK] ❌ EXCEPTION: $e');
-    debugPrint('🧹 [HK]    STACKTRACE: $st');
-    return const HkHomeSummary(done: 0, total: 0);
+    return [];
   }
 });
 
@@ -111,15 +111,11 @@ final homeComplaintsProvider = FutureProvider.autoDispose<int>((ref) async {
     if (data is Map && data['complaints'] is List)
       return (data['complaints'] as List).length;
     if (data is Map && data['total'] is int) return data['total'] as int;
-    debugPrint('🔴 [COMPLAINTS] Unexpected response shape: $data');
     return 0;
   } on DioException catch (e) {
-    debugPrint(
-      '🔴 [COMPLAINTS] DioError: ${e.response?.statusCode} ${e.message}',
-    );
+    debugPrint('🔴 [COMPLAINTS] DioError: ${e.response?.statusCode}');
     return 0;
-  } catch (e) {
-    debugPrint('🔴 [COMPLAINTS] Error: $e');
+  } catch (_) {
     return 0;
   }
 });
@@ -138,15 +134,11 @@ final homeMaintenanceProvider = FutureProvider.autoDispose<int>((ref) async {
     if (data is Map && data['issues'] is List)
       return (data['issues'] as List).length;
     if (data is Map && data['total'] is int) return data['total'] as int;
-    debugPrint('🔧 [MAINTENANCE] Unexpected response shape: $data');
     return 0;
   } on DioException catch (e) {
-    debugPrint(
-      '🔧 [MAINTENANCE] DioError: ${e.response?.statusCode} ${e.message}',
-    );
+    debugPrint('🔧 [MAINTENANCE] DioError: ${e.response?.statusCode}');
     return 0;
-  } catch (e) {
-    debugPrint('🔧 [MAINTENANCE] Error: $e');
+  } catch (_) {
     return 0;
   }
 });

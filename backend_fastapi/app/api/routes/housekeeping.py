@@ -1,9 +1,4 @@
 # app/api/routes/housekeeping.py
-# ─────────────────────────────────────────────────────────────────────────────
-# Housekeeping router — uses your project's existing SQLAlchemy session.
-# Drop-in replacement for the in-memory dict version.
-# API contract is IDENTICAL — no Flutter changes needed.
-# ─────────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
 
@@ -16,11 +11,9 @@ from sqlalchemy import desc
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-# ── Your existing project imports ─────────────────────────────────────────────
-from ...database import get_db                    # SessionLocal dependency
+from ...database import get_db
 from ...models.housekeeping import HkTask, HkRecurring
 
-# Re-use your existing auth dependency (adjust import path if different)
 try:
     from ...core.security import get_current_user
 except ImportError:
@@ -32,10 +25,23 @@ except ImportError:
 
 router = APIRouter()
 
-_COURTS       = [1, 2, 3]
-_SHIFTS       = ["morning", "day", "night"]
-_WEEKLY_ID    = "flagswash"
-_MONTHLY_ID   = "fireaudit"
+_COURTS     = [1, 2, 3]
+_SHIFTS     = ["morning", "day", "night"]
+_WEEKLY_ID  = "flagswash"
+_MONTHLY_ID = "fireaudit"
+
+# ─── Single source of truth for task count ────────────────────────────────────
+# Must stay in sync with Flutter's kDailyTasks list.
+# When you add/remove tasks on Flutter side, update this list too.
+_DAILY_TASK_IDS = [
+    "floorclean",
+    "tablechairclean",
+    "binclean",
+    "trayclean",
+    "binempty",
+    "pestspray",
+]
+TASKS_PER_SHIFT = len(_DAILY_TASK_IDS)  # = 6
 
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
@@ -50,8 +56,8 @@ class TaskSubmitItem(BaseModel):
 
 class ShiftSubmitRequest(BaseModel):
     court_id:     int
-    shift:        str        # morning | day | night
-    date:         str        # YYYY-MM-DD
+    shift:        str
+    date:         str
     tasks:        List[TaskSubmitItem]
     submitted_by: Optional[int] = None
 
@@ -88,13 +94,16 @@ def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
     ]
 
     done  = sum(1 for t in tasks if t["is_done"])
-    total = len(tasks)
+    total = TASKS_PER_SHIFT  # ← always 6, never len(rows)
+
+    # submitted = all tasks completed
+    submitted = (done == total) and (total > 0)
 
     return {
         "shift":     shift,
         "total":     total,
         "done":      done,
-        "submitted": total > 0,
+        "submitted": submitted,
         "tasks":     tasks,
     }
 
@@ -144,15 +153,10 @@ def submit_shift(
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    """
-    Staff submits their shift checklist.
-    Uses SQLite UPSERT — re-submitting a task updates it, never duplicates.
-    """
     if not body.tasks:
         raise HTTPException(status_code=422, detail="tasks list must not be empty")
 
     for task in body.tasks:
-        # SQLite UPSERT: INSERT or UPDATE on conflict
         stmt = (
             sqlite_insert(HkTask)
             .values(
@@ -187,7 +191,6 @@ def get_status(
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    """Full housekeeping status for every court — manager + staff report."""
     target = date or datetime.now().strftime("%Y-%m-%d")
 
     courts = [

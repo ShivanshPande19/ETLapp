@@ -1,3 +1,5 @@
+// lib/features/home/presentation/home_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,14 +9,26 @@ import '../../courts/domain/courts_notifier.dart';
 import '../../sales/domain/sales_notifier.dart';
 import 'home_providers.dart';
 
+// ─── Colors ───────────────────────────────────────────────────────────────────
+
 const _white = Color(0xFFFFFFFF);
 const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
 const _lightGrey = Color(0xFFF2F2F2);
 const _border = Color(0xFF1A1A1A);
 
+const _pillGreenFg = Color(0xFF15803D);
+const _pillGreenBg = Color(0xFFDCFCE7);
+const _pillYellowFg = Color(0xFFB45309);
+const _pillYellowBg = Color(0xFFFEF3C7);
+const _pillInactiveFg = Color(0xFFBBBBBB);
+const _pillInactiveBg = Color(0xFFF5F5F5);
+
+// ─── Home Screen ──────────────────────────────────────────────────────────────
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
+
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
@@ -61,6 +75,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ref.invalidate(homeMaintenanceProvider);
   }
 
+  String _fmt(double v) {
+    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
+    return v.toStringAsFixed(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final salesState = ref.watch(salesNotifierProvider);
@@ -74,18 +94,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final isLoadingSales = salesState.status == SalesLoadStatus.loading;
     final isLoadingCourts = courtsAsync is AsyncLoading;
 
-    // Housekeeping resolved values
-    final hkSummary = hkAsync.maybeWhen(data: (v) => v, orElse: () => null);
+    final hkRows = hkAsync.maybeWhen(
+      data: (v) => v,
+      orElse: () => <CourtHkRow>[],
+    );
     final hkLoading = hkAsync is AsyncLoading;
-    final hkDone = hkSummary?.done ?? 0;
-    final hkTotal = hkSummary?.total ?? 0;
-    final hkPct = hkSummary?.pct ?? 0.0;
-    final hkPending = hkSummary?.pending ?? 0;
-    final hkLabel = hkTotal == 0
-        ? 'No submissions today'
-        : '${hkDone} / ${hkTotal} zones';
 
-    // Complaints & maintenance counts
     final complaintsCount = complaintsAsync.maybeWhen(
       data: (v) => v,
       orElse: () => 0,
@@ -125,7 +139,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Row 1: Revenue + Courts ──────────────────────
+                  // ── Revenue + Courts ─────────────────────────────
                   SizedBox(
                     height: 120,
                     child: Row(
@@ -198,7 +212,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 10),
 
-                  // ── Sales sparkline card ─────────────────────────
+                  // ── Sparkline ────────────────────────────────────
                   _OutlineCard(
                     height: 86,
                     child: Row(
@@ -251,12 +265,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 10),
 
-                  // ── Row 2: Complaints + Maintenance (REAL DATA) ──
+                  // ── Complaints + Maintenance ─────────────────────
                   SizedBox(
                     height: 100,
                     child: Row(
                       children: [
-                        // Complaints
                         Expanded(
                           child: _OutlineCard(
                             child: Column(
@@ -314,7 +327,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                         ),
                         const SizedBox(width: 10),
-                        // Maintenance
                         Expanded(
                           child: _FilledCard(
                             child: Column(
@@ -380,12 +392,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   const SizedBox(height: 10),
 
-                  // ── Housekeeping Progress Card (REAL DATA + BUG 3 FIX) ──
+                  // ── Housekeeping ─────────────────────────────────
                   _OutlineCard(
-                    height: 90,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -398,53 +408,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            hkLoading
-                                ? const _Skeleton(width: 70, height: 14)
-                                : Text(
-                                    hkLabel,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      color: _black,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
+                            Row(
+                              children: [
+                                _LegendDot(fg: _pillGreenFg, label: 'Done'),
+                                const SizedBox(width: 8),
+                                _LegendDot(
+                                  fg: _pillYellowFg,
+                                  label: 'In progress',
+                                ),
+                              ],
+                            ),
                           ],
                         ),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: hkLoading
-                              ? const _Skeleton(
-                                  width: double.infinity,
-                                  height: 8,
-                                )
-                              : LinearProgressIndicator(
-                                  value: hkPct,
-                                  minHeight: 8,
-                                  backgroundColor: _lightGrey,
-                                  valueColor:
-                                      const AlwaysStoppedAnimation<Color>(
-                                        _black,
-                                      ),
-                                ),
-                        ),
-                        Text(
-                          hkLoading
-                              ? 'Loading...'
-                              : hkTotal == 0
-                              ? 'No submissions today'
-                              : '$hkPending zones pending',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: _grey,
-                            fontWeight: FontWeight.w400,
+                        if (hkLoading) ...[
+                          const SizedBox(height: 14),
+                          ...List.generate(
+                            3,
+                            (_) => const Padding(
+                              padding: EdgeInsets.only(bottom: 10),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: _Skeleton(
+                                      width: double.infinity,
+                                      height: 14,
+                                    ),
+                                  ),
+                                  SizedBox(width: 10),
+                                  _Skeleton(width: 52, height: 26),
+                                  SizedBox(width: 5),
+                                  _Skeleton(width: 52, height: 26),
+                                  SizedBox(width: 5),
+                                  _Skeleton(width: 52, height: 26),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
+                        ] else if (hkRows.isEmpty) ...[
+                          const SizedBox(height: 14),
+                          Text(
+                            'No submissions today',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: _grey,
+                            ),
+                          ),
+                        ] else ...[
+                          const SizedBox(height: 12),
+                          ...hkRows.map((row) => _CourtHkRow(row: row)),
+                        ],
                       ],
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  // ── Courts Section ───────────────────────────────
+                  // ── Courts ───────────────────────────────────────
                   _SectionHeader(title: 'Courts', onViewAll: () {}),
                   const SizedBox(height: 12),
                   courtsAsync.when(
@@ -484,15 +502,153 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ),
     );
   }
+}
 
-  String _fmt(double v) {
-    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
-    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
-    return v.toStringAsFixed(0);
+// ─── Legend Dot ───────────────────────────────────────────────────────────────
+
+class _LegendDot extends StatelessWidget {
+  final Color fg;
+  final String label;
+  const _LegendDot({required this.fg, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            color: _grey,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 }
 
-// ── Top Row ───────────────────────────────────────────────────────────────────
+// ─── Court HK Row ─────────────────────────────────────────────────────────────
+
+class _CourtHkRow extends StatelessWidget {
+  final CourtHkRow row;
+  const _CourtHkRow({required this.row});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              row.courtName,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: _black,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+          const SizedBox(width: 8),
+          _ShiftPill(pill: row.morning),
+          const SizedBox(width: 5),
+          _ShiftPill(pill: row.day),
+          const SizedBox(width: 5),
+          _ShiftPill(pill: row.night),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Shift Pill ───────────────────────────────────────────────────────────────
+
+class _ShiftPill extends StatelessWidget {
+  final ShiftPillData pill;
+  const _ShiftPill({required this.pill});
+
+  // Sirf time ke basis pe decide karo — total/pct se koi lena dena nahi
+  // M = Morning  06:00 – 11:59
+  // D = Day      12:00 – 15:59
+  // N = Night    16:00 – 23:59
+  bool _isShiftTimeActive(String label) {
+    final h = TimeOfDay.now().hour;
+    switch (label.toUpperCase()) {
+      case 'M':
+        return h >= 6 && h < 12;
+      case 'D':
+        return h >= 12 && h < 16;
+      case 'N':
+        return h >= 16 && h < 24;
+      default:
+        return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isActive = _isShiftTimeActive(pill.label);
+
+    final Color fg;
+    final Color bg;
+
+    if (!isActive) {
+      // Shift ka time nahi — grey, no percentage
+      fg = _pillInactiveFg;
+      bg = _pillInactiveBg;
+    } else if (pill.isComplete) {
+      fg = _pillGreenFg;
+      bg = _pillGreenBg;
+    } else {
+      fg = _pillYellowFg;
+      bg = _pillYellowBg;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            pill.label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
+          ),
+          // Percentage only jab shift ka time active ho
+          if (isActive) ...[
+            const SizedBox(width: 3),
+            Text(
+              '${(pill.pct * 100).round()}%',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: fg,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Top Row ──────────────────────────────────────────────────────────────────
 
 class _TopRow extends StatelessWidget {
   final String managerName;
@@ -525,7 +681,7 @@ class _TopRow extends StatelessWidget {
   }
 }
 
-// ── Section Header ────────────────────────────────────────────────────────────
+// ─── Section Header ───────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -563,7 +719,7 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-// ── Outline Card ──────────────────────────────────────────────────────────────
+// ─── Outline Card ─────────────────────────────────────────────────────────────
 
 class _OutlineCard extends StatelessWidget {
   final Widget child;
@@ -586,7 +742,7 @@ class _OutlineCard extends StatelessWidget {
   }
 }
 
-// ── Filled Card ───────────────────────────────────────────────────────────────
+// ─── Filled Card ──────────────────────────────────────────────────────────────
 
 class _FilledCard extends StatelessWidget {
   final Widget child;
@@ -608,7 +764,7 @@ class _FilledCard extends StatelessWidget {
   }
 }
 
-// ── Court Row ─────────────────────────────────────────────────────────────────
+// ─── Court Row ────────────────────────────────────────────────────────────────
 
 class _CourtRow extends StatelessWidget {
   final dynamic court;
@@ -685,7 +841,7 @@ class _CourtRow extends StatelessWidget {
   }
 }
 
-// ── Now Playing Card ──────────────────────────────────────────────────────────
+// ─── Now Playing Card ─────────────────────────────────────────────────────────
 
 class _NowPlayingCard extends StatelessWidget {
   const _NowPlayingCard();
@@ -761,7 +917,7 @@ class _NowPlayingCard extends StatelessWidget {
   }
 }
 
-// ── Sparkline Painter ─────────────────────────────────────────────────────────
+// ─── Sparkline Painter ────────────────────────────────────────────────────────
 
 class _SparklinePainter extends CustomPainter {
   final Color color;
@@ -777,6 +933,7 @@ class _SparklinePainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
 
     const pts = [0.55, 0.40, 0.65, 0.30, 0.70, 0.45, 0.35, 0.60, 0.50, 0.75];
+
     final path = Path();
     for (int i = 0; i < pts.length; i++) {
       final x = (i / (pts.length - 1)) * size.width;
@@ -790,7 +947,7 @@ class _SparklinePainter extends CustomPainter {
   bool shouldRepaint(_) => false;
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 class _Skeleton extends StatelessWidget {
   final double width;
@@ -815,7 +972,7 @@ class _Skeleton extends StatelessWidget {
   }
 }
 
-// ── Error Row ─────────────────────────────────────────────────────────────────
+// ─── Error Row ────────────────────────────────────────────────────────────────
 
 class _ErrorRow extends StatelessWidget {
   final String message;

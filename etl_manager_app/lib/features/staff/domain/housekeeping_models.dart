@@ -1,5 +1,4 @@
 // lib/features/staff/domain/housekeeping_models.dart
-// Single source of truth for ALL housekeeping types.
 
 import 'package:flutter/material.dart';
 
@@ -92,6 +91,8 @@ const kDailyTasks = [
   ),
 ];
 
+const kTasksPerShift = 6;
+
 const kFlags = HkTask(
   id: 'flagswash',
   title: 'Flags Washing',
@@ -99,6 +100,7 @@ const kFlags = HkTask(
   icon: Icons.flag_rounded,
   frequency: TaskFreq.weekly,
 );
+
 const kFire = HkTask(
   id: 'fireaudit',
   title: 'Fire Safety Audit',
@@ -196,11 +198,13 @@ class TaskStatusItem {
   });
 
   factory TaskStatusItem.fromJson(Map<String, dynamic> j) => TaskStatusItem(
-    taskId: j['task_id'],
-    taskTitle: j['task_title'],
-    isDone: j['is_done'],
-    photoUrl: j['photo_url'],
-    doneAt: j['done_at'] != null ? DateTime.parse(j['done_at']) : null,
+    taskId: j['task_id'] as String? ?? '',
+    taskTitle: j['task_title'] as String? ?? '',
+    isDone: j['is_done'] as bool? ?? false,
+    photoUrl: j['photo_url'] as String?,
+    doneAt: j['done_at'] != null
+        ? DateTime.tryParse(j['done_at'] as String)
+        : null,
   );
 }
 
@@ -219,12 +223,21 @@ class ShiftStatus {
     required this.tasks,
   });
 
+  double get pct => total == 0 ? 0.0 : done / total;
+
   factory ShiftStatus.fromJson(Map<String, dynamic> j) => ShiftStatus(
-    shift: Shift.values.firstWhere((s) => s.name == j['shift']),
-    total: j['total'],
-    done: j['done'],
-    submitted: j['submitted'],
-    tasks: (j['tasks'] as List).map((t) => TaskStatusItem.fromJson(t)).toList(),
+    // ✅ case-insensitive match + safe fallback — fixes the crash
+    shift: Shift.values.firstWhere(
+      (s) =>
+          s.name.toLowerCase() == (j['shift'] as String? ?? '').toLowerCase(),
+      orElse: () => Shift.morning,
+    ),
+    total: j['total'] as int? ?? 0,
+    done: j['done'] as int? ?? 0,
+    submitted: j['submitted'] as bool? ?? false,
+    tasks: (j['tasks'] as List? ?? [])
+        .map((t) => TaskStatusItem.fromJson(t as Map<String, dynamic>))
+        .toList(),
   );
 }
 
@@ -240,9 +253,11 @@ class CourtDayStatus {
   });
 
   factory CourtDayStatus.fromJson(Map<String, dynamic> j) => CourtDayStatus(
-    courtId: j['court_id'],
-    date: j['date'],
-    shifts: (j['shifts'] as List).map((s) => ShiftStatus.fromJson(s)).toList(),
+    courtId: j['court_id'] as int? ?? 0,
+    date: j['date'] as String? ?? '',
+    shifts: (j['shifts'] as List? ?? [])
+        .map((s) => ShiftStatus.fromJson(s as Map<String, dynamic>))
+        .toList(),
   );
 }
 
@@ -262,15 +277,15 @@ class WeeklyTaskStatus {
   });
 
   factory WeeklyTaskStatus.fromJson(Map<String, dynamic> j) => WeeklyTaskStatus(
-    courtId: j['court_id'],
+    courtId: j['court_id'] as int? ?? 0,
     lastDoneAt: j['last_done_at'] != null
-        ? DateTime.parse(j['last_done_at'])
+        ? DateTime.tryParse(j['last_done_at'] as String)
         : null,
     nextDueAt: j['next_due_at'] != null
-        ? DateTime.parse(j['next_due_at'])
+        ? DateTime.tryParse(j['next_due_at'] as String)
         : null,
-    photoUrl: j['photo_url'],
-    isOverdue: j['is_overdue'],
+    photoUrl: j['photo_url'] as String?,
+    isOverdue: j['is_overdue'] as bool? ?? false,
   );
 }
 
@@ -291,15 +306,15 @@ class MonthlyTaskStatus {
 
   factory MonthlyTaskStatus.fromJson(Map<String, dynamic> j) =>
       MonthlyTaskStatus(
-        courtId: j['court_id'],
+        courtId: j['court_id'] as int? ?? 0,
         lastDoneAt: j['last_done_at'] != null
-            ? DateTime.parse(j['last_done_at'])
+            ? DateTime.tryParse(j['last_done_at'] as String)
             : null,
         nextDueAt: j['next_due_at'] != null
-            ? DateTime.parse(j['next_due_at'])
+            ? DateTime.tryParse(j['next_due_at'] as String)
             : null,
-        photoUrl: j['photo_url'],
-        isOverdue: j['is_overdue'],
+        photoUrl: j['photo_url'] as String?,
+        isOverdue: j['is_overdue'] as bool? ?? false,
       );
 }
 
@@ -318,15 +333,15 @@ class FullStatusResponse {
 
   factory FullStatusResponse.fromJson(Map<String, dynamic> j) =>
       FullStatusResponse(
-        date: j['date'],
-        courts: (j['courts'] as List)
-            .map((c) => CourtDayStatus.fromJson(c))
+        date: j['date'] as String? ?? '',
+        courts: (j['courts'] as List? ?? [])
+            .map((c) => CourtDayStatus.fromJson(c as Map<String, dynamic>))
             .toList(),
-        weeklyTasks: (j['weekly_tasks'] as List)
-            .map((w) => WeeklyTaskStatus.fromJson(w))
+        weeklyTasks: (j['weekly_tasks'] as List? ?? [])
+            .map((w) => WeeklyTaskStatus.fromJson(w as Map<String, dynamic>))
             .toList(),
-        monthlyTasks: (j['monthly_tasks'] as List)
-            .map((m) => MonthlyTaskStatus.fromJson(m))
+        monthlyTasks: (j['monthly_tasks'] as List? ?? [])
+            .map((m) => MonthlyTaskStatus.fromJson(m as Map<String, dynamic>))
             .toList(),
       );
 }
