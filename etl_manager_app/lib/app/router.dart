@@ -10,6 +10,8 @@ import '../features/settings/presentation/settings_screen.dart';
 import '../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../features/complaints/presentation/complaints_screen.dart';
 import '../features/maintenance/presentation/maintenance_screen.dart'; // ← NEW
+import '../features/courts/presentation/court_detail_screen.dart';
+import '../features/courts/data/courts_repository.dart';
 import '../features/staff/presentation/staff_shell_screen.dart';
 import '../features/staff/presentation/staff_home_screen.dart';
 import '../features/staff/presentation/staff_checklist_screen.dart';
@@ -133,6 +135,46 @@ final routerProvider = Provider<GoRouter>((ref) {
               state: state,
               child: const MaintenanceScreen(),
             ),
+          ),
+
+          GoRoute(
+            path: '/court/:id',
+            pageBuilder: (context, state) {
+              final court = state.extra as Court;
+              return CustomTransitionPage(
+                key: state.pageKey,
+                child: CourtDetailScreen(court: court),
+                transitionDuration: const Duration(milliseconds: 300),
+                reverseTransitionDuration: const Duration(milliseconds: 250),
+                transitionsBuilder:
+                    (context, animation, secondaryAnimation, child) {
+                      final slide =
+                          Tween<Offset>(
+                            begin: const Offset(1.0, 0.0),
+                            end: Offset.zero,
+                          ).animate(
+                            CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                            ),
+                          );
+                      final fade = Tween<double>(begin: 0.0, end: 1.0).animate(
+                        CurvedAnimation(
+                          parent: animation,
+                          curve: const Interval(
+                            0.0,
+                            0.5,
+                            curve: Curves.easeOut,
+                          ),
+                        ),
+                      );
+                      return FadeTransition(
+                        opacity: fade,
+                        child: SlideTransition(position: slide, child: child),
+                      );
+                    },
+              );
+            },
           ),
 
           // ──────────────────────────────────────────────────────────────────
