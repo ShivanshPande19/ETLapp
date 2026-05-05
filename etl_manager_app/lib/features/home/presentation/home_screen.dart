@@ -8,6 +8,7 @@ import '../../../core/utils/token_storage.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../sales/domain/sales_notifier.dart';
 import 'home_providers.dart';
+import 'package:go_router/go_router.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
@@ -271,119 +272,140 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     child: Row(
                       children: [
                         Expanded(
-                          child: _OutlineCard(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Complaints',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: _grey,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const Icon(
-                                      Icons.arrow_forward_ios_rounded,
-                                      size: 11,
-                                      color: _grey,
-                                    ),
-                                  ],
-                                ),
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    complaintsAsync is AsyncLoading
-                                        ? const _Skeleton(width: 36, height: 32)
-                                        : Text(
-                                            '$complaintsCount',
-                                            style: GoogleFonts.antonSc(
-                                              fontSize: 32,
-                                              color: _black,
-                                              height: 1,
-                                            ),
-                                          ),
-                                    const SizedBox(width: 6),
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 3),
-                                      child: Text(
-                                        'open',
+                          child: GestureDetector(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              context.go('/complaints');
+                            },
+                            child: _OutlineCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Complaints',
                                         style: GoogleFonts.inter(
                                           fontSize: 12,
                                           color: _grey,
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                      const Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        size: 11,
+                                        color: _grey,
+                                      ),
+                                    ],
+                                  ),
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      complaintsAsync is AsyncLoading
+                                          ? const _Skeleton(
+                                              width: 36,
+                                              height: 32,
+                                            )
+                                          : Text(
+                                              '$complaintsCount',
+                                              style: GoogleFonts.antonSc(
+                                                fontSize: 32,
+                                                color: _black,
+                                                height: 1,
+                                              ),
+                                            ),
+                                      const SizedBox(width: 6),
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 3,
+                                        ),
+                                        child: Text(
+                                          'open',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color: _grey,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: _FilledCard(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Maintenance',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: Colors.white60,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    Icon(
-                                      Icons.arrow_forward_ios_rounded,
-                                      size: 11,
-                                      color: Colors.white.withOpacity(0.4),
-                                    ),
-                                  ],
-                                ),
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    maintenanceAsync is AsyncLoading
-                                        ? const _Skeleton(
-                                            width: 36,
-                                            height: 32,
-                                            dark: true,
-                                          )
-                                        : Text(
-                                            '$maintenanceCount',
-                                            style: GoogleFonts.antonSc(
-                                              fontSize: 32,
-                                              color: _white,
-                                              height: 1,
-                                            ),
-                                          ),
-                                    const SizedBox(width: 6),
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 3),
-                                      child: Text(
-                                        'pending',
+                          child: GestureDetector(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              context.go('/maintenance');
+                            },
+                            child: _FilledCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Maintenance',
                                         style: GoogleFonts.inter(
                                           fontSize: 12,
                                           color: Colors.white60,
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                      Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        size: 11,
+                                        color: Colors.white.withOpacity(0.4),
+                                      ),
+                                    ],
+                                  ),
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      maintenanceAsync is AsyncLoading
+                                          ? const _Skeleton(
+                                              width: 36,
+                                              height: 32,
+                                              dark: true,
+                                            )
+                                          : Text(
+                                              '$maintenanceCount',
+                                              style: GoogleFonts.antonSc(
+                                                fontSize: 32,
+                                                color: _white,
+                                                height: 1,
+                                              ),
+                                            ),
+                                      const SizedBox(width: 6),
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 3,
+                                        ),
+                                        child: Text(
+                                          'pending',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color: Colors.white60,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
