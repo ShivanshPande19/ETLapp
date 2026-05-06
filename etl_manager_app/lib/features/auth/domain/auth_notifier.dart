@@ -10,6 +10,8 @@ class AuthState {
   final String? managerEmail;
   final String? role;
   final String? zone;
+  final String? staffName;
+  final int courtId;
 
   const AuthState({
     this.status = AuthStatus.idle,
@@ -18,6 +20,8 @@ class AuthState {
     this.managerEmail,
     this.role,
     this.zone,
+    this.staffName,
+    this.courtId = 1,
   });
 
   bool get isManager => role == 'manager';
@@ -30,6 +34,8 @@ class AuthState {
     String? managerEmail,
     String? role,
     String? zone,
+    String? staffName,
+    int? courtId,
   }) {
     return AuthState(
       status: status ?? this.status,
@@ -38,6 +44,8 @@ class AuthState {
       managerEmail: managerEmail ?? this.managerEmail,
       role: role ?? this.role,
       zone: zone ?? this.zone,
+      staffName: staffName ?? this.staffName,
+      courtId: courtId ?? this.courtId,
     );
   }
 }
@@ -54,10 +62,12 @@ class AuthNotifier extends Notifier<AuthState> {
           .login(email, password);
       state = state.copyWith(
         status: AuthStatus.success,
-        managerName: data['manager_name'],
-        managerEmail: data['manager_email'],
-        role: data['role'],
-        zone: data['zone'],
+        managerName: data['manager_name'] as String?,
+        managerEmail: data['manager_email'] as String?,
+        role: data['role'] as String?,
+        zone: data['zone'] as String?,
+        staffName: data['manager_name'] as String?,
+        courtId: _parseCourtId(data['zone'] as String?),
       );
     } catch (e) {
       state = state.copyWith(
@@ -71,6 +81,12 @@ class AuthNotifier extends Notifier<AuthState> {
     await ref.read(authRepositoryProvider).logout();
     state = const AuthState();
   }
+}
+
+int _parseCourtId(String? zone) {
+  if (zone == null) return 1;
+  final match = RegExp(r'\d+').firstMatch(zone);
+  return int.tryParse(match?.group(0) ?? '1') ?? 1;
 }
 
 final authNotifierProvider = NotifierProvider<AuthNotifier, AuthState>(() {

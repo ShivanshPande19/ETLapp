@@ -10,7 +10,7 @@
 import qrcode
 from pathlib import Path
 
-BASE_URL = "http://172.20.10.3:8000"   # ← your Mac IP while developing
+BASE_URL = "http://172.20.10.4:8000"   # ← your Mac IP while developing
                                          # production: "https://your-app.railway.app"
 OUT_DIR  = Path("qr_codes")
 OUT_DIR.mkdir(exist_ok=True)

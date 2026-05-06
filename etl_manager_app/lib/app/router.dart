@@ -9,7 +9,7 @@ import '../features/music/presentation/music_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../features/complaints/presentation/complaints_screen.dart';
-import '../features/maintenance/presentation/maintenance_screen.dart'; // ← NEW
+import '../features/maintenance/presentation/maintenance_screen.dart';
 import '../features/courts/presentation/court_detail_screen.dart';
 import '../features/courts/data/courts_repository.dart';
 import '../features/staff/presentation/staff_shell_screen.dart';
@@ -18,6 +18,7 @@ import '../features/staff/presentation/staff_checklist_screen.dart';
 import '../features/staff/presentation/staff_report_screen.dart';
 import 'shell_screen.dart';
 
+// ─── Transition helper ────────────────────────────────────────────────────────
 CustomTransitionPage<T> _buildPage<T>({
   required BuildContext context,
   required GoRouterState state,
@@ -57,6 +58,7 @@ CustomTransitionPage<T> _buildPage<T>({
   );
 }
 
+// ─── Router ───────────────────────────────────────────────────────────────────
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);
 
@@ -72,6 +74,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
+      // ── Login ──────────────────────────────────────────────────────────
       GoRoute(
         path: '/login',
         pageBuilder: (context, state) => _buildPage(
@@ -82,7 +85,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
-      // ── Manager Shell ─────────────────────────────────────────────────────
+      // ── Manager Shell ──────────────────────────────────────────────────
       ShellRoute(
         builder: (context, state, child) => ShellScreen(child: child),
         routes: [
@@ -126,8 +129,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const ComplaintsScreen(),
             ),
           ),
-
-          // ── NEW: Maintenance ───────────────────────────────────────────────
           GoRoute(
             path: '/maintenance',
             pageBuilder: (context, state) => _buildPage(
@@ -136,7 +137,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const MaintenanceScreen(),
             ),
           ),
-
           GoRoute(
             path: '/court/:id',
             pageBuilder: (context, state) {
@@ -176,8 +176,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               );
             },
           ),
-
-          // ──────────────────────────────────────────────────────────────────
           GoRoute(
             path: '/settings',
             pageBuilder: (context, state) => _buildPage(
@@ -189,7 +187,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
-      // ── Staff Shell ───────────────────────────────────────────────────────
+      // ── Staff Shell ────────────────────────────────────────────────────
       ShellRoute(
         builder: (context, state, child) => StaffShellScreen(child: child),
         routes: [
@@ -198,7 +196,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildPage(
               context: context,
               state: state,
-              child: const StaffHomeScreen(),
+              child: StaffHomeScreen(
+                assignedCourt: authState.courtId,
+                staffName:
+                    authState.staffName ?? authState.managerName ?? 'Staff',
+              ),
             ),
           ),
           GoRoute(
