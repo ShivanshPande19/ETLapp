@@ -22,7 +22,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
   @override
   void initState() {
     super.initState();
-    // Build ke baad check karo — initState mein context.go() nahi chalega
     WidgetsBinding.instance.addPostFrameCallback((_) => _check());
   }
 
@@ -33,17 +32,28 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     });
 
     final prefs = await SharedPreferences.getInstance();
-    final biometricEnabled = prefs.getBool('biometric_lock') ?? false;
+    final authState = ref.read(authNotifierProvider);
+
+    // ✅ Debug prints
+    print('[BIOMETRIC] managerEmail: ${authState.managerEmail}');
+    print('[BIOMETRIC] role: ${authState.role}');
+
+    final key = 'biometric_lock_${authState.managerEmail ?? 'default'}';
+    final biometricEnabled = prefs.getBool(key) ?? false;
+
+    print('[BIOMETRIC] key: $key');
+    print('[BIOMETRIC] enabled: $biometricEnabled');
+
+    // Saari SharedPreferences keys print karo
+    print('[BIOMETRIC] ALL PREFS KEYS: ${prefs.getKeys()}');
 
     if (!biometricEnabled) {
-      // Biometric off hai — seedha destination pe bhejo
       _navigate();
       return;
     }
 
     final available = await BiometricService.isAvailable();
     if (!available) {
-      // Device mein biometric nahi — seedha bhejo
       _navigate();
       return;
     }
@@ -52,18 +62,19 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     if (passed) {
       _navigate();
     } else {
-      // Authentication fail — retry screen dikhao
-      if (mounted)
+      if (mounted) {
         setState(() {
           _checking = false;
           _failed = true;
         });
+      }
     }
   }
 
   void _navigate() {
     if (!mounted) return;
     final authState = ref.read(authNotifierProvider);
+    print('[BIOMETRIC] Navigating — isStaff: ${authState.isStaff}');
     if (authState.isStaff) {
       context.go('/staff/home');
     } else {
@@ -81,7 +92,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     );
   }
 
-  // ── Checking state — spinner ─────────────────────────────────────────────
   Widget _buildChecking() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -118,7 +128,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     );
   }
 
-  // ── Failed state — retry button ──────────────────────────────────────────
   Widget _buildFailed() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -152,7 +161,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
           style: GoogleFonts.inter(fontSize: 13, color: Colors.white38),
         ),
         const SizedBox(height: 32),
-        // Retry button
         GestureDetector(
           onTap: _check,
           child: Container(

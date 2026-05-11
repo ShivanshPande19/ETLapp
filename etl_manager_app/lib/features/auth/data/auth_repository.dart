@@ -19,7 +19,7 @@ class AuthRepository {
       data['manager_email'],
     );
     await TokenStorage.saveRole(data['role']);
-    await TokenStorage.saveZone(data['zone']);
+    await TokenStorage.saveZone(data['zone']?.toString());
     return data;
   }
 

@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/biometric_service.dart';
 import '../../auth/domain/auth_notifier.dart';
+import '../presentation/manage_courts_screen.dart';
 
 const _bg = Color(0xFF080808);
 const _white = Color(0xFFFFFFFF);
@@ -80,7 +81,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   // ── Load saved biometric preference + check device availability ──────────
   Future<void> _loadPrefs() async {
     _prefs = await SharedPreferences.getInstance();
-    final saved = _prefs!.getBool('biometric_lock') ?? false;
+    final email = ref.read(authNotifierProvider).managerEmail ?? 'default';
+    final key = 'biometric_lock_$email'; // ✅ per-user key
+    final saved = _prefs!.getBool(key) ?? false;
     final available = await BiometricService.isAvailable();
     if (mounted) {
       setState(() {
@@ -94,15 +97,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _onBiometricToggle(bool v) async {
     HapticFeedback.selectionClick();
     if (v) {
-      // Enable karne se pehle authenticate karo
       final passed = await BiometricService.authenticate();
       if (!passed) {
-        // Authentication fail — toggle on mat karo
         _showBiometricError();
         return;
       }
     }
-    await _prefs?.setBool('biometric_lock', v);
+    final email = ref.read(authNotifierProvider).managerEmail ?? 'default';
+    final key = 'biometric_lock_$email'; // ✅ per-user key
+    await _prefs?.setBool(key, v);
     if (mounted) setState(() => _biometricLock = v);
   }
 
@@ -356,7 +359,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                 icon: Icons.store_rounded,
                                 label: 'Manage Courts',
                                 subtitle: 'ETL · 3 courts active',
-                                onTap: () {},
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ManageCourtsScreen(),
+                                  ),
+                                ),
                               ),
                               _GroupDivider(),
                               _NavTile(

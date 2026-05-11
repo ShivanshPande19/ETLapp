@@ -60,14 +60,21 @@ class AuthNotifier extends Notifier<AuthState> {
       final data = await ref
           .read(authRepositoryProvider)
           .login(email, password);
+
+      // ✅ zone ab int hai directly — _parseCourtId ki zaroorat nahi
+      final zoneRaw = data['zone'];
+      final courtId = zoneRaw is int
+          ? zoneRaw
+          : int.tryParse(zoneRaw?.toString() ?? '') ?? 1;
+
       state = state.copyWith(
         status: AuthStatus.success,
         managerName: data['manager_name'] as String?,
         managerEmail: data['manager_email'] as String?,
         role: data['role'] as String?,
-        zone: data['zone'] as String?,
+        zone: zoneRaw?.toString(),
         staffName: data['manager_name'] as String?,
-        courtId: _parseCourtId(data['zone'] as String?),
+        courtId: courtId, // ✅ directly set
       );
     } catch (e) {
       state = state.copyWith(
@@ -81,12 +88,6 @@ class AuthNotifier extends Notifier<AuthState> {
     await ref.read(authRepositoryProvider).logout();
     state = const AuthState();
   }
-}
-
-int _parseCourtId(String? zone) {
-  if (zone == null) return 1;
-  final match = RegExp(r'\d+').firstMatch(zone);
-  return int.tryParse(match?.group(0) ?? '1') ?? 1;
 }
 
 final authNotifierProvider = NotifierProvider<AuthNotifier, AuthState>(() {

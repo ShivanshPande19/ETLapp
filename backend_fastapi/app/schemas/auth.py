@@ -11,4 +11,4 @@ class TokenResponse(BaseModel):
     manager_name: str
     manager_email: str
     role: str
-    zone: Optional[str] = None
+    zone: Optional[int] = None
