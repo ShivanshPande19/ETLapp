@@ -11,7 +11,7 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
 # ── EDIT THIS: your machine's IP on the local WiFi ───────────────────────────
-BASE_URL = "http://172.20.10.3:8000"      # same as your Flutter baseUrl
+BASE_URL = "http://172.20.10.4:8000"      # same as your Flutter baseUrl
 # ─────────────────────────────────────────────────────────────────────────────
 
 COURTS = {1: "ETL Food Court", 2: "ETL Court 2", 3: "ETL Court 3"}

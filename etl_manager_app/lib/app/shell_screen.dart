@@ -1,3 +1,5 @@
+// lib/app/shell_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -14,8 +16,7 @@ class ShellScreen extends StatelessWidget {
     if (loc.startsWith('/housekeeping')) return 3;
     if (loc.startsWith('/complaints')) return 4;
     if (loc.startsWith('/maintenance')) return 5;
-    if (loc.startsWith('/settings')) return 6;
-    return 0;
+    return 0; // /home
   }
 
   void _onTap(BuildContext context, int index) {
@@ -38,9 +39,6 @@ class ShellScreen extends StatelessWidget {
       case 5:
         context.go('/maintenance');
         break;
-      case 6:
-        context.go('/settings');
-        break;
     }
   }
 
@@ -53,6 +51,7 @@ class ShellScreen extends StatelessWidget {
       SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
     );
 
+    // Settings tab removed — ab 6 tabs hain
     const items = [
       NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
       NavItem(icon: Icons.bar_chart_rounded, label: 'Sales'),
@@ -60,7 +59,6 @@ class ShellScreen extends StatelessWidget {
       NavItem(icon: Icons.cleaning_services_rounded, label: 'Tasks'),
       NavItem(icon: Icons.feedback_rounded, label: 'Issues'),
       NavItem(icon: Icons.handyman_rounded, label: 'Repairs'),
-      NavItem(icon: Icons.settings_rounded, label: 'Settings'),
     ];
 
     return Scaffold(
@@ -117,7 +115,10 @@ class NavBar extends StatelessWidget {
         children: List.generate(items.length, (index) {
           final isSelected = selectedIndex == index;
           return GestureDetector(
-            onTap: () => onTap(index),
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onTap(index);
+            },
             behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),

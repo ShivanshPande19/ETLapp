@@ -17,7 +17,7 @@ const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
 const _lightGrey = Color(0xFFF2F2F2);
 const _border = Color(0xFF1A1A1A);
-const _red = Color(0xFFd02128); // EFC brand red
+const _red = Color(0xFFd02128);
 
 const _pillGreenFg = Color(0xFF15803D);
 const _pillGreenBg = Color(0xFFDCFCE7);
@@ -39,19 +39,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with TickerProviderStateMixin {
   String _managerName = 'Manager';
 
-  // Screen-level fade (same as SalesScreen _fadeCtrl)
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
 
-  // Hero title slide-up
   late final AnimationController _heroCtrl;
   late final Animation<double> _heroFade;
   late final Animation<Offset> _heroSlide;
 
-  // Staggered cards reveal
   late final AnimationController _cardsCtrl;
 
-  // Scroll controller — for pull-to-refresh snap-back fix
   final ScrollController _scrollCtrl = ScrollController();
 
   @override
@@ -103,7 +99,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _refreshAll() async {
-    // Snap back to top before refreshing
     if (_scrollCtrl.hasClients) {
       _scrollCtrl.animateTo(
         0,
@@ -126,7 +121,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return v.toStringAsFixed(0);
   }
 
-  // Staggered entry per card row — same 60ms * index pattern as _VendorRow in SalesScreen
   Animation<double> _stagger(int index) {
     final start = (index * 0.1).clamp(0.0, 0.7);
     final end = (start + 0.4).clamp(0.0, 1.0);
@@ -171,7 +165,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           opacity: _fadeAnim,
           child: NotificationListener<ScrollNotification>(
             onNotification: (notification) {
-              // Release ke baad agar overscrolled hai toh snap back to top
               if (notification is ScrollEndNotification &&
                   _scrollCtrl.hasClients &&
                   _scrollCtrl.offset < 0) {
@@ -197,10 +190,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── Top Row (profile → settings) ─────────────────────
                     _TopRow(managerName: _managerName),
                     const SizedBox(height: 8),
 
-                    // ── ETL FOOD COURT — hero slide-up, E/F/C in red ──────
+                    // ── ETL FOOD COURT hero ───────────────────────────────
                     FadeTransition(
                       opacity: _heroFade,
                       child: SlideTransition(
@@ -260,7 +254,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                     const SizedBox(height: 20),
 
-                    // ── Revenue + Courts — stagger 0 ─────────────────────
+                    // ── Revenue + Courts — stagger 0 ──────────────────────
                     _StaggerRow(
                       anim: _stagger(0),
                       child: SizedBox(
@@ -373,7 +367,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                     const SizedBox(height: 10),
 
-                    // ── Sparkline — stagger 1 ────────────────────────────
+                    // ── Sparkline — stagger 1 ─────────────────────────────
                     _StaggerRow(
                       anim: _stagger(1),
                       child: _OutlineCard(
@@ -441,7 +435,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                     const SizedBox(height: 10),
 
-                    // ── Complaints + Maintenance — stagger 2 ─────────────
+                    // ── Complaints + Maintenance — stagger 2 ──────────────
                     _StaggerRow(
                       anim: _stagger(2),
                       child: SizedBox(
@@ -805,7 +799,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 }
 
-// ─── _StaggerRow ─────────────────────────────────────────────────────────────
+// ─── StaggerRow ───────────────────────────────────────────────────────────────
 
 class _StaggerRow extends StatelessWidget {
   final Animation<double> anim;
@@ -955,29 +949,55 @@ class _ShiftPill extends StatelessWidget {
   }
 }
 
-// ─── Top Row ──────────────────────────────────────────────────────────────────
+// ─── Top Row ← UPDATED: profile button → context.push('/settings') ───────────
 
-class _TopRow extends StatelessWidget {
+class _TopRow extends StatefulWidget {
   final String managerName;
   const _TopRow({required this.managerName});
+
+  @override
+  State<_TopRow> createState() => _TopRowState();
+}
+
+class _TopRowState extends State<_TopRow> {
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) => Row(
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
       Text(
-        'Hi, $managerName',
+        'Hi, ${widget.managerName}',
         style: GoogleFonts.inter(
           fontSize: 15,
           color: _grey,
           fontWeight: FontWeight.w500,
         ),
       ),
-      Container(
-        width: 38,
-        height: 38,
-        decoration: const BoxDecoration(color: _black, shape: BoxShape.circle),
-        child: const Icon(Icons.person_rounded, color: _white, size: 20),
+      GestureDetector(
+        onTapDown: (_) {
+          HapticFeedback.selectionClick();
+          setState(() => _pressed = true);
+        },
+        onTapUp: (_) {
+          setState(() => _pressed = false);
+          context.push('/settings'); // ✅ push — back button kaam karega
+        },
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.88 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOutCubic,
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: const BoxDecoration(
+              color: _black,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.person_rounded, color: _white, size: 20),
+          ),
+        ),
       ),
     ],
   );
@@ -1060,7 +1080,7 @@ class _FilledCard extends StatelessWidget {
   );
 }
 
-// ─── Court Row — press-scale + staggered entry ────────────────────────────────
+// ─── Court Row ────────────────────────────────────────────────────────────────
 
 class _CourtRow extends StatefulWidget {
   final dynamic court;

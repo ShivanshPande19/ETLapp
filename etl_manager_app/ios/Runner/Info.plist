@@ -32,6 +32,11 @@
     <string>Required to upload proof photos</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Required to save proof photos</string>
+
+    <!-- ✅ Face ID permission — local_auth ke liye zaroori -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>ETL Manager uses Face ID to keep your data secure</string>
+
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
