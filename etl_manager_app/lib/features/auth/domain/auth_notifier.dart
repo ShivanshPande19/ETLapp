@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/auth_repository.dart';
 
@@ -61,7 +62,6 @@ class AuthNotifier extends Notifier<AuthState> {
           .read(authRepositoryProvider)
           .login(email, password);
 
-      // ✅ zone ab int hai directly — _parseCourtId ki zaroorat nahi
       final zoneRaw = data['zone'];
       final courtId = zoneRaw is int
           ? zoneRaw
@@ -74,12 +74,32 @@ class AuthNotifier extends Notifier<AuthState> {
         role: data['role'] as String?,
         zone: zoneRaw?.toString(),
         staffName: data['manager_name'] as String?,
-        courtId: courtId, // ✅ directly set
+        courtId: courtId,
       );
-    } catch (e) {
+    } on DioException catch (e) {
+      // Network / HTTP errors
+      String message;
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        message = 'Connection timeout — check internet';
+      } else if (e.type == DioExceptionType.connectionError) {
+        message = 'Cannot connect to server: ${e.message}';
+      } else if (e.response?.statusCode == 401) {
+        message = 'Invalid email or password';
+      } else {
+        message = 'Error ${e.response?.statusCode}: ${e.response?.data ?? e.message}';
+      }
+      print('[AUTH ERROR] DioException: $message | type: ${e.type} | msg: ${e.message}');
       state = state.copyWith(
         status: AuthStatus.error,
-        errorMessage: 'Invalid email or password',
+        errorMessage: message,
+      );
+    } catch (e) {
+      print('[AUTH ERROR] Unknown: $e');
+      state = state.copyWith(
+        status: AuthStatus.error,
+        errorMessage: 'Unexpected error: $e',
       );
     }
   }
