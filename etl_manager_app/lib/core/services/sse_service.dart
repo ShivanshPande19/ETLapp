@@ -1,3 +1,4 @@
+// lib/core/services/sse_service.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../network/api_client.dart';
 import '../utils/token_storage.dart';
 import '../../features/staff/domain/housekeeping_notifier.dart';
+import '../../features/housekeeping/presentation/manager_housekeeping_screen.dart'; // ✅
 
 class SSEService {
   final Ref _ref;
@@ -25,8 +27,6 @@ class SSEService {
 
     if (token == null) return;
 
-    // Manager = court_id 0 (sabke events milte hain)
-    // Staff   = apna court_id (sirf apne court ke events)
     final courtId = isStaff ? (_parseZone(zone) ?? 0) : 0;
 
     try {
@@ -76,7 +76,12 @@ class SSEService {
   void _handleEvent(Map<String, dynamic> data) {
     final type = data['type'];
     if (type == 'housekeeping_update') {
+      // ✅ Staff side
       _ref.invalidate(housekeepingNotifierProvider);
+
+      // ✅ Manager side — aaj ki date ke saath invalidate
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      _ref.invalidate(managerHkProvider(today));
     }
   }
 

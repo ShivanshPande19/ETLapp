@@ -16,7 +16,7 @@ class ShellScreen extends StatelessWidget {
     if (loc.startsWith('/housekeeping')) return 3;
     if (loc.startsWith('/complaints')) return 4;
     if (loc.startsWith('/maintenance')) return 5;
-    return 0; // /home
+    return 0;
   }
 
   void _onTap(BuildContext context, int index) {
@@ -51,7 +51,6 @@ class ShellScreen extends StatelessWidget {
       SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
     );
 
-    // Settings tab removed — ab 6 tabs hain
     const items = [
       NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
       NavItem(icon: Icons.bar_chart_rounded, label: 'Sales'),

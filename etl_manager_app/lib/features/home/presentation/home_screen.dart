@@ -54,7 +54,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
+      SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
     );
 
     _fadeCtrl = AnimationController(
@@ -159,42 +159,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
 
     return Scaffold(
-      backgroundColor: _white,
+      backgroundColor: _black,
       body: SafeArea(
+        bottom: false,
         child: FadeTransition(
           opacity: _fadeAnim,
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (notification) {
-              if (notification is ScrollEndNotification &&
-                  _scrollCtrl.hasClients &&
-                  _scrollCtrl.offset < 0) {
-                _scrollCtrl.animateTo(
-                  0,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOutCubic,
-                );
-              }
-              return false;
-            },
-            child: RefreshIndicator(
-              color: _black,
-              strokeWidth: 2,
-              backgroundColor: _white,
-              onRefresh: _refreshAll,
-              child: SingleChildScrollView(
-                controller: _scrollCtrl,
-                physics: const BouncingScrollPhysics(
-                  parent: AlwaysScrollableScrollPhysics(),
-                ),
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
+          child: Column(
+            children: [
+              // ══════════════════════════════════════════════
+              // BLACK HEADER
+              // ══════════════════════════════════════════════
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Top Row (profile → settings) ─────────────────────
+                    // ✅ Top row with red profile button
                     _TopRow(managerName: _managerName),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
 
-                    // ── ETL FOOD COURT hero ───────────────────────────────
+                    // ETL FOOD COURT hero text
                     FadeTransition(
                       opacity: _heroFade,
                       child: SlideTransition(
@@ -216,7 +200,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                                   TextSpan(
                                     text: 'TL ',
-                                    style: TextStyle(color: _black),
+                                    style: TextStyle(color: _white),
                                   ),
                                   TextSpan(
                                     text: 'F',
@@ -224,7 +208,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                                   TextSpan(
                                     text: 'OOD',
-                                    style: TextStyle(color: _black),
+                                    style: TextStyle(color: _white),
                                   ),
                                 ],
                               ),
@@ -243,7 +227,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                                   TextSpan(
                                     text: 'OURT',
-                                    style: TextStyle(color: _black),
+                                    style: TextStyle(color: _white),
                                   ),
                                 ],
                               ),
@@ -252,341 +236,108 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
 
-                    // ── Revenue + Courts — stagger 0 ──────────────────────
-                    _StaggerRow(
-                      anim: _stagger(0),
-                      child: SizedBox(
-                        height: 120,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 55,
-                              child: _OutlineCard(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Revenue',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: _grey,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    isLoadingSales
-                                        ? const _Skeleton(
-                                            width: 100,
-                                            height: 32,
-                                          )
-                                        : TweenAnimationBuilder<double>(
-                                            tween: Tween<double>(
-                                              begin: 0,
-                                              end: totalSales,
-                                            ),
-                                            duration: const Duration(
-                                              milliseconds: 700,
-                                            ),
-                                            curve: Curves.easeOutCubic,
-                                            builder: (_, val, __) => Text(
-                                              '₹${_fmt(val)}',
-                                              style: GoogleFonts.antonSc(
-                                                fontSize: 30,
-                                                color: _black,
-                                                height: 1,
-                                              ),
-                                            ),
-                                          ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              flex: 45,
-                              child: _FilledCard(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Courts',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: Colors.white60,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    isLoadingCourts
-                                        ? const _Skeleton(
-                                            width: 70,
-                                            height: 28,
-                                            dark: true,
-                                          )
-                                        : AnimatedSwitcher(
-                                            duration: const Duration(
-                                              milliseconds: 350,
-                                            ),
-                                            switchInCurve: Curves.easeOutCubic,
-                                            switchOutCurve: Curves.easeInCubic,
-                                            transitionBuilder: (child, anim) =>
-                                                FadeTransition(
-                                                  opacity: anim,
-                                                  child: SlideTransition(
-                                                    position: Tween<Offset>(
-                                                      begin: const Offset(
-                                                        0,
-                                                        0.3,
-                                                      ),
-                                                      end: Offset.zero,
-                                                    ).animate(anim),
-                                                    child: child,
-                                                  ),
-                                                ),
-                                            child: Text(
-                                              '$totalCourts Active',
-                                              key: ValueKey(totalCourts),
-                                              style: GoogleFonts.antonSc(
-                                                fontSize: 24,
-                                                color: _white,
-                                                height: 1,
-                                              ),
-                                            ),
-                                          ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+              // ══════════════════════════════════════════════
+              // WHITE CONTENT — rounded top corners
+              // ══════════════════════════════════════════════
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: _white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(28),
                     ),
-                    const SizedBox(height: 10),
-
-                    // ── Sparkline — stagger 1 ─────────────────────────────
-                    _StaggerRow(
-                      anim: _stagger(1),
-                      child: _OutlineCard(
-                        height: 86,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 4,
-                              child: SizedBox(
-                                height: 46,
-                                child: CustomPaint(
-                                  painter: _SparklinePainter(color: _black),
-                                ),
-                              ),
-                            ),
-                            Container(
-                              width: 1,
-                              height: 46,
-                              color: _border.withOpacity(0.12),
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                            ),
-                            Expanded(
-                              flex: 5,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisAlignment: MainAxisAlignment.center,
+                  ),
+                  child: RefreshIndicator(
+                    color: _black,
+                    strokeWidth: 2,
+                    backgroundColor: _white,
+                    onRefresh: _refreshAll,
+                    child: SingleChildScrollView(
+                      controller: _scrollCtrl,
+                      physics: const BouncingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ── Revenue + Courts — stagger 0 ──────────────
+                          _StaggerRow(
+                            anim: _stagger(0),
+                            child: SizedBox(
+                              height: 120,
+                              child: Row(
                                 children: [
-                                  Text(
-                                    'Total Sales',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      color: _grey,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  isLoadingSales
-                                      ? const _Skeleton(width: 80, height: 24)
-                                      : TweenAnimationBuilder<double>(
-                                          tween: Tween<double>(
-                                            begin: 0,
-                                            end: totalSales,
-                                          ),
-                                          duration: const Duration(
-                                            milliseconds: 700,
-                                          ),
-                                          curve: Curves.easeOutCubic,
-                                          builder: (_, val, __) => Text(
-                                            '₹${_fmt(val)}',
-                                            style: GoogleFonts.antonSc(
-                                              fontSize: 26,
-                                              color: _black,
-                                              height: 1,
-                                            ),
-                                          ),
-                                        ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // ── Complaints + Maintenance — stagger 2 ──────────────
-                    _StaggerRow(
-                      anim: _stagger(2),
-                      child: SizedBox(
-                        height: 100,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  context.go('/complaints');
-                                },
-                                child: _OutlineCard(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Row(
+                                  Expanded(
+                                    flex: 55,
+                                    child: _OutlineCard(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text(
-                                            'Complaints',
+                                            'Revenue',
                                             style: GoogleFonts.inter(
                                               fontSize: 12,
                                               color: _grey,
                                               fontWeight: FontWeight.w500,
                                             ),
                                           ),
-                                          const Icon(
-                                            Icons.arrow_forward_ios_rounded,
-                                            size: 11,
-                                            color: _grey,
-                                          ),
-                                        ],
-                                      ),
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          complaintsAsync is AsyncLoading
+                                          isLoadingSales
                                               ? const _Skeleton(
-                                                  width: 36,
+                                                  width: 100,
                                                   height: 32,
                                                 )
-                                              : AnimatedSwitcher(
-                                                  duration: const Duration(
-                                                    milliseconds: 350,
+                                              : TweenAnimationBuilder<double>(
+                                                  tween: Tween<double>(
+                                                    begin: 0,
+                                                    end: totalSales,
                                                   ),
-                                                  switchInCurve:
-                                                      Curves.easeOutCubic,
-                                                  switchOutCurve:
-                                                      Curves.easeInCubic,
-                                                  transitionBuilder:
-                                                      (
-                                                        child,
-                                                        anim,
-                                                      ) => FadeTransition(
-                                                        opacity: anim,
-                                                        child: SlideTransition(
-                                                          position:
-                                                              Tween<Offset>(
-                                                                begin:
-                                                                    const Offset(
-                                                                      0,
-                                                                      0.3,
-                                                                    ),
-                                                                end:
-                                                                    Offset.zero,
-                                                              ).animate(anim),
-                                                          child: child,
-                                                        ),
-                                                      ),
-                                                  child: Text(
-                                                    '$complaintsCount',
-                                                    key: ValueKey(
-                                                      complaintsCount,
-                                                    ),
+                                                  duration: const Duration(
+                                                    milliseconds: 700,
+                                                  ),
+                                                  curve: Curves.easeOutCubic,
+                                                  builder: (_, val, __) => Text(
+                                                    '₹${_fmt(val)}',
                                                     style: GoogleFonts.antonSc(
-                                                      fontSize: 32,
+                                                      fontSize: 30,
                                                       color: _black,
                                                       height: 1,
                                                     ),
                                                   ),
                                                 ),
-                                          const SizedBox(width: 6),
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 3,
-                                            ),
-                                            child: Text(
-                                              'open',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 12,
-                                                color: _grey,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ),
                                         ],
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  context.go('/maintenance');
-                                },
-                                child: _FilledCard(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Row(
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    flex: 45,
+                                    child: _FilledCard(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text(
-                                            'Maintenance',
+                                            'Courts',
                                             style: GoogleFonts.inter(
                                               fontSize: 12,
                                               color: Colors.white60,
                                               fontWeight: FontWeight.w500,
                                             ),
                                           ),
-                                          Icon(
-                                            Icons.arrow_forward_ios_rounded,
-                                            size: 11,
-                                            color: Colors.white.withOpacity(
-                                              0.4,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          maintenanceAsync is AsyncLoading
+                                          isLoadingCourts
                                               ? const _Skeleton(
-                                                  width: 36,
-                                                  height: 32,
+                                                  width: 70,
+                                                  height: 28,
                                                   dark: true,
                                                 )
                                               : AnimatedSwitcher(
@@ -618,185 +369,552 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                         ),
                                                       ),
                                                   child: Text(
-                                                    '$maintenanceCount',
-                                                    key: ValueKey(
-                                                      maintenanceCount,
-                                                    ),
+                                                    '$totalCourts Active',
+                                                    key: ValueKey(totalCourts),
                                                     style: GoogleFonts.antonSc(
-                                                      fontSize: 32,
+                                                      fontSize: 24,
                                                       color: _white,
                                                       height: 1,
                                                     ),
                                                   ),
                                                 ),
-                                          const SizedBox(width: 6),
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 3,
-                                            ),
-                                            child: Text(
-                                              'pending',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 12,
-                                                color: Colors.white60,
-                                                fontWeight: FontWeight.w500,
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // ── Sparkline — stagger 1 ─────────────────────
+                          _StaggerRow(
+                            anim: _stagger(1),
+                            child: _OutlineCard(
+                              height: 86,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    flex: 4,
+                                    child: SizedBox(
+                                      height: 46,
+                                      child: CustomPaint(
+                                        painter: _SparklinePainter(
+                                          color: _black,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    height: 46,
+                                    color: _border.withOpacity(0.12),
+                                    margin: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 5,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          'Total Sales',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11,
+                                            color: _grey,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        isLoadingSales
+                                            ? const _Skeleton(
+                                                width: 80,
+                                                height: 24,
+                                              )
+                                            : TweenAnimationBuilder<double>(
+                                                tween: Tween<double>(
+                                                  begin: 0,
+                                                  end: totalSales,
+                                                ),
+                                                duration: const Duration(
+                                                  milliseconds: 700,
+                                                ),
+                                                curve: Curves.easeOutCubic,
+                                                builder: (_, val, __) => Text(
+                                                  '₹${_fmt(val)}',
+                                                  style: GoogleFonts.antonSc(
+                                                    fontSize: 26,
+                                                    color: _black,
+                                                    height: 1,
+                                                  ),
+                                                ),
                                               ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // ── Complaints + Maintenance — stagger 2 ──────
+                          _StaggerRow(
+                            anim: _stagger(2),
+                            child: SizedBox(
+                              height: 100,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        HapticFeedback.selectionClick();
+                                        context.go('/complaints');
+                                      },
+                                      child: _OutlineCard(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(
+                                                  'Complaints',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 12,
+                                                    color: _grey,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                                const Icon(
+                                                  Icons
+                                                      .arrow_forward_ios_rounded,
+                                                  size: 11,
+                                                  color: _grey,
+                                                ),
+                                              ],
                                             ),
+                                            Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.end,
+                                              children: [
+                                                complaintsAsync is AsyncLoading
+                                                    ? const _Skeleton(
+                                                        width: 36,
+                                                        height: 32,
+                                                      )
+                                                    : AnimatedSwitcher(
+                                                        duration:
+                                                            const Duration(
+                                                              milliseconds: 350,
+                                                            ),
+                                                        switchInCurve:
+                                                            Curves.easeOutCubic,
+                                                        switchOutCurve:
+                                                            Curves.easeInCubic,
+                                                        transitionBuilder:
+                                                            (
+                                                              child,
+                                                              anim,
+                                                            ) => FadeTransition(
+                                                              opacity: anim,
+                                                              child: SlideTransition(
+                                                                position: Tween<Offset>(
+                                                                  begin:
+                                                                      const Offset(
+                                                                        0,
+                                                                        0.3,
+                                                                      ),
+                                                                  end: Offset
+                                                                      .zero,
+                                                                ).animate(anim),
+                                                                child: child,
+                                                              ),
+                                                            ),
+                                                        child: Text(
+                                                          '$complaintsCount',
+                                                          key: ValueKey(
+                                                            complaintsCount,
+                                                          ),
+                                                          style:
+                                                              GoogleFonts.antonSc(
+                                                                fontSize: 32,
+                                                                color: _black,
+                                                                height: 1,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                const SizedBox(width: 6),
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 3,
+                                                      ),
+                                                  child: Text(
+                                                    'open',
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 12,
+                                                      color: _grey,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        HapticFeedback.selectionClick();
+                                        context.go('/maintenance');
+                                      },
+                                      child: _FilledCard(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(
+                                                  'Maintenance',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 12,
+                                                    color: Colors.white60,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                                Icon(
+                                                  Icons
+                                                      .arrow_forward_ios_rounded,
+                                                  size: 11,
+                                                  color: Colors.white
+                                                      .withOpacity(0.4),
+                                                ),
+                                              ],
+                                            ),
+                                            Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.end,
+                                              children: [
+                                                maintenanceAsync is AsyncLoading
+                                                    ? const _Skeleton(
+                                                        width: 36,
+                                                        height: 32,
+                                                        dark: true,
+                                                      )
+                                                    : AnimatedSwitcher(
+                                                        duration:
+                                                            const Duration(
+                                                              milliseconds: 350,
+                                                            ),
+                                                        switchInCurve:
+                                                            Curves.easeOutCubic,
+                                                        switchOutCurve:
+                                                            Curves.easeInCubic,
+                                                        transitionBuilder:
+                                                            (
+                                                              child,
+                                                              anim,
+                                                            ) => FadeTransition(
+                                                              opacity: anim,
+                                                              child: SlideTransition(
+                                                                position: Tween<Offset>(
+                                                                  begin:
+                                                                      const Offset(
+                                                                        0,
+                                                                        0.3,
+                                                                      ),
+                                                                  end: Offset
+                                                                      .zero,
+                                                                ).animate(anim),
+                                                                child: child,
+                                                              ),
+                                                            ),
+                                                        child: Text(
+                                                          '$maintenanceCount',
+                                                          key: ValueKey(
+                                                            maintenanceCount,
+                                                          ),
+                                                          style:
+                                                              GoogleFonts.antonSc(
+                                                                fontSize: 32,
+                                                                color: _white,
+                                                                height: 1,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                const SizedBox(width: 6),
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 3,
+                                                      ),
+                                                  child: Text(
+                                                    'pending',
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 12,
+                                                      color: Colors.white60,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // ── Housekeeping — stagger 3 ──────────────────
+                          _StaggerRow(
+                            anim: _stagger(3),
+                            child: _OutlineCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Housekeeping',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          color: _grey,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      Row(
+                                        children: [
+                                          _LegendDot(
+                                            fg: _pillGreenFg,
+                                            label: 'Done',
+                                          ),
+                                          const SizedBox(width: 8),
+                                          _LegendDot(
+                                            fg: _pillYellowFg,
+                                            label: 'In progress',
                                           ),
                                         ],
                                       ),
                                     ],
                                   ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // ── Housekeeping — stagger 3 ──────────────────────────
-                    _StaggerRow(
-                      anim: _stagger(3),
-                      child: _OutlineCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Housekeeping',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 12,
-                                    color: _grey,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                Row(
-                                  children: [
-                                    _LegendDot(fg: _pillGreenFg, label: 'Done'),
-                                    const SizedBox(width: 8),
-                                    _LegendDot(
-                                      fg: _pillYellowFg,
-                                      label: 'In progress',
+                                  if (hkLoading) ...[
+                                    const SizedBox(height: 14),
+                                    ...List.generate(
+                                      3,
+                                      (_) => const Padding(
+                                        padding: EdgeInsets.only(bottom: 10),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: _Skeleton(
+                                                width: double.infinity,
+                                                height: 14,
+                                              ),
+                                            ),
+                                            SizedBox(width: 10),
+                                            _Skeleton(width: 52, height: 26),
+                                            SizedBox(width: 5),
+                                            _Skeleton(width: 52, height: 26),
+                                            SizedBox(width: 5),
+                                            _Skeleton(width: 52, height: 26),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ] else if (hkRows.isEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    Text(
+                                      'No submissions today',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: _grey,
+                                      ),
+                                    ),
+                                  ] else ...[
+                                    const SizedBox(height: 12),
+                                    ...hkRows.map(
+                                      (row) => _CourtHkRow(row: row),
                                     ),
                                   ],
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // ── Courts — stagger 4 ────────────────────────
+                          _StaggerRow(
+                            anim: _stagger(4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _SectionHeader(
+                                  title: 'Courts',
+                                  onViewAll: () {},
+                                ),
+                                const SizedBox(height: 12),
+                                courtsAsync.when(
+                                  loading: () => Column(
+                                    children: List.generate(
+                                      3,
+                                      (_) => const Padding(
+                                        padding: EdgeInsets.only(bottom: 10),
+                                        child: _Skeleton(
+                                          width: double.infinity,
+                                          height: 72,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  error: (_, __) => const _ErrorRow(
+                                    message: 'Could not load courts',
+                                  ),
+                                  data: (courts) => Column(
+                                    children: courts
+                                        .asMap()
+                                        .entries
+                                        .map(
+                                          (e) => Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 10,
+                                            ),
+                                            child: _CourtRow(
+                                              court: e.value,
+                                              index: e.key,
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
                                 ),
                               ],
                             ),
-                            if (hkLoading) ...[
-                              const SizedBox(height: 14),
-                              ...List.generate(
-                                3,
-                                (_) => const Padding(
-                                  padding: EdgeInsets.only(bottom: 10),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: _Skeleton(
-                                          width: double.infinity,
-                                          height: 14,
-                                        ),
-                                      ),
-                                      SizedBox(width: 10),
-                                      _Skeleton(width: 52, height: 26),
-                                      SizedBox(width: 5),
-                                      _Skeleton(width: 52, height: 26),
-                                      SizedBox(width: 5),
-                                      _Skeleton(width: 52, height: 26),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ] else if (hkRows.isEmpty) ...[
-                              const SizedBox(height: 14),
-                              Text(
-                                'No submissions today',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  color: _grey,
-                                ),
-                              ),
-                            ] else ...[
-                              const SizedBox(height: 12),
-                              ...hkRows.map((row) => _CourtHkRow(row: row)),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
+                          ),
+                          const SizedBox(height: 24),
 
-                    // ── Courts — stagger 4 ────────────────────────────────
-                    _StaggerRow(
-                      anim: _stagger(4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _SectionHeader(title: 'Courts', onViewAll: () {}),
-                          const SizedBox(height: 12),
-                          courtsAsync.when(
-                            loading: () => Column(
-                              children: List.generate(
-                                3,
-                                (_) => const Padding(
-                                  padding: EdgeInsets.only(bottom: 10),
-                                  child: _Skeleton(
-                                    width: double.infinity,
-                                    height: 72,
-                                  ),
+                          // ── Now Playing — stagger 5 ───────────────────
+                          _StaggerRow(
+                            anim: _stagger(5),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _SectionHeader(
+                                  title: 'Now Playing',
+                                  onViewAll: null,
                                 ),
-                              ),
-                            ),
-                            error: (_, __) => const _ErrorRow(
-                              message: 'Could not load courts',
-                            ),
-                            data: (courts) => Column(
-                              children: courts
-                                  .asMap()
-                                  .entries
-                                  .map(
-                                    (e) => Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: 10,
-                                      ),
-                                      child: _CourtRow(
-                                        court: e.value,
-                                        index: e.key,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
+                                const SizedBox(height: 12),
+                                const _NowPlayingCard(),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-                    // ── Now Playing — stagger 5 ───────────────────────────
-                    _StaggerRow(
-                      anim: _stagger(5),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _SectionHeader(title: 'Now Playing', onViewAll: null),
-                          const SizedBox(height: 12),
-                          const _NowPlayingCard(),
-                        ],
-                      ),
-                    ),
-                  ],
+// ─── Top Row ──────────────────────────────────────────────────────────────────
+
+class _TopRow extends StatefulWidget {
+  final String managerName;
+  const _TopRow({required this.managerName});
+
+  @override
+  State<_TopRow> createState() => _TopRowState();
+}
+
+class _TopRowState extends State<_TopRow> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Text(
+        'Hi, ${widget.managerName}',
+        style: GoogleFonts.inter(
+          fontSize: 13,
+          color: _white.withOpacity(0.55),
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      GestureDetector(
+        onTapDown: (_) {
+          HapticFeedback.selectionClick();
+          setState(() => _pressed = true);
+        },
+        onTapUp: (_) {
+          setState(() => _pressed = false);
+          context.push('/settings');
+        },
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.88 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOutCubic,
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: _red.withOpacity(0.15),
+              shape: BoxShape.circle,
+              border: Border.all(color: _red.withOpacity(0.35), width: 1.5),
+            ),
+            child: Center(
+              child: Text(
+                widget.managerName.isNotEmpty
+                    ? widget.managerName[0].toUpperCase()
+                    : 'M',
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  color: _red,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
           ),
         ),
       ),
-    );
-  }
+    ],
+  );
 }
 
 // ─── StaggerRow ───────────────────────────────────────────────────────────────
@@ -947,60 +1065,6 @@ class _ShiftPill extends StatelessWidget {
       ),
     );
   }
-}
-
-// ─── Top Row ← UPDATED: profile button → context.push('/settings') ───────────
-
-class _TopRow extends StatefulWidget {
-  final String managerName;
-  const _TopRow({required this.managerName});
-
-  @override
-  State<_TopRow> createState() => _TopRowState();
-}
-
-class _TopRowState extends State<_TopRow> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-    children: [
-      Text(
-        'Hi, ${widget.managerName}',
-        style: GoogleFonts.inter(
-          fontSize: 15,
-          color: _grey,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-      GestureDetector(
-        onTapDown: (_) {
-          HapticFeedback.selectionClick();
-          setState(() => _pressed = true);
-        },
-        onTapUp: (_) {
-          setState(() => _pressed = false);
-          context.push('/settings'); // ✅ push — back button kaam karega
-        },
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedScale(
-          scale: _pressed ? 0.88 : 1.0,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOutCubic,
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: const BoxDecoration(
-              color: _black,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.person_rounded, color: _white, size: 20),
-          ),
-        ),
-      ),
-    ],
-  );
 }
 
 // ─── Section Header ───────────────────────────────────────────────────────────
@@ -1261,11 +1325,7 @@ class _NowPlayingCard extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 'Now Playing',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: Colors.white54,
-                  fontWeight: FontWeight.w400,
-                ),
+                style: GoogleFonts.inter(fontSize: 12, color: Colors.white54),
               ),
             ],
           ),
