@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../features/auth/domain/auth_notifier.dart';
 import '../core/services/biometric_service.dart';
+import '../core/services/sse_service.dart'; // ✅ SSE import
 
 class BiometricGate extends ConsumerStatefulWidget {
   const BiometricGate({super.key});
@@ -34,7 +35,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     final prefs = await SharedPreferences.getInstance();
     final authState = ref.read(authNotifierProvider);
 
-    // ✅ Debug prints
     print('[BIOMETRIC] managerEmail: ${authState.managerEmail}');
     print('[BIOMETRIC] role: ${authState.role}');
 
@@ -43,8 +43,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
 
     print('[BIOMETRIC] key: $key');
     print('[BIOMETRIC] enabled: $biometricEnabled');
-
-    // Saari SharedPreferences keys print karo
     print('[BIOMETRIC] ALL PREFS KEYS: ${prefs.getKeys()}');
 
     if (!biometricEnabled) {
@@ -74,6 +72,10 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
   void _navigate() {
     if (!mounted) return;
     final authState = ref.read(authNotifierProvider);
+
+    // ✅ SSE connect — login ke baad ek baar
+    ref.read(sseServiceProvider).connect();
+
     print('[BIOMETRIC] Navigating — isStaff: ${authState.isStaff}');
     if (authState.isStaff) {
       context.go('/staff/home');

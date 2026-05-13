@@ -36,5 +36,11 @@ class TokenStorage {
 
   static Future<String?> getZone() async => await _storage.read(key: _zoneKey);
 
+  // ✅ New
+  static Future<bool> isStaff() async {
+    final role = await _storage.read(key: _roleKey);
+    return role?.toLowerCase() == 'staff';
+  }
+
   static Future<void> clearAll() async => await _storage.deleteAll();
 }

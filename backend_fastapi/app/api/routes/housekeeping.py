@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.housekeeping import HkTask, HkRecurring
+from .events import notify_clients
 
 try:
     from ...core.security import get_current_user
@@ -38,9 +40,11 @@ _DAILY_TASK_IDS = [
     "binempty",
     "pestspray",
 ]
-TASKS_PER_SHIFT = len(_DAILY_TASK_IDS)  # = 6
+TASKS_PER_SHIFT = len(_DAILY_TASK_IDS)
+
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
+
 
 class TaskSubmitItem(BaseModel):
     task_id:    str
@@ -64,7 +68,25 @@ class RecurringTaskRequest(BaseModel):
     done_by:   Optional[int] = None
 
 
+# ─── SSE helper ───────────────────────────────────────────────────────────────
+
+# Main event loop — main.py ke lifespan mein set hoga
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _fire_notify(event: dict) -> None:
+    """AnyIO worker thread se main event loop pe safely notify karo."""
+    global _main_loop
+    try:
+        if _main_loop is None or not _main_loop.is_running():
+            return
+        asyncio.run_coroutine_threadsafe(notify_clients(event), _main_loop)
+    except Exception as e:
+        print(f"[SSE] notify failed: {e}")
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
     rows = (
@@ -89,9 +111,8 @@ def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
         for r in rows
     ]
 
-    done  = sum(1 for t in tasks if t["is_done"])
-    total = TASKS_PER_SHIFT  # always 6
-
+    done      = sum(1 for t in tasks if t["is_done"])
+    total     = TASKS_PER_SHIFT
     submitted = (done == total) and (total > 0)
 
     return {
@@ -106,7 +127,6 @@ def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
 def _get_latest_recurring(
     db: Session, court_id: int, task_type: str, task_id: str
 ) -> Optional[HkRecurring]:
-    """Get the most recent recurring task entry for a court."""
     return (
         db.query(HkRecurring)
         .filter(
@@ -120,7 +140,6 @@ def _get_latest_recurring(
 
 
 def _parse_done_at(row: Optional[HkRecurring]) -> Optional[datetime]:
-    """Safely parse done_at from a recurring row."""
     if row is None or not row.done_at:
         return None
     try:
@@ -153,6 +172,7 @@ def _recurring_status(
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
 
 @router.post("/submit", status_code=status.HTTP_200_OK)
 def submit_shift(
@@ -191,6 +211,15 @@ def submit_shift(
         db.execute(stmt)
 
     db.commit()
+
+    # ✅ SSE notify
+    _fire_notify({
+        "type":     "housekeeping_update",
+        "court_id": body.court_id,
+        "shift":    body.shift,
+        "date":     body.date,
+    })
+
     return {"status": "ok", "submitted": len(body.tasks)}
 
 
@@ -234,7 +263,6 @@ def mark_weekly_done(
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    # ✅ Cooldown check — 7 days from last done
     row       = _get_latest_recurring(db, body.court_id, "weekly", _WEEKLY_ID)
     last_done = _parse_done_at(row)
     now       = datetime.now()
@@ -256,6 +284,15 @@ def mark_weekly_done(
             )
 
     _add_recurring(db, body, "weekly", _WEEKLY_ID)
+
+    # ✅ SSE notify
+    _fire_notify({
+        "type":     "housekeeping_update",
+        "court_id": body.court_id,
+        "shift":    "all",
+        "date":     datetime.now().strftime("%Y-%m-%d"),
+    })
+
     return {
         "status":   "ok",
         "task":     "flags_washing",
@@ -269,7 +306,6 @@ def mark_monthly_done(
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    # ✅ Cooldown check — 30 days from last done
     row       = _get_latest_recurring(db, body.court_id, "monthly", _MONTHLY_ID)
     last_done = _parse_done_at(row)
     now       = datetime.now()
@@ -291,6 +327,15 @@ def mark_monthly_done(
             )
 
     _add_recurring(db, body, "monthly", _MONTHLY_ID)
+
+    # ✅ SSE notify
+    _fire_notify({
+        "type":     "housekeeping_update",
+        "court_id": body.court_id,
+        "shift":    "all",
+        "date":     datetime.now().strftime("%Y-%m-%d"),
+    })
+
     return {
         "status":   "ok",
         "task":     "fire_safety_audit",
