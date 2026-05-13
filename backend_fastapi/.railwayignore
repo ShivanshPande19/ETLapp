@@ -1,0 +1,18 @@
+# Ignore local SQLite DB — Railway will create a fresh one on startup
+etl.db
+app/etl.db
+
+# Ignore local env files
+.env
+.env.local
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# QR code output files
+../qr_codes/
+../maintenance_qr_codes/
