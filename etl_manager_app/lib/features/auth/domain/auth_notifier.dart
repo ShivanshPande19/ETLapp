@@ -88,13 +88,13 @@ class AuthNotifier extends Notifier<AuthState> {
       } else if (e.response?.statusCode == 401) {
         message = 'Invalid email or password';
       } else {
-        message = 'Error ${e.response?.statusCode}: ${e.response?.data ?? e.message}';
+        message =
+            'Error ${e.response?.statusCode}: ${e.response?.data ?? e.message}';
       }
-      print('[AUTH ERROR] DioException: $message | type: ${e.type} | msg: ${e.message}');
-      state = state.copyWith(
-        status: AuthStatus.error,
-        errorMessage: message,
+      print(
+        '[AUTH ERROR] DioException: $message | type: ${e.type} | msg: ${e.message}',
       );
+      state = state.copyWith(status: AuthStatus.error, errorMessage: message);
     } catch (e) {
       print('[AUTH ERROR] Unknown: $e');
       state = state.copyWith(

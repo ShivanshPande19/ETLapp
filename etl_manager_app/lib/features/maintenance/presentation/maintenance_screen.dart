@@ -8,7 +8,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../data/maintenance_repository.dart';
 import '../domain/maintenance_model.dart';
 
-// ─── Palette (matches complaints_screen.dart exactly) ────────────────────────
 const _bg = Color(0xFF080808);
 const _black = Color(0xFF0A0A0A);
 const _white = Color(0xFFFFFFFF);
@@ -20,7 +19,6 @@ const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
 const _orange = Color(0xFFFB923C);
 
-// ─── Screen ──────────────────────────────────────────────────────────────────
 class MaintenanceScreen extends ConsumerStatefulWidget {
   const MaintenanceScreen({super.key});
   @override
@@ -28,13 +26,14 @@ class MaintenanceScreen extends ConsumerStatefulWidget {
 }
 
 class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
+  late final AnimationController _listCtrl; // ← NEW
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
-  int _filterCourt = 0; // 0 = All courts
-  String _filterStatus = 'all'; // all | open | in_progress | resolved
+  int _filterCourt = 0;
+  String _filterStatus = 'all';
 
   @override
   void initState() {
@@ -43,8 +42,16 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
       vsync: this,
       duration: const Duration(milliseconds: 350),
     );
+    _listCtrl = AnimationController(
+      // ← NEW
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) _listCtrl.forward();
+    });
 
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) ref.invalidate(maintenanceProvider);
@@ -59,10 +66,25 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
   void dispose() {
     _pollTimer?.cancel();
     _fadeCtrl.dispose();
+    _listCtrl.dispose(); // ← NEW
     super.dispose();
   }
 
-  void _refresh() => ref.invalidate(maintenanceProvider);
+  void _refresh() {
+    ref.invalidate(maintenanceProvider);
+    _listCtrl
+      ..reset()
+      ..forward();
+  }
+
+  Animation<double> _itemAnim(int i) => CurvedAnimation(
+    parent: _listCtrl,
+    curve: Interval(
+      (i * 0.08).clamp(0.0, 0.7),
+      ((i * 0.08) + 0.4).clamp(0.0, 1.0),
+      curve: Curves.easeOutCubic,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -110,7 +132,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     );
   }
 
-  // ── Header ──────────────────────────────────────────────────────────────────
   Widget _buildHeader() => Padding(
     padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
     child: Column(
@@ -142,10 +163,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
             _iconBtn(Icons.refresh_rounded, _refresh),
           ],
         ),
-
         const SizedBox(height: 16),
-
-        // Court filter chips
         Row(
           children: [
             _courtTab('All', 0),
@@ -157,10 +175,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
             _courtTab('Court 3', 3),
           ],
         ),
-
         const SizedBox(height: 10),
-
-        // Status segmented control
         Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
@@ -176,7 +191,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
             ],
           ),
         ),
-
         const SizedBox(height: 18),
       ],
     ),
@@ -203,6 +217,9 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
         onTap: () {
           HapticFeedback.selectionClick();
           setState(() => _filterCourt = court);
+          _listCtrl
+            ..reset()
+            ..forward();
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -232,6 +249,9 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
         onTap: () {
           HapticFeedback.selectionClick();
           setState(() => _filterStatus = val);
+          _listCtrl
+            ..reset()
+            ..forward();
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -254,7 +274,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     );
   }
 
-  // ── Content ─────────────────────────────────────────────────────────────────
   Widget _buildContent(List<MaintenanceIssue> all, double navClearance) {
     final filtered = all.where((i) {
       if (_filterCourt > 0 && i.courtId != _filterCourt) return false;
@@ -268,43 +287,53 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
       children: [
-        _SummaryBar(
-          total: all.length,
-          open: open,
-          inProg: inProg,
-          resolved: all.length - open - inProg,
+        _StaggerItem(
+          anim: _itemAnim(0),
+          child: _SummaryBar(
+            total: all.length,
+            open: open,
+            inProg: inProg,
+            resolved: all.length - open - inProg,
+          ),
         ),
-
         const SizedBox(height: 16),
-
         if (filtered.isEmpty) ...[
           const SizedBox(height: 40),
-          _emptyView(),
+          _StaggerItem(anim: _itemAnim(1), child: _emptyView()),
         ] else ...[
-          Text(
-            '${filtered.length} issue${filtered.length == 1 ? '' : 's'}',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: _black,
-              letterSpacing: -.3,
+          _StaggerItem(
+            anim: _itemAnim(1),
+            child: Text(
+              '${filtered.length} issue${filtered.length == 1 ? '' : 's'}',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: _black,
+                letterSpacing: -.3,
+              ),
             ),
           ),
           const SizedBox(height: 10),
-          ...filtered.map(
-            (i) => _IssueTile(
-              key: ValueKey(i.id),
-              item: i,
-              onStatusChange: (s) => _updateStatus(i.id, s),
+          ...filtered.asMap().entries.map(
+            (e) => _StaggerItem(
+              anim: _itemAnim(e.key + 2),
+              child: _IssueTile(
+                key: ValueKey('issue_${e.value.id}'),
+                item: e.value,
+                onStatusChange: (s) => _updateStatus(e.value.id, s),
+              ),
             ),
           ),
           const SizedBox(height: 8),
-          Center(
-            child: Text(
-              'Pull to refresh  ·  auto-refresh 30s',
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                color: _black.withOpacity(0.25),
+          _StaggerItem(
+            anim: _itemAnim(filtered.length + 2),
+            child: Center(
+              child: Text(
+                'Pull to refresh  ·  auto-refresh 30s',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: _black.withOpacity(0.25),
+                ),
               ),
             ),
           ),
@@ -376,6 +405,25 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
   );
 }
 
+// ─── Stagger Item ─────────────────────────────────────────────────────────────
+class _StaggerItem extends StatelessWidget {
+  final Animation<double> anim;
+  final Widget child;
+  const _StaggerItem({required this.anim, required this.child});
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: anim,
+    child: SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0, 0.06),
+        end: Offset.zero,
+      ).animate(anim),
+      child: child,
+    ),
+  );
+}
+
 // ─── Summary Bar ─────────────────────────────────────────────────────────────
 class _SummaryBar extends StatelessWidget {
   final int total, open, inProg, resolved;
@@ -385,7 +433,6 @@ class _SummaryBar extends StatelessWidget {
     required this.inProg,
     required this.resolved,
   });
-
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(16),
@@ -418,7 +465,6 @@ class _Stat extends StatelessWidget {
   final String label, value;
   final Color color;
   const _Stat(this.label, this.value, this.color);
-
   @override
   Widget build(BuildContext context) => Expanded(
     child: Column(
@@ -471,7 +517,6 @@ class _IssueTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top row: icon + info + status badge
           Row(
             children: [
               Container(
@@ -522,18 +567,13 @@ class _IssueTile extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 10),
           Divider(color: Colors.grey.shade100, height: 1),
           const SizedBox(height: 10),
-
-          // Description
           Text(
             item.description,
             style: GoogleFonts.inter(fontSize: 13, color: _black, height: 1.5),
           ),
-
-          // Staff name row
           const SizedBox(height: 8),
           Row(
             children: [
@@ -545,8 +585,6 @@ class _IssueTile extends StatelessWidget {
               ),
             ],
           ),
-
-          // Action buttons
           if (item.status != 'resolved') ...[
             const SizedBox(height: 12),
             Row(
@@ -563,7 +601,6 @@ class _IssueTile extends StatelessWidget {
               ],
             ),
           ],
-
           if (item.status == 'resolved' && item.resolvedAt != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -585,7 +622,6 @@ class _ActionBtn extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
   const _ActionBtn(this.label, this.color, this.onTap);
-
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: () {
@@ -611,7 +647,6 @@ class _ActionBtn extends StatelessWidget {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 class _IssueMeta {
   final String emoji, label;
   final Color color;

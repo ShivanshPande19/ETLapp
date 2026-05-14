@@ -8,7 +8,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
-// Palette
 const _white = Color(0xFFFFFFFF);
 const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
@@ -21,7 +20,6 @@ const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
 const _bg = Color(0xFF080808);
 
-// Task definitions
 enum _Cat { cleaning, pest, laundry, audit }
 
 class _TaskDef {
@@ -72,16 +70,13 @@ Color _catColor(_Cat c) => switch (c) {
   _Cat.audit => _danger,
 };
 
-// Provider
 final managerHkProvider = FutureProvider.autoDispose
     .family<hk.FullStatusResponse?, String>((ref, date) async {
       return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
     });
 
-// Screen
 class ManagerHousekeepingScreen extends ConsumerStatefulWidget {
   const ManagerHousekeepingScreen({super.key});
-
   @override
   ConsumerState<ManagerHousekeepingScreen> createState() =>
       _ManagerHousekeepingScreenState();
@@ -89,12 +84,14 @@ class ManagerHousekeepingScreen extends ConsumerStatefulWidget {
 
 class _ManagerHousekeepingScreenState
     extends ConsumerState<ManagerHousekeepingScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  // ← CHANGED
   DateTime _date = DateTime.now();
   hk.Shift _shift = _autoShift();
   int _court = 1;
 
   late final AnimationController _fadeCtrl;
+  late final AnimationController _listCtrl; // ← NEW
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
@@ -105,8 +102,16 @@ class _ManagerHousekeepingScreenState
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
+    _listCtrl = AnimationController(
+      // ← NEW
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) _listCtrl.forward(); // ← NEW
+    });
 
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) ref.invalidate(managerHkProvider(_dateStr));
@@ -121,42 +126,28 @@ class _ManagerHousekeepingScreenState
   void dispose() {
     _pollTimer?.cancel();
     _fadeCtrl.dispose();
+    _listCtrl.dispose(); // ← NEW
     super.dispose();
   }
 
   String get _dateStr => _date.toIso8601String().substring(0, 10);
-  void _refresh() => ref.invalidate(managerHkProvider(_dateStr));
 
-  // Date-aware recurring task filter
-  T _effectiveRecurring<T>({
-    required dynamic raw,
-    required DateTime viewDate,
-    required int cooldownDays,
-    required T Function() makeEmpty,
-    required T Function(
-      DateTime? lastDone,
-      DateTime? nextDue,
-      bool isOverdue,
-      String? photoUrl,
-    )
-    makeFiltered,
-  }) {
-    final DateTime? lastDoneAt = raw.lastDoneAt as DateTime?;
-    final String? photoUrl = raw.photoUrl as String?;
-
-    if (lastDoneAt == null) return makeEmpty();
-    if (lastDoneAt.isAfter(viewDate)) return makeEmpty();
-
-    final computedNextDue = lastDoneAt.add(Duration(days: cooldownDays));
-    final isOverdueForView = viewDate.isAfter(computedNextDue);
-
-    return makeFiltered(
-      lastDoneAt,
-      computedNextDue,
-      isOverdueForView,
-      photoUrl,
-    );
+  void _refresh() {
+    ref.invalidate(managerHkProvider(_dateStr));
+    _listCtrl
+      ..reset()
+      ..forward(); // ← NEW: re-animate on refresh
   }
+
+  // ── Stagger helper ────────────────────────────────────────────────────────
+  Animation<double> _itemAnim(int i) => CurvedAnimation(
+    parent: _listCtrl,
+    curve: Interval(
+      (i * 0.08).clamp(0.0, 0.7),
+      ((i * 0.08) + 0.4).clamp(0.0, 1.0),
+      curve: Curves.easeOutCubic,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -291,6 +282,9 @@ class _ManagerHousekeepingScreenState
                   onTap: () {
                     HapticFeedback.selectionClick();
                     setState(() => _court = i + 1);
+                    _listCtrl
+                      ..reset()
+                      ..forward(); // ← re-animate on court change
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
@@ -332,6 +326,9 @@ class _ManagerHousekeepingScreenState
                     onTap: () {
                       HapticFeedback.selectionClick();
                       setState(() => _shift = s);
+                      _listCtrl
+                        ..reset()
+                        ..forward(); // ← re-animate on shift change
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
@@ -372,21 +369,19 @@ class _ManagerHousekeepingScreenState
     );
   }
 
-  Widget _hdrBtn(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: _white.withOpacity(0.07),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: _white.withOpacity(0.08)),
-        ),
-        child: Icon(icon, size: 18, color: _grey),
+  Widget _hdrBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: _white.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _white.withOpacity(0.08)),
       ),
-    );
-  }
+      child: Icon(icon, size: 18, color: _grey),
+    ),
+  );
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -404,7 +399,12 @@ class _ManagerHousekeepingScreenState
         child: child!,
       ),
     );
-    if (picked != null) setState(() => _date = picked);
+    if (picked != null) {
+      setState(() => _date = picked);
+      _listCtrl
+        ..reset()
+        ..forward(); // ← re-animate on date change
+    }
   }
 
   Widget _buildContent(hk.FullStatusResponse data, double navClearance) {
@@ -437,8 +437,6 @@ class _ManagerHousekeepingScreenState
 
     final doneCount = mergedTasks.where((t) => t.isDone).length;
     final total = mergedTasks.length;
-
-    // End-of-viewing-day timestamp
     final viewDate = DateTime(_date.year, _date.month, _date.day, 23, 59, 59);
 
     final rawWeekly = data.weeklyTasks.firstWhere(
@@ -478,77 +476,136 @@ class _ManagerHousekeepingScreenState
       ),
     );
 
+    // ── List with stagger animations ────────────────────────────────────────
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
       children: [
-        _SummaryCard(
-          done: doneCount,
-          total: total,
-          court: _court,
-          shift: _shift,
+        // 0 — Summary card
+        _StaggerItem(
+          anim: _itemAnim(0),
+          child: _SummaryCard(
+            done: doneCount,
+            total: total,
+            court: _court,
+            shift: _shift,
+          ),
         ),
+
         const SizedBox(height: 16),
 
-        _SectionLabel(label: 'Daily Tasks', right: '$doneCount / $total done'),
+        // 1 — Daily Tasks section label
+        _StaggerItem(
+          anim: _itemAnim(1),
+          child: _SectionLabel(
+            label: 'Daily Tasks',
+            right: '$doneCount / $total done',
+          ),
+        ),
         const SizedBox(height: 10),
 
-        ...mergedTasks.map(
-          (t) => _DailyTaskTile(
-            key: ValueKey(t.def.id),
-            task: t,
-            onPhotoTap: t.photoUrl != null
-                ? () => _openPhoto(t.photoUrl!, t.def.title)
+        // 2..N — Daily task tiles
+        ...mergedTasks.asMap().entries.map(
+          (e) => _StaggerItem(
+            anim: _itemAnim(e.key + 2),
+            child: _DailyTaskTile(
+              key: ValueKey(
+                'hk_daily_${_court}_${_shift.name}_${e.value.def.id}',
+              ),
+              task: e.value,
+              onPhotoTap: e.value.photoUrl != null
+                  ? () => _openPhoto(e.value.photoUrl!, e.value.def.title)
+                  : null,
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        // N+1 — Weekly label + tile
+        _StaggerItem(
+          anim: _itemAnim(mergedTasks.length + 2),
+          child: const _SectionLabel(label: 'Weekly Task'),
+        ),
+        const SizedBox(height: 10),
+        _StaggerItem(
+          anim: _itemAnim(mergedTasks.length + 3),
+          child: _RecurringTile(
+            icon: Icons.flag_rounded,
+            title: 'Flags Washing',
+            accentColor: _purple,
+            lastDoneAt: effectiveWeekly.lastDoneAt,
+            nextDueAt: effectiveWeekly.nextDueAt,
+            isOverdue: effectiveWeekly.isOverdue,
+            photoUrl: effectiveWeekly.photoUrl,
+            onPhotoTap: effectiveWeekly.photoUrl != null
+                ? () => _openPhoto(effectiveWeekly.photoUrl!, 'Flags Washing')
                 : null,
           ),
         ),
 
         const SizedBox(height: 10),
 
-        const _SectionLabel(label: 'Weekly Task'),
-        const SizedBox(height: 10),
-        _RecurringTile(
-          icon: Icons.flag_rounded,
-          title: 'Flags Washing',
-          accentColor: _purple,
-          lastDoneAt: effectiveWeekly.lastDoneAt,
-          nextDueAt: effectiveWeekly.nextDueAt,
-          isOverdue: effectiveWeekly.isOverdue,
-          photoUrl: effectiveWeekly.photoUrl,
-          onPhotoTap: effectiveWeekly.photoUrl != null
-              ? () => _openPhoto(effectiveWeekly.photoUrl!, 'Flags Washing')
-              : null,
+        // N+2 — Monthly label + tile
+        _StaggerItem(
+          anim: _itemAnim(mergedTasks.length + 4),
+          child: const _SectionLabel(label: 'Monthly Task'),
         ),
-
         const SizedBox(height: 10),
-
-        const _SectionLabel(label: 'Monthly Task'),
-        const SizedBox(height: 10),
-        _RecurringTile(
-          icon: Icons.fire_extinguisher_rounded,
-          title: 'Fire Safety Audit',
-          accentColor: _danger,
-          lastDoneAt: effectiveMonthly.lastDoneAt,
-          nextDueAt: effectiveMonthly.nextDueAt,
-          isOverdue: effectiveMonthly.isOverdue,
-          photoUrl: effectiveMonthly.photoUrl,
-          onPhotoTap: effectiveMonthly.photoUrl != null
-              ? () =>
-                    _openPhoto(effectiveMonthly.photoUrl!, 'Fire Safety Audit')
-              : null,
+        _StaggerItem(
+          anim: _itemAnim(mergedTasks.length + 5),
+          child: _RecurringTile(
+            icon: Icons.fire_extinguisher_rounded,
+            title: 'Fire Safety Audit',
+            accentColor: _danger,
+            lastDoneAt: effectiveMonthly.lastDoneAt,
+            nextDueAt: effectiveMonthly.nextDueAt,
+            isOverdue: effectiveMonthly.isOverdue,
+            photoUrl: effectiveMonthly.photoUrl,
+            onPhotoTap: effectiveMonthly.photoUrl != null
+                ? () => _openPhoto(
+                    effectiveMonthly.photoUrl!,
+                    'Fire Safety Audit',
+                  )
+                : null,
+          ),
         ),
 
         const SizedBox(height: 20),
 
-        Center(
-          child: Text(
-            'Pull to refresh · auto-refreshes every 30s',
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              color: _black.withOpacity(0.28),
+        _StaggerItem(
+          anim: _itemAnim(mergedTasks.length + 6),
+          child: Center(
+            child: Text(
+              'Pull to refresh · auto-refreshes every 30s',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                color: _black.withOpacity(0.28),
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  T _effectiveRecurring<T>({
+    required dynamic raw,
+    required DateTime viewDate,
+    required int cooldownDays,
+    required T Function() makeEmpty,
+    required T Function(DateTime?, DateTime?, bool, String?) makeFiltered,
+  }) {
+    final DateTime? lastDoneAt = raw.lastDoneAt as DateTime?;
+    final String? photoUrl = raw.photoUrl as String?;
+    if (lastDoneAt == null) return makeEmpty();
+    if (lastDoneAt.isAfter(viewDate)) return makeEmpty();
+    final computedNextDue = lastDoneAt.add(Duration(days: cooldownDays));
+    final isOverdueForView = viewDate.isAfter(computedNextDue);
+    return makeFiltered(
+      lastDoneAt,
+      computedNextDue,
+      isOverdueForView,
+      photoUrl,
     );
   }
 
@@ -559,7 +616,26 @@ class _ManagerHousekeepingScreenState
   );
 }
 
-// Merged task model
+// ─── Stagger Item ─────────────────────────────────────────────────────────────
+class _StaggerItem extends StatelessWidget {
+  final Animation<double> anim;
+  final Widget child;
+  const _StaggerItem({required this.anim, required this.child});
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: anim,
+    child: SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0, 0.06),
+        end: Offset.zero,
+      ).animate(anim),
+      child: child,
+    ),
+  );
+}
+
+// ─── Merged task model ────────────────────────────────────────────────────────
 class _MergedTask {
   final _TaskDef def;
   final bool isDone;
@@ -573,7 +649,7 @@ class _MergedTask {
   });
 }
 
-// Summary Card
+// ─── Summary Card ─────────────────────────────────────────────────────────────
 class _SummaryCard extends StatelessWidget {
   final int done, total, court;
   final hk.Shift shift;
@@ -679,7 +755,7 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-// Daily Task Tile
+// ─── Daily Task Tile ──────────────────────────────────────────────────────────
 class _DailyTaskTile extends StatelessWidget {
   final _MergedTask task;
   final VoidCallback? onPhotoTap;
@@ -868,13 +944,12 @@ class _DailyTaskTile extends StatelessWidget {
   }
 }
 
-// Recurring Task Tile
+// ─── Recurring Tile ───────────────────────────────────────────────────────────
 class _RecurringTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final Color accentColor;
-  final DateTime? lastDoneAt;
-  final DateTime? nextDueAt;
+  final DateTime? lastDoneAt, nextDueAt;
   final bool isOverdue;
   final String? photoUrl;
   final VoidCallback? onPhotoTap;
@@ -892,7 +967,6 @@ class _RecurringTile extends StatelessWidget {
 
   bool get _isCooldownActive =>
       nextDueAt != null && DateTime.now().isBefore(nextDueAt!);
-
   int get _cooldownDays {
     if (nextDueAt == null) return 0;
     final diff = nextDueAt!.difference(DateTime.now());
@@ -913,35 +987,28 @@ class _RecurringTile extends StatelessWidget {
     final neverDone = lastDoneAt == null;
     final justDone = cooldown;
 
-    final Color stColor;
-    if (overdue || neverDone) {
-      stColor = _danger;
-    } else if (justDone) {
-      stColor = _ok;
-    } else {
-      stColor = _warn;
-    }
-
-    final String stLabel;
-    if (neverDone) {
-      stLabel = 'Never Done';
-    } else if (overdue) {
-      final d = _overdueDays;
-      stLabel = d > 0 ? 'Overdue by $d ${d == 1 ? 'day' : 'days'}' : 'Overdue';
-    } else if (justDone) {
-      stLabel = 'Done';
-    } else {
-      stLabel = 'Pending';
-    }
+    final Color stColor = (overdue || neverDone)
+        ? _danger
+        : justDone
+        ? _ok
+        : _warn;
+    final String stLabel = neverDone
+        ? 'Never Done'
+        : overdue
+        ? (_overdueDays > 0
+              ? 'Overdue by $_overdueDays ${_overdueDays == 1 ? 'day' : 'days'}'
+              : 'Overdue')
+        : justDone
+        ? 'Done'
+        : 'Pending';
 
     String? subInfo;
-    if (justDone && nextDueAt != null) {
+    if (justDone && nextDueAt != null)
       subInfo = 'Next due ${_fmtDateShort(nextDueAt!.toLocal())}';
-    } else if (overdue && lastDoneAt != null) {
+    else if (overdue && lastDoneAt != null)
       subInfo = 'Last done ${_fmtDateShort(lastDoneAt!.toLocal())}';
-    } else if (!neverDone && lastDoneAt != null) {
+    else if (!neverDone && lastDoneAt != null)
       subInfo = 'Last done ${_fmtDateShort(lastDoneAt!.toLocal())}';
-    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -983,7 +1050,6 @@ class _RecurringTile extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    // Main status badge
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 7,
@@ -1002,7 +1068,6 @@ class _RecurringTile extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Cooldown remaining badge
                     if (justDone)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -1034,7 +1099,6 @@ class _RecurringTile extends StatelessWidget {
                           ],
                         ),
                       ),
-                    // Overdue-by badge
                     if (overdue && _overdueDays > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -1066,7 +1130,6 @@ class _RecurringTile extends StatelessWidget {
                           ],
                         ),
                       ),
-                    // Sub info
                     if (subInfo != null)
                       Text(
                         subInfo,
@@ -1156,7 +1219,7 @@ class _RecurringTile extends StatelessWidget {
                 border: Border.all(color: stColor.withOpacity(0.20)),
               ),
               child: Text(
-                overdue || neverDone ? 'No photo' : 'No photo',
+                'No photo',
                 style: GoogleFonts.inter(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
@@ -1170,125 +1233,112 @@ class _RecurringTile extends StatelessWidget {
   }
 }
 
-// Photo Viewer
+// ─── Photo Viewer ─────────────────────────────────────────────────────────────
 class _PhotoViewer extends StatelessWidget {
   final String url, title;
   const _PhotoViewer({required this.url, required this.title});
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog.fullscreen(
-      backgroundColor: Colors.transparent,
-      child: Stack(
-        children: [
-          Center(
-            child: InteractiveViewer(
-              child: Image.network(
-                url,
-                fit: BoxFit.contain,
-                loadingBuilder: (_, child, prog) => prog == null
-                    ? child
-                    : const Center(
-                        child: CircularProgressIndicator(
-                          color: _white,
-                          strokeWidth: 2,
-                        ),
+  Widget build(BuildContext context) => Dialog.fullscreen(
+    backgroundColor: Colors.transparent,
+    child: Stack(
+      children: [
+        Center(
+          child: InteractiveViewer(
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              loadingBuilder: (_, child, prog) => prog == null
+                  ? child
+                  : const Center(
+                      child: CircularProgressIndicator(
+                        color: _white,
+                        strokeWidth: 2,
                       ),
-                errorBuilder: (_, __, ___) => const Center(
-                  child: Icon(
-                    Icons.broken_image_rounded,
-                    color: _grey,
-                    size: 48,
+                    ),
+              errorBuilder: (_, __, ___) => const Center(
+                child: Icon(Icons.broken_image_rounded, color: _grey, size: 48),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: _white,
+                        size: 18,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.55),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(
-                          Icons.close_rounded,
-                          color: _white,
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: _white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
-// Utility Widgets
+// ─── Utility Widgets ──────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
   final String label;
   final String? right;
   const _SectionLabel({required this.label, this.right});
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-            color: _black,
-            letterSpacing: -0.3,
-          ),
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+          color: _black,
+          letterSpacing: -0.3,
         ),
-        if (right != null)
-          Text(right!, style: GoogleFonts.antonSc(fontSize: 14, color: _grey)),
-      ],
-    );
-  }
+      ),
+      if (right != null)
+        Text(right!, style: GoogleFonts.antonSc(fontSize: 14, color: _grey)),
+    ],
+  );
 }
 
 class _Loader extends StatelessWidget {
   const _Loader();
   @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: CircularProgressIndicator(color: _black, strokeWidth: 2),
-    );
-  }
+  Widget build(BuildContext context) => const Center(
+    child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+  );
 }
 
 class _ErrorView extends StatelessWidget {
@@ -1296,52 +1346,50 @@ class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.onRetry});
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
-          const SizedBox(height: 12),
-          Text(
-            'Could not load status',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+  Widget build(BuildContext context) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
+        const SizedBox(height: 12),
+        Text(
+          'Could not load status',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: _black,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Pull to refresh or tap Retry',
+          style: GoogleFonts.inter(fontSize: 12, color: _grey),
+        ),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: onRetry,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            decoration: BoxDecoration(
               color: _black,
+              borderRadius: BorderRadius.circular(999),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Pull to refresh or tap Retry',
-            style: GoogleFonts.inter(fontSize: 12, color: _grey),
-          ),
-          const SizedBox(height: 16),
-          GestureDetector(
-            onTap: onRetry,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-              decoration: BoxDecoration(
-                color: _black,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'Retry',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _white,
-                ),
+            child: Text(
+              'Retry',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: _white,
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
-// Helpers
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 hk.Shift _autoShift() {
   final h = DateTime.now().hour;
   if (h >= 6 && h < 12) return hk.Shift.morning;
