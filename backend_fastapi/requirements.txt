@@ -6,6 +6,7 @@ cffi==2.0.0
 click==8.3.3
 cryptography==46.0.7
 ecdsa==0.19.2
+email-validator==2.2.0
 fastapi==0.136.0
 h11==0.16.0
 idna==3.13
