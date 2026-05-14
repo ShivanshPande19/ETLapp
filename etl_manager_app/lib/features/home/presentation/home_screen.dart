@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/utils/token_storage.dart';
 import '../../courts/domain/courts_notifier.dart';
-import '../../sales/domain/sales_notifier.dart';
 import 'home_providers.dart';
 import 'package:go_router/go_router.dart';
 
@@ -106,9 +105,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         curve: Curves.easeOutCubic,
       );
     }
-    ref
-        .read(salesNotifierProvider.notifier)
-        .fetchSummary(allCourts: true, period: SalesPeriod.yesterday);
+    ref.invalidate(homeYesterdaySalesProvider);
+    ref.invalidate(homeMonthSalesProvider);
     ref.read(courtsNotifierProvider.notifier).fetchCourts();
     ref.invalidate(homeHousekeepingProvider);
     ref.invalidate(homeComplaintsProvider);
@@ -132,15 +130,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    final salesState = ref.watch(salesNotifierProvider);
+    final yesterdayAsync = ref.watch(homeYesterdaySalesProvider);
+    final monthAsync = ref.watch(homeMonthSalesProvider);
     final courtsAsync = ref.watch(courtsNotifierProvider);
     final hkAsync = ref.watch(homeHousekeepingProvider);
     final complaintsAsync = ref.watch(homeComplaintsProvider);
     final maintenanceAsync = ref.watch(homeMaintenanceProvider);
 
-    final totalSales = salesState.summary?.totalSales ?? 0.0;
+    final yesterdaySales = yesterdayAsync.maybeWhen(
+      data: (v) => v,
+      orElse: () => 0.0,
+    );
+    final monthSales = monthAsync.maybeWhen(data: (v) => v, orElse: () => 0.0);
+    final isLoadingYesterday = yesterdayAsync is AsyncLoading;
+    final isLoadingMonth = monthAsync is AsyncLoading;
+
     final totalCourts = courtsAsync.whenData((c) => c.length).value ?? 0;
-    final isLoadingSales = salesState.status == SalesLoadStatus.loading;
     final isLoadingCourts = courtsAsync is AsyncLoading;
 
     final hkRows = hkAsync.maybeWhen(
@@ -174,11 +179,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ✅ Top row with red profile button
                     _TopRow(managerName: _managerName),
                     const SizedBox(height: 10),
-
-                    // ETL FOOD COURT hero text
                     FadeTransition(
                       opacity: _heroFade,
                       child: SlideTransition(
@@ -241,7 +243,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
 
               // ══════════════════════════════════════════════
-              // WHITE CONTENT — rounded top corners
+              // WHITE CONTENT
               // ══════════════════════════════════════════════
               Expanded(
                 child: Container(
@@ -281,15 +283,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Text(
-                                            'Revenue',
-                                            style: GoogleFonts.inter(
-                                              fontSize: 12,
-                                              color: _grey,
-                                              fontWeight: FontWeight.w500,
-                                            ),
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Revenue',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 12,
+                                                  color: _grey,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                              Text(
+                                                'Yesterday · All Courts',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 10,
+                                                  color: _grey.withOpacity(
+                                                    0.65,
+                                                  ),
+                                                  fontWeight: FontWeight.w400,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                          isLoadingSales
+                                          isLoadingYesterday
                                               ? const _Skeleton(
                                                   width: 100,
                                                   height: 32,
@@ -297,7 +315,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                               : TweenAnimationBuilder<double>(
                                                   tween: Tween<double>(
                                                     begin: 0,
-                                                    end: totalSales,
+                                                    end: yesterdaySales,
                                                   ),
                                                   duration: const Duration(
                                                     milliseconds: 700,
@@ -388,11 +406,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                           const SizedBox(height: 10),
 
-                          // ── Sparkline — stagger 1 ─────────────────────
+                          // ── Sparkline (Monthly Total) — stagger 1 ─────
                           _StaggerRow(
                             anim: _stagger(1),
                             child: _OutlineCard(
-                              height: 86,
+                              height: 96,
                               child: Row(
                                 children: [
                                   Expanded(
@@ -430,8 +448,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                             fontWeight: FontWeight.w500,
                                           ),
                                         ),
-                                        const SizedBox(height: 3),
-                                        isLoadingSales
+                                        Text(
+                                          'This Month · All Courts',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 9,
+                                            color: _grey.withOpacity(0.65),
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        isLoadingMonth
                                             ? const _Skeleton(
                                                 width: 80,
                                                 height: 24,
@@ -439,7 +465,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                             : TweenAnimationBuilder<double>(
                                                 tween: Tween<double>(
                                                   begin: 0,
-                                                  end: totalSales,
+                                                  end: monthSales,
                                                 ),
                                                 duration: const Duration(
                                                   milliseconds: 700,

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
+import '../../sales/data/sales_repository.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart';
 
@@ -43,7 +44,48 @@ class CourtHkRow {
 ShiftPillData _emptyPill(String label) =>
     ShiftPillData(label: label, done: 0, total: 0);
 
-// ─── Housekeeping provider ────────────────────────────────────────────────────
+// ─── Revenue Card — Yesterday, All Courts ─────────────────────────────────────
+
+final homeYesterdaySalesProvider = FutureProvider.autoDispose<double>((
+  ref,
+) async {
+  try {
+    final repo = ref.read(salesRepositoryProvider);
+    final summary = await repo.getSalesSummary(
+      courtId: null,
+      period: 'yesterday',
+    );
+    return summary.totalSales;
+  } on DioException catch (e) {
+    debugPrint(
+      '💰 [YESTERDAY_SALES] DioError: ${e.response?.statusCode} ${e.message}',
+    );
+    return 0.0;
+  } catch (e) {
+    debugPrint('💰 [YESTERDAY_SALES] Exception: $e');
+    return 0.0;
+  }
+});
+
+// ─── Sparkline Card — This Month Cumulative, All Courts ──────────────────────
+
+final homeMonthSalesProvider = FutureProvider.autoDispose<double>((ref) async {
+  try {
+    final repo = ref.read(salesRepositoryProvider);
+    final summary = await repo.getSalesSummary(courtId: null, period: 'month');
+    return summary.totalSales;
+  } on DioException catch (e) {
+    debugPrint(
+      '💰 [MONTH_SALES] DioError: ${e.response?.statusCode} ${e.message}',
+    );
+    return 0.0;
+  } catch (e) {
+    debugPrint('💰 [MONTH_SALES] Exception: $e');
+    return 0.0;
+  }
+});
+
+// ─── Housekeeping Provider ────────────────────────────────────────────────────
 
 final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
   ref,
@@ -97,7 +139,7 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
   }
 });
 
-// ─── Open complaints count ────────────────────────────────────────────────────
+// ─── Open Complaints Count ────────────────────────────────────────────────────
 
 final homeComplaintsProvider = FutureProvider.autoDispose<int>((ref) async {
   try {
@@ -120,7 +162,7 @@ final homeComplaintsProvider = FutureProvider.autoDispose<int>((ref) async {
   }
 });
 
-// ─── Open maintenance issues count ───────────────────────────────────────────
+// ─── Open Maintenance Issues Count ───────────────────────────────────────────
 
 final homeMaintenanceProvider = FutureProvider.autoDispose<int>((ref) async {
   try {
