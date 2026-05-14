@@ -1,7 +1,5 @@
-package com.example.etl_manager_app
+package com.example.etl_manager_app  // apna package name same rakho
 
-// ✅ FlutterFragmentActivity — local_auth ke liye zaroori
-// FlutterActivity se replace karo, warna biometric kaam nahi karega Android pe
-import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterFragmentActivity  // ✅ Change karo
 
-class MainActivity : FlutterFragmentActivity()
+class MainActivity: FlutterFragmentActivity()  // ✅ FlutterActivity → FlutterFragmentActivity

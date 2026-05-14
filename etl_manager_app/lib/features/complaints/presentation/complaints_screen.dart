@@ -8,7 +8,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../data/complaints_repository.dart';
 import '../domain/complaint_model.dart';
 
-// ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
 const _black = Color(0xFF0A0A0A);
 const _white = Color(0xFFFFFFFF);
@@ -19,7 +18,6 @@ const _danger = Color(0xFFEF4444);
 const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
 class ComplaintsScreen extends ConsumerStatefulWidget {
   const ComplaintsScreen({super.key});
   @override
@@ -27,13 +25,14 @@ class ComplaintsScreen extends ConsumerStatefulWidget {
 }
 
 class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
+  late final AnimationController _listCtrl; // ← NEW
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
-  int _filterCourt = 0; // 0 = All courts
-  String _filterStatus = 'all'; // all | open | in_progress | resolved
+  int _filterCourt = 0;
+  String _filterStatus = 'all';
 
   @override
   void initState() {
@@ -42,10 +41,17 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
       vsync: this,
       duration: const Duration(milliseconds: 350),
     );
+    _listCtrl = AnimationController(
+      // ← NEW
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) _listCtrl.forward(); // ← NEW
+    });
 
-    // Auto-refresh every 30 s
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) ref.invalidate(complaintsProvider);
     });
@@ -59,12 +65,27 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
   void dispose() {
     _pollTimer?.cancel();
     _fadeCtrl.dispose();
+    _listCtrl.dispose(); // ← NEW
     super.dispose();
   }
 
-  void _refresh() => ref.invalidate(complaintsProvider);
+  void _refresh() {
+    ref.invalidate(complaintsProvider);
+    _listCtrl
+      ..reset()
+      ..forward(); // ← NEW: re-animate on refresh
+  }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // ── stagger helper ────────────────────────────────────────────────────────
+  Animation<double> _itemAnim(int i) => CurvedAnimation(
+    parent: _listCtrl,
+    curve: Interval(
+      (i * 0.08).clamp(0.0, 0.7),
+      ((i * 0.08) + 0.4).clamp(0.0, 1.0),
+      curve: Curves.easeOutCubic,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(complaintsProvider);
@@ -111,13 +132,11 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     );
   }
 
-  // ── Header ─────────────────────────────────────────────────────────────────
   Widget _buildHeader() => Padding(
     padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title row
         Row(
           children: [
             Expanded(
@@ -144,10 +163,7 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
             _iconBtn(Icons.refresh_rounded, _refresh),
           ],
         ),
-
         const SizedBox(height: 16),
-
-        // Court filter
         Row(
           children: [
             _courtTab('All', 0),
@@ -159,10 +175,7 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
             _courtTab('Court 3', 3),
           ],
         ),
-
         const SizedBox(height: 10),
-
-        // Status filter
         Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
@@ -178,7 +191,6 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
             ],
           ),
         ),
-
         const SizedBox(height: 18),
       ],
     ),
@@ -205,6 +217,9 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
         onTap: () {
           HapticFeedback.selectionClick();
           setState(() => _filterCourt = court);
+          _listCtrl
+            ..reset()
+            ..forward(); // ← re-animate on filter change
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -234,6 +249,9 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
         onTap: () {
           HapticFeedback.selectionClick();
           setState(() => _filterStatus = val);
+          _listCtrl
+            ..reset()
+            ..forward(); // ← re-animate on filter change
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -256,7 +274,6 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     );
   }
 
-  // ── Content ────────────────────────────────────────────────────────────────
   Widget _buildContent(List<ComplaintModel> all, double navClearance) {
     final filtered = all.where((c) {
       if (_filterCourt > 0 && c.courtId != _filterCourt) return false;
@@ -270,43 +287,60 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
       children: [
-        _SummaryBar(
-          total: all.length,
-          open: open,
-          inProg: inProg,
-          resolved: all.length - open - inProg,
+        // Summary bar — index 0
+        _StaggerItem(
+          anim: _itemAnim(0),
+          child: _SummaryBar(
+            total: all.length,
+            open: open,
+            inProg: inProg,
+            resolved: all.length - open - inProg,
+          ),
         ),
 
         const SizedBox(height: 16),
 
         if (filtered.isEmpty) ...[
           const SizedBox(height: 40),
-          _emptyView(),
+          _StaggerItem(anim: _itemAnim(1), child: _emptyView()),
         ] else ...[
-          Text(
-            '${filtered.length} complaint${filtered.length == 1 ? '' : 's'}',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: _black,
-              letterSpacing: -.3,
+          // Count label — index 1
+          _StaggerItem(
+            anim: _itemAnim(1),
+            child: Text(
+              '${filtered.length} complaint${filtered.length == 1 ? '' : 's'}',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: _black,
+                letterSpacing: -.3,
+              ),
             ),
           ),
           const SizedBox(height: 10),
-          ...filtered.map(
-            (c) => _ComplaintTile(
-              key: ValueKey(c.id),
-              item: c,
-              onStatusChange: (s) => _updateStatus(c.id, s),
+
+          // Each tile — index 2, 3, 4, ...
+          ...filtered.asMap().entries.map(
+            (e) => _StaggerItem(
+              anim: _itemAnim(e.key + 2),
+              child: _ComplaintTile(
+                key: ValueKey('complaint_${e.value.id}'),
+                item: e.value,
+                onStatusChange: (s) => _updateStatus(e.value.id, s),
+              ),
             ),
           ),
+
           const SizedBox(height: 8),
-          Center(
-            child: Text(
-              'Pull to refresh  ·  auto-refresh 30s',
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                color: _black.withOpacity(0.25),
+          _StaggerItem(
+            anim: _itemAnim(filtered.length + 2),
+            child: Center(
+              child: Text(
+                'Pull to refresh  ·  auto-refresh 30s',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: _black.withOpacity(0.25),
+                ),
               ),
             ),
           ),
@@ -390,6 +424,25 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           style: GoogleFonts.inter(fontSize: 13, color: _grey),
         ),
       ],
+    ),
+  );
+}
+
+// ─── Stagger Item ─────────────────────────────────────────────────────────────
+class _StaggerItem extends StatelessWidget {
+  final Animation<double> anim;
+  final Widget child;
+  const _StaggerItem({required this.anim, required this.child});
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: anim,
+    child: SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0, 0.06),
+        end: Offset.zero,
+      ).animate(anim),
+      child: child,
     ),
   );
 }
@@ -490,7 +543,6 @@ class _ComplaintTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top row: icon + court name + status badge
           Row(
             children: [
               Container(
@@ -541,18 +593,13 @@ class _ComplaintTile extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 10),
           Divider(color: Colors.grey.shade100, height: 1),
           const SizedBox(height: 10),
-
-          // Description
           Text(
             item.description,
             style: GoogleFonts.inter(fontSize: 13, color: _black, height: 1.5),
           ),
-
-          // Action buttons
           if (item.status != 'resolved') ...[
             const SizedBox(height: 12),
             Row(
@@ -605,7 +652,6 @@ class _ActionBtn extends StatelessWidget {
   );
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 class _CatMeta {
   final String emoji, label;
   final Color color;
@@ -619,10 +665,10 @@ class _StatusMeta {
 }
 
 _CatMeta _catMeta(String cat) => switch (cat) {
-  'food' => const _CatMeta('\u{1F354}', 'Food Quality', _blue),
-  'staff' => const _CatMeta('\u{1F9D1}', 'Staff Behaviour', _danger),
-  'cleanliness' => const _CatMeta('\u{1F9F9}', 'Cleanliness', _purple),
-  _ => const _CatMeta('\u{1F4CB}', 'Other Issue', _grey),
+  'food' => const _CatMeta('🍔', 'Food Quality', _blue),
+  'staff' => const _CatMeta('🧑', 'Staff Behaviour', _danger),
+  'cleanliness' => const _CatMeta('🧹', 'Cleanliness', _purple),
+  _ => const _CatMeta('📋', 'Other Issue', _grey),
 };
 
 _StatusMeta _statusMeta(String s) => switch (s) {

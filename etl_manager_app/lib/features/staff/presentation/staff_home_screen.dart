@@ -9,7 +9,8 @@ import '../../staff/domain/housekeeping_models.dart' as hk;
 import '../../staff/data/housekeeping_repository.dart';
 import '../../complaints/domain/complaint_model.dart';
 import '../../complaints/data/complaints_repository.dart';
-import 'staff_complaints_screen.dart'; // ← new import
+import 'staff_complaints_screen.dart';
+import '../../settings/presentation/staff_settings_screen.dart'; // ← NEW
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -154,7 +155,6 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
     ]);
   }
 
-  // ── Navigation to StaffComplaintsScreen ─────────────────────────────────────
   void _openComplaints() {
     HapticFeedback.selectionClick();
     Navigator.of(context).push(
@@ -163,6 +163,33 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
           courtId: widget.assignedCourt,
           courtName: 'Court ${widget.assignedCourt}',
         ),
+        transitionsBuilder: (_, anim, __, child) {
+          final curved = CurvedAnimation(
+            parent: anim,
+            curve: Curves.easeOutCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.04),
+                end: Offset.zero,
+              ).animate(curved),
+              child: child,
+            ),
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 350),
+      ),
+    );
+  }
+
+  // ── NEW: Navigation to StaffSettingsScreen ──────────────────────────────────
+  void _openSettings() {
+    HapticFeedback.selectionClick();
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (_, anim, __) => const StaffSettingsScreen(),
         transitionsBuilder: (_, anim, __, child) {
           final curved = CurvedAnimation(
             parent: anim,
@@ -231,28 +258,33 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                             ),
                           ),
                         ),
+
+                        // ── Avatar → tappable → opens Settings ──────
                         FadeTransition(
                           opacity: _heroFade,
-                          child: Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: _red.withOpacity(0.15),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _red.withOpacity(0.35),
-                                width: 1.5,
+                          child: GestureDetector(
+                            onTap: _openSettings, // ← NEW
+                            child: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: _red.withOpacity(0.15),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _red.withOpacity(0.35),
+                                  width: 1.5,
+                                ),
                               ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                widget.staffName.isNotEmpty
-                                    ? widget.staffName[0].toUpperCase()
-                                    : 'S',
-                                style: GoogleFonts.inter(
-                                  fontSize: 16,
-                                  color: _red,
-                                  fontWeight: FontWeight.w700,
+                              child: Center(
+                                child: Text(
+                                  widget.staffName.isNotEmpty
+                                      ? widget.staffName[0].toUpperCase()
+                                      : 'S',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 16,
+                                    color: _red,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ),
@@ -415,7 +447,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                           ),
                           const SizedBox(height: 10),
 
-                          // 3. Complaints Card — onViewTap connected ✅
+                          // 3. Complaints Card
                           _StaggerRow(
                             anim: _stagger(2),
                             child: cmpAsync.when(
@@ -431,7 +463,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                               data: (complaints) => _ComplaintsCard(
                                 openCount: complaints.length,
                                 courtId: widget.assignedCourt,
-                                onViewTap: _openComplaints, // ← connected here
+                                onViewTap: _openComplaints,
                               ),
                             ),
                           ),
@@ -825,7 +857,9 @@ class _ComplaintsCardState extends State<_ComplaintsCard> {
                   ),
                 ),
                 child: Container(
-                  key: ValueKey(widget.openCount),
+                  key: ValueKey(
+                    'complaints_badge_${widget.courtId}_${widget.openCount}',
+                  ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 6,
