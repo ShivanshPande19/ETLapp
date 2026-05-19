@@ -2,6 +2,9 @@ from datetime import datetime, timedelta
 from typing import List
 from sqlalchemy.orm import Session
 
+# NAYA IMPORT: Yahan actual Court table ko import kar rahe hain taaki ID's dynamic milein
+from ..models.court import Court 
+
 from ..models.housekeeping import (
     HousekeepingRecord, WeeklyTaskRecord, MonthlyTaskRecord, ShiftEnum
 )
@@ -11,7 +14,6 @@ from ..schemas.housekeeping import (
     WeeklyTaskStatus, MonthlyTaskStatus, FullStatusResponse, SubmitResponse,
 )
 
-COURTS     = [1, 2, 3]
 ALL_SHIFTS = ["morning", "day", "night"]
 
 DEFAULT_TASKS = [
@@ -24,10 +26,16 @@ DEFAULT_TASKS = [
 ]
 
 
+def _get_active_court_ids(db: Session) -> List[int]:
+    """Helper: Database se sirf active courts ki list nikalta hai."""
+    active_courts = db.query(Court.id).filter(Court.is_active == True).all()
+    # List comprehension se tuples [(1,), (2,)] ko normal list [1, 2] me convert kar diya
+    return [court[0] for court in active_courts]
+
+
 # ── Staff: submit shift ───────────────────────────────────────────────────────
 
 def submit_shift(db: Session, req: ShiftSubmitRequest) -> SubmitResponse:
-    # Delete previous records for this slot so re-submission always wins
     db.query(HousekeepingRecord).filter(
         HousekeepingRecord.court_id == req.court_id,
         HousekeepingRecord.shift    == ShiftEnum(req.shift),
@@ -105,16 +113,19 @@ def mark_monthly_done(db: Session, req: MonthlyTaskDoneRequest) -> MonthlyTaskSt
 # ── Manager: full status ──────────────────────────────────────────────────────
 
 def get_full_status(db: Session, date: str) -> FullStatusResponse:
-    courts_status = [_build_court_status(db, c, date) for c in COURTS]
+    # NAYA LOGIC: Yahan ab dynamic IDs fetch ho rahi hain
+    dynamic_courts = _get_active_court_ids(db)
+    
+    courts_status = [_build_court_status(db, c, date) for c in dynamic_courts]
     weekly_status = [
         _build_weekly_status(c,
             db.query(WeeklyTaskRecord).filter(WeeklyTaskRecord.court_id == c).first())
-        for c in COURTS
+        for c in dynamic_courts
     ]
     monthly_status = [
         _build_monthly_status(c,
             db.query(MonthlyTaskRecord).filter(MonthlyTaskRecord.court_id == c).first())
-        for c in COURTS
+        for c in dynamic_courts
     ]
     return FullStatusResponse(
         date=date, courts=courts_status,

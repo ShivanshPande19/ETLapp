@@ -121,8 +121,9 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
 
   void _onPeriodTap(SalesPeriod period, int? courtId) async {
     if (period == SalesPeriod.custom) {
-      final range = await showDateRangePicker(
+      final DateTime? pickedDate = await showDatePicker(
         context: context,
+        initialDate: DateTime.now().subtract(const Duration(days: 1)),
         firstDate: DateTime(2024),
         lastDate: DateTime.now(),
         builder: (ctx, child) => Theme(
@@ -137,16 +138,20 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
           child: child!,
         ),
       );
-      if (range == null || !mounted) return;
+
+      if (pickedDate == null || !mounted) return;
       HapticFeedback.selectionClick();
       _triggerSwitchAnim();
+
+      final dateStr = pickedDate.toIso8601String().split('T').first;
+
       ref
           .read(salesNotifierProvider.notifier)
           .fetchSummary(
             courtId: courtId,
             period: SalesPeriod.custom,
-            customDateFrom: range.start.toIso8601String().split('T').first,
-            customDateTo: range.end.toIso8601String().split('T').first,
+            customDateFrom: dateStr,
+            customDateTo: dateStr,
           );
     } else {
       HapticFeedback.selectionClick();
@@ -158,7 +163,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
   }
 
   void _triggerSwitchAnim() {
-    _prevCourtId = -998; // force _onNewData to re-trigger
+    _prevCourtId = -998;
     _switchCtrl?.reverse().then((_) {
       if (mounted) _switchCtrl?.forward();
     });
@@ -194,7 +199,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
       case SalesPeriod.year:
         return 'This Year';
       case SalesPeriod.custom:
-        return 'Custom Range';
+        return date ?? 'Custom Date';
     }
   }
 
@@ -227,6 +232,8 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
               .fetchSummary(
                 courtId: salesState.selectedCourtId,
                 period: salesState.period,
+                customDateFrom: salesState.customDateFrom,
+                customDateTo: salesState.customDateTo,
               ),
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -251,7 +258,6 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            // Date / period pill
                             AnimatedSwitcher(
                               duration: const Duration(milliseconds: 300),
                               child: Container(
@@ -278,7 +284,6 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      // ← now shows period label
                                       _periodLabel(
                                         salesState.period,
                                         summary?.date,
@@ -391,13 +396,15 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                 .fetchSummary(
                                   courtId: id,
                                   period: salesState.period,
+                                  customDateFrom: salesState.customDateFrom,
+                                  customDateTo: salesState.customDateTo,
                                 );
                           },
                         ),
                       ),
                       const SizedBox(height: 16),
 
-                      // ── Period Tabs — fully wired ───────────────────
+                      // ── Period Tabs ───────────────────
                       SizedBox(
                         height: 36,
                         child: ListView.builder(
@@ -453,7 +460,9 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                 child: isLoading
                                     ? _BentoSkeleton()
                                     : salesState.status == SalesLoadStatus.error
-                                    ? _ErrorRow(message: 'Could not load sales')
+                                    ? const _ErrorRow(
+                                        message: 'Could not load sales',
+                                      )
                                     : summary != null &&
                                           summary.vendors.isNotEmpty
                                     ? _VendorBentoGrid(
@@ -485,10 +494,8 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                               const SizedBox(height: 12),
 
                               if (salesState.status == SalesLoadStatus.error)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                  ),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 20),
                                   child: _ErrorRow(
                                     message: 'Could not load vendors',
                                   ),
@@ -501,10 +508,8 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                   child: Column(
                                     children: List.generate(
                                       3,
-                                      (i) => Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 10,
-                                        ),
+                                      (i) => const Padding(
+                                        padding: EdgeInsets.only(bottom: 10),
                                         child: _SkeletonBox(height: 90),
                                       ),
                                     ),
@@ -761,47 +766,53 @@ class _VendorBentoGridState extends State<_VendorBentoGrid> {
     final visible = _expanded ? sorted : sorted.take(4).toList();
     final hasMore = sorted.length > 4;
     final remaining = sorted.length - 4;
+
     final isOdd = visible.length.isOdd;
+    final gridCount = isOdd ? visible.length - 1 : visible.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.05,
+        if (gridCount > 0)
+          GridView.builder(
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1.05,
+            ),
+            itemCount: gridCount,
+            itemBuilder: (_, i) {
+              final v = visible[i];
+              final pct = widget.total > 0 ? v.totalSales / widget.total : 0.0;
+              return _VendorBentoCard(
+                vendor: v,
+                pct: pct,
+                fmt: _fmt(v.totalSales),
+                isFilled: i == 0,
+                onTap: () => showVendorDetail(
+                  context: context,
+                  vendorName: v.vendorName,
+                  courtId: widget.courtId,
+                  repo: widget.repo,
+                ),
+              );
+            },
           ),
-          itemCount: isOdd ? visible.length - 1 : visible.length,
-          itemBuilder: (_, i) {
-            final v = visible[i];
-            final pct = widget.total > 0 ? v.totalSales / widget.total : 0.0;
-            return _VendorBentoCard(
-              vendor: v,
-              pct: pct,
-              fmt: _fmt(v.totalSales),
-              isFilled: i == 0,
-              onTap: () => showVendorDetail(
-                context: context,
-                vendorName: v.vendorName,
-                courtId: widget.courtId,
-                repo: widget.repo,
-              ),
-            );
-          },
-        ),
+
         if (isOdd) ...[
-          const SizedBox(height: 10),
+          if (gridCount > 0) const SizedBox(height: 10),
+
           _VendorBentoCard(
             vendor: visible.last,
             pct: widget.total > 0
                 ? visible.last.totalSales / widget.total
                 : 0.0,
             fmt: _fmt(visible.last.totalSales),
-            isFilled: false,
+            isFilled: gridCount == 0,
             isFullWidth: true,
             onTap: () => showVendorDetail(
               context: context,
@@ -811,6 +822,7 @@ class _VendorBentoGridState extends State<_VendorBentoGrid> {
             ),
           ),
         ],
+
         if (hasMore) ...[
           const SizedBox(height: 10),
           GestureDetector(
@@ -821,9 +833,12 @@ class _VendorBentoGridState extends State<_VendorBentoGrid> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(
-                color: _white,
+                color: const Color(0xFFFFFFFF),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _border.withOpacity(0.3), width: 1.5),
+                border: Border.all(
+                  color: const Color(0xFF1A1A1A).withOpacity(0.3),
+                  width: 1.5,
+                ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -835,7 +850,7 @@ class _VendorBentoGridState extends State<_VendorBentoGrid> {
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: _black,
+                      color: const Color(0xFF0A0A0A),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -845,7 +860,7 @@ class _VendorBentoGridState extends State<_VendorBentoGrid> {
                     child: const Icon(
                       Icons.keyboard_arrow_down_rounded,
                       size: 18,
-                      color: _black,
+                      color: Color(0xFF0A0A0A),
                     ),
                   ),
                 ],

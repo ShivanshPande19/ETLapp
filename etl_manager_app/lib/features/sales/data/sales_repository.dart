@@ -23,12 +23,12 @@ class VendorSaleDetail {
 
   factory VendorSaleDetail.fromJson(Map<String, dynamic> json) {
     return VendorSaleDetail(
-      vendorName: json['vendor_name'],
-      sourceSystem: json['source_system'],
-      totalSales: (json['total_sales'] as num).toDouble(),
-      billCount: json['bill_count'],
-      avgBillValue: (json['avg_bill_value'] as num).toDouble(),
-      lastSynced: json['last_synced'],
+      vendorName: json['vendor_name'] ?? 'Unknown',
+      sourceSystem: json['source_system'] ?? 'Petpooja',
+      totalSales: (json['total_sales'] ?? 0).toDouble(),
+      billCount: json['bill_count'] ?? 0,
+      avgBillValue: (json['avg_bill'] ?? 0).toDouble(),
+      lastSynced: json['fetched_at'] ?? DateTime.now().toIso8601String(),
     );
   }
 }
@@ -37,7 +37,7 @@ class VendorSaleDetail {
 
 class SalesSummary {
   final String date;
-  final String period; // ← added
+  final String period;
   final double totalSales;
   final int totalBills;
   final double avgBillValue;
@@ -45,21 +45,24 @@ class SalesSummary {
 
   SalesSummary({
     required this.date,
-    required this.period, // ← added
+    required this.period,
     required this.totalSales,
     required this.totalBills,
     required this.avgBillValue,
     required this.vendors,
   });
 
-  factory SalesSummary.fromJson(Map<String, dynamic> json) {
+  factory SalesSummary.fromJson(Map<String, dynamic> json, String periodReq) {
+    // FIX 1: 'results' ki jagah 'vendors' key use karenge
+    var vendorList = json['vendors'] as List? ?? [];
     return SalesSummary(
-      date: json['date'],
-      period: json['period'] ?? 'yesterday', // ← added
-      totalSales: (json['total_sales'] as num).toDouble(),
-      totalBills: json['total_bills'],
-      avgBillValue: (json['avg_bill_value'] as num).toDouble(),
-      vendors: (json['vendors'] as List)
+      date: json['date'] ?? json['business_date'] ?? json['sale_date'] ?? '',
+      period: periodReq,
+      totalSales: (json['total_sales'] ?? 0).toDouble(),
+      totalBills: json['total_bills'] ?? json['bill_count'] ?? 0,
+      avgBillValue: (json['avg_bill_value'] ?? json['avg_bill'] ?? 0)
+          .toDouble(),
+      vendors: vendorList
           .map((v) => VendorSaleDetail.fromJson(v as Map<String, dynamic>))
           .toList(),
     );
@@ -81,9 +84,9 @@ class DailySnapshot {
 
   factory DailySnapshot.fromJson(Map<String, dynamic> json) {
     return DailySnapshot(
-      date: json['date'] as String,
-      totalSales: (json['total_sales'] as num).toDouble(),
-      totalBills: json['total_bills'] as int,
+      date: json['date'] ?? json['sale_date'] ?? '',
+      totalSales: (json['total_sales'] ?? 0).toDouble(),
+      totalBills: json['total_bills'] ?? json['bill_count'] ?? 0,
     );
   }
 }
@@ -116,17 +119,19 @@ class VendorHistory {
   });
 
   factory VendorHistory.fromJson(Map<String, dynamic> json) {
+    // FIX 2: 'results' ki jagah 'daily_history' key use karenge
+    var resultsList = json['daily_history'] as List? ?? [];
     return VendorHistory(
-      vendorName: json['vendor_name'] as String,
-      sourceSystem: json['source_system'] as String,
-      totalSales: (json['total_sales'] as num).toDouble(),
-      billCount: json['bill_count'] as int,
-      avgBillValue: (json['avg_bill_value'] as num).toDouble(),
-      lastSynced: json['last_synced'] as String,
-      weekTotal: (json['week_total'] as num).toDouble(),
-      lastWeekTotal: (json['last_week_total'] as num).toDouble(),
-      bestDay: json['best_day'] as String,
-      dailyHistory: (json['daily_history'] as List)
+      vendorName: json['vendor_name'] ?? 'Vendor',
+      sourceSystem: json['source_system'] ?? 'Petpooja',
+      totalSales: (json['total_sales'] ?? 0).toDouble(),
+      billCount: json['bill_count'] ?? 0,
+      avgBillValue: (json['avg_bill_value'] ?? 0).toDouble(),
+      lastSynced: json['last_synced'] ?? '',
+      weekTotal: (json['week_total'] ?? 0).toDouble(),
+      lastWeekTotal: (json['last_week_total'] ?? 0).toDouble(),
+      bestDay: json['best_day'] ?? '',
+      dailyHistory: resultsList
           .map((e) => DailySnapshot.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
@@ -141,9 +146,9 @@ class SalesRepository {
 
   Future<SalesSummary> getSalesSummary({
     int? courtId,
-    String period = 'yesterday', // ← added
-    String? dateFrom, // ← added (custom range)
-    String? dateTo, // ← added (custom range)
+    String period = 'yesterday',
+    String? dateFrom,
+    String? dateTo,
   }) async {
     final response = await _dio.get(
       '/sales/summary',
@@ -154,7 +159,8 @@ class SalesRepository {
         if (dateTo != null) 'date_to': dateTo,
       },
     );
-    return SalesSummary.fromJson(response.data as Map<String, dynamic>);
+    // Backend se aaya data, model me bhejo
+    return SalesSummary.fromJson(response.data as Map<String, dynamic>, period);
   }
 
   Future<VendorHistory> fetchVendorHistory({

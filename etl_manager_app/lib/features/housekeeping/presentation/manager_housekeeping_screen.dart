@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+// CHANGED: Importing the generic courts provider
+import '../../courts/domain/courts_notifier.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -85,13 +88,13 @@ class ManagerHousekeepingScreen extends ConsumerStatefulWidget {
 class _ManagerHousekeepingScreenState
     extends ConsumerState<ManagerHousekeepingScreen>
     with TickerProviderStateMixin {
-  // ← CHANGED
   DateTime _date = DateTime.now();
   hk.Shift _shift = _autoShift();
-  int _court = 1;
+  int?
+  _court; // CHANGED: now nullable to select the first dynamic court if not set
 
   late final AnimationController _fadeCtrl;
-  late final AnimationController _listCtrl; // ← NEW
+  late final AnimationController _listCtrl;
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
@@ -103,14 +106,13 @@ class _ManagerHousekeepingScreenState
       duration: const Duration(milliseconds: 400),
     );
     _listCtrl = AnimationController(
-      // ← NEW
       vsync: this,
       duration: const Duration(milliseconds: 900),
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
     Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) _listCtrl.forward(); // ← NEW
+      if (mounted) _listCtrl.forward();
     });
 
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -126,7 +128,7 @@ class _ManagerHousekeepingScreenState
   void dispose() {
     _pollTimer?.cancel();
     _fadeCtrl.dispose();
-    _listCtrl.dispose(); // ← NEW
+    _listCtrl.dispose();
     super.dispose();
   }
 
@@ -134,12 +136,12 @@ class _ManagerHousekeepingScreenState
 
   void _refresh() {
     ref.invalidate(managerHkProvider(_dateStr));
+    ref.invalidate(courtsNotifierProvider); // also refresh the courts
     _listCtrl
       ..reset()
-      ..forward(); // ← NEW: re-animate on refresh
+      ..forward();
   }
 
-  // ── Stagger helper ────────────────────────────────────────────────────────
   Animation<double> _itemAnim(int i) => CurvedAnimation(
     parent: _listCtrl,
     curve: Interval(
@@ -152,6 +154,10 @@ class _ManagerHousekeepingScreenState
   @override
   Widget build(BuildContext context) {
     final statusAsync = ref.watch(managerHkProvider(_dateStr));
+    final courtsAsync = ref.watch(
+      courtsNotifierProvider,
+    ); // CHANGED: Get courts
+
     final navClearance = MediaQuery.of(context).padding.bottom + 92.0;
 
     return Scaffold(
@@ -162,7 +168,7 @@ class _ManagerHousekeepingScreenState
           bottom: false,
           child: Column(
             children: [
-              _buildHeader(),
+              _buildHeader(courtsAsync), // Pass to header
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -178,9 +184,34 @@ class _ManagerHousekeepingScreenState
                     child: statusAsync.when(
                       loading: () => const _Loader(),
                       error: (e, _) => _ErrorView(onRetry: _refresh),
-                      data: (data) => data == null
-                          ? _ErrorView(onRetry: _refresh)
-                          : _buildContent(data, navClearance),
+                      data: (data) {
+                        if (data == null) {
+                          return _ErrorView(onRetry: _refresh);
+                        }
+                        return courtsAsync.when(
+                          loading: () => const _Loader(),
+                          error: (err, stack) => _ErrorView(onRetry: _refresh),
+                          data: (courts) {
+                            if (courts.isEmpty) {
+                              return const Center(
+                                child: Text("No Courts available"),
+                              );
+                            }
+                            // Auto-select first active court if none selected
+                            if (_court == null ||
+                                !courts.any((c) => c.id == _court)) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted)
+                                  setState(() => _court = courts.first.id);
+                              });
+                            }
+
+                            if (_court == null) return const SizedBox.shrink();
+
+                            return _buildContent(data, navClearance);
+                          },
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -192,7 +223,7 @@ class _ManagerHousekeepingScreenState
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(AsyncValue<List<dynamic>> courtsAsync) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: Column(
@@ -273,40 +304,58 @@ class _ManagerHousekeepingScreenState
 
           const SizedBox(height: 14),
 
-          // Court tabs
-          Row(
-            children: List.generate(3, (i) {
-              final sel = _court == i + 1;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    setState(() => _court = i + 1);
-                    _listCtrl
-                      ..reset()
-                      ..forward(); // ← re-animate on court change
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: EdgeInsets.only(right: i < 2 ? 6 : 0),
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    decoration: BoxDecoration(
-                      color: sel ? _white : _white.withOpacity(0.07),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'Court ${i + 1}',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: sel ? _black : _grey,
+          // CHANGED: Dynamic Court tabs using the generic provider
+          courtsAsync.when(
+            loading: () => const SizedBox(height: 38), // placeholder height
+            error: (_, __) => const SizedBox(height: 38),
+            data: (courts) {
+              if (courts.isEmpty) return const SizedBox(height: 38);
+              return SizedBox(
+                height: 38,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: courts.length,
+                  itemBuilder: (context, index) {
+                    final courtInfo = courts[index];
+                    final sel = _court == courtInfo.id;
+                    return GestureDetector(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _court = courtInfo.id);
+                        _listCtrl
+                          ..reset()
+                          ..forward();
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: EdgeInsets.only(
+                          right: index < courts.length - 1 ? 8 : 0,
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: sel ? _white : _white.withOpacity(0.07),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Center(
+                          child: Text(
+                            courtInfo.name,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: sel ? _black : _grey,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
               );
-            }),
+            },
           ),
 
           const SizedBox(height: 10),
@@ -328,7 +377,7 @@ class _ManagerHousekeepingScreenState
                       setState(() => _shift = s);
                       _listCtrl
                         ..reset()
-                        ..forward(); // ← re-animate on shift change
+                        ..forward();
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
@@ -403,15 +452,17 @@ class _ManagerHousekeepingScreenState
       setState(() => _date = picked);
       _listCtrl
         ..reset()
-        ..forward(); // ← re-animate on date change
+        ..forward();
     }
   }
 
   Widget _buildContent(hk.FullStatusResponse data, double navClearance) {
+    if (_court == null) return const SizedBox.shrink();
+
     final courtData = data.courts.firstWhere(
       (c) => c.courtId == _court,
       orElse: () =>
-          hk.CourtDayStatus(courtId: _court, date: _dateStr, shifts: []),
+          hk.CourtDayStatus(courtId: _court!, date: _dateStr, shifts: []),
     );
     final shiftData = courtData.shifts.firstWhere(
       (s) => s.shift == _shift,
@@ -441,20 +492,20 @@ class _ManagerHousekeepingScreenState
 
     final rawWeekly = data.weeklyTasks.firstWhere(
       (w) => w.courtId == _court,
-      orElse: () => hk.WeeklyTaskStatus(courtId: _court, isOverdue: true),
+      orElse: () => hk.WeeklyTaskStatus(courtId: _court!, isOverdue: true),
     );
     final rawMonthly = data.monthlyTasks.firstWhere(
       (m) => m.courtId == _court,
-      orElse: () => hk.MonthlyTaskStatus(courtId: _court, isOverdue: true),
+      orElse: () => hk.MonthlyTaskStatus(courtId: _court!, isOverdue: true),
     );
 
     final effectiveWeekly = _effectiveRecurring<hk.WeeklyTaskStatus>(
       raw: rawWeekly,
       viewDate: viewDate,
       cooldownDays: 7,
-      makeEmpty: () => hk.WeeklyTaskStatus(courtId: _court, isOverdue: true),
+      makeEmpty: () => hk.WeeklyTaskStatus(courtId: _court!, isOverdue: true),
       makeFiltered: (lastDone, nextDue, overdue, photo) => hk.WeeklyTaskStatus(
-        courtId: _court,
+        courtId: _court!,
         lastDoneAt: lastDone,
         nextDueAt: nextDue,
         isOverdue: overdue,
@@ -466,9 +517,9 @@ class _ManagerHousekeepingScreenState
       raw: rawMonthly,
       viewDate: viewDate,
       cooldownDays: 30,
-      makeEmpty: () => hk.MonthlyTaskStatus(courtId: _court, isOverdue: true),
+      makeEmpty: () => hk.MonthlyTaskStatus(courtId: _court!, isOverdue: true),
       makeFiltered: (lastDone, nextDue, overdue, photo) => hk.MonthlyTaskStatus(
-        courtId: _court,
+        courtId: _court!,
         lastDoneAt: lastDone,
         nextDueAt: nextDue,
         isOverdue: overdue,
@@ -476,24 +527,27 @@ class _ManagerHousekeepingScreenState
       ),
     );
 
-    // ── List with stagger animations ────────────────────────────────────────
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
       children: [
-        // 0 — Summary card
         _StaggerItem(
           anim: _itemAnim(0),
           child: _SummaryCard(
             done: doneCount,
             total: total,
-            court: _court,
+            courtName:
+                ref
+                    .read(courtsNotifierProvider)
+                    .value
+                    ?.firstWhere((c) => c.id == _court)
+                    .name ??
+                "Unknown Court",
             shift: _shift,
           ),
         ),
 
         const SizedBox(height: 16),
 
-        // 1 — Daily Tasks section label
         _StaggerItem(
           anim: _itemAnim(1),
           child: _SectionLabel(
@@ -503,7 +557,6 @@ class _ManagerHousekeepingScreenState
         ),
         const SizedBox(height: 10),
 
-        // 2..N — Daily task tiles
         ...mergedTasks.asMap().entries.map(
           (e) => _StaggerItem(
             anim: _itemAnim(e.key + 2),
@@ -521,7 +574,6 @@ class _ManagerHousekeepingScreenState
 
         const SizedBox(height: 10),
 
-        // N+1 — Weekly label + tile
         _StaggerItem(
           anim: _itemAnim(mergedTasks.length + 2),
           child: const _SectionLabel(label: 'Weekly Task'),
@@ -545,7 +597,6 @@ class _ManagerHousekeepingScreenState
 
         const SizedBox(height: 10),
 
-        // N+2 — Monthly label + tile
         _StaggerItem(
           anim: _itemAnim(mergedTasks.length + 4),
           child: const _SectionLabel(label: 'Monthly Task'),
@@ -616,7 +667,6 @@ class _ManagerHousekeepingScreenState
   );
 }
 
-// ─── Stagger Item ─────────────────────────────────────────────────────────────
 class _StaggerItem extends StatelessWidget {
   final Animation<double> anim;
   final Widget child;
@@ -635,7 +685,6 @@ class _StaggerItem extends StatelessWidget {
   );
 }
 
-// ─── Merged task model ────────────────────────────────────────────────────────
 class _MergedTask {
   final _TaskDef def;
   final bool isDone;
@@ -649,14 +698,14 @@ class _MergedTask {
   });
 }
 
-// ─── Summary Card ─────────────────────────────────────────────────────────────
 class _SummaryCard extends StatelessWidget {
-  final int done, total, court;
+  final int done, total;
+  final String courtName; // CHANGED: now taking string name
   final hk.Shift shift;
   const _SummaryCard({
     required this.done,
     required this.total,
-    required this.court,
+    required this.courtName,
     required this.shift,
   });
 
@@ -698,7 +747,7 @@ class _SummaryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Court $court · ${_shiftLabel(shift)} Shift',
+                      '$courtName · ${_shiftLabel(shift)} Shift', // CHANGED
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -755,7 +804,6 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-// ─── Daily Task Tile ──────────────────────────────────────────────────────────
 class _DailyTaskTile extends StatelessWidget {
   final _MergedTask task;
   final VoidCallback? onPhotoTap;
@@ -944,7 +992,6 @@ class _DailyTaskTile extends StatelessWidget {
   }
 }
 
-// ─── Recurring Tile ───────────────────────────────────────────────────────────
 class _RecurringTile extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -1233,7 +1280,6 @@ class _RecurringTile extends StatelessWidget {
   }
 }
 
-// ─── Photo Viewer ─────────────────────────────────────────────────────────────
 class _PhotoViewer extends StatelessWidget {
   final String url, title;
   const _PhotoViewer({required this.url, required this.title});
@@ -1308,7 +1354,6 @@ class _PhotoViewer extends StatelessWidget {
   );
 }
 
-// ─── Utility Widgets ──────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
   final String label;
   final String? right;
@@ -1389,7 +1434,6 @@ class _ErrorView extends StatelessWidget {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 hk.Shift _autoShift() {
   final h = DateTime.now().hour;
   if (h >= 6 && h < 12) return hk.Shift.morning;

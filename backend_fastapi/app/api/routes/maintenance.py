@@ -1,4 +1,3 @@
-# app/api/routes/maintenance.py
 from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
@@ -10,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.maintenance import MaintenanceIssue
+# NEW IMPORT: Court table
+from ...models.sale import Court
 
 router = APIRouter()
 
-_COURT_NAMES = {1: "ETL Food Court", 2: "Court 2", 3: "Court 3"}
 
 _ISSUE_TYPES = [
     ("electrical",  "⚡", "Electrical",      "Lights, fans, sockets, wiring issues"),
@@ -26,8 +26,7 @@ _ISSUE_TYPES = [
 
 # ── HTML Form ────────────────────────────────────────────────────────────────
 
-def _form_html(court_id: int, cart_id: str) -> str:
-    court_name = _COURT_NAMES.get(court_id, f"Court {court_id}")
+def _form_html(court_id: int, court_name: str, cart_id: str) -> str:
     cart_name  = f"Cart {cart_id}"
 
     options = ""
@@ -152,31 +151,39 @@ p{{font-size:14px;color:rgba(255,255,255,.5);line-height:1.6;max-width:280px;mar
 
 @router.get("/m/{court_id}/{cart_id}", response_class=HTMLResponse, include_in_schema=False)
 def maintenance_form(
-    court_id: int = Path(..., ge=1, le=10),
+    court_id: int = Path(..., ge=1),
     cart_id:  str = Path(...),
+    db: Session = Depends(get_db)
 ):
-    return HTMLResponse(_form_html(court_id, cart_id.upper()))
+    court = db.query(Court).filter(Court.id == court_id, Court.is_active == True).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found or inactive")
+        
+    return HTMLResponse(_form_html(court_id, court.name, cart_id.upper()))
 
 
 @router.post("/m/{court_id}/{cart_id}/submit", response_class=HTMLResponse, include_in_schema=False)
 def submit_maintenance(
-    court_id:   int = Path(..., ge=1, le=10),
+    court_id:   int = Path(..., ge=1),
     cart_id:    str = Path(...),
     staff_name: str = Form(..., min_length=2),
     issue_type: str = Form(...),
     description: str = Form(..., min_length=5),
     db: Session = Depends(get_db),
 ):
+    court = db.query(Court).filter(Court.id == court_id, Court.is_active == True).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found or inactive")
+        
     valid_types = {t[0] for t in _ISSUE_TYPES}
     if issue_type not in valid_types:
         raise HTTPException(status_code=422, detail="Invalid issue type")
 
-    court_name = _COURT_NAMES.get(court_id, f"Court {court_id}")
     cart_name  = f"Cart {cart_id.upper()}"
 
     db.add(MaintenanceIssue(
         court_id=court_id,
-        court_name=court_name,
+        court_name=court.name,
         cart_id=cart_id.upper(),
         cart_name=cart_name,
         staff_name=staff_name.strip(),
@@ -185,7 +192,7 @@ def submit_maintenance(
         status="open",
     ))
     db.commit()
-    return HTMLResponse(_thanks_html(court_name, cart_name))
+    return HTMLResponse(_thanks_html(court.name, cart_name))
 
 
 # ── Private endpoints (manager Flutter app) ──────────────────────────────────

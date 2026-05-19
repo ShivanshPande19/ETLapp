@@ -377,7 +377,7 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                 style: GoogleFonts.inter(fontSize: 12, color: _grey),
               ),
               const SizedBox(width: 10),
-              _StatusDot(status: widget.court.status),
+              _StatusDot(status: widget.court.isActive ? 'Active' : 'Inactive'),
             ],
           ),
 

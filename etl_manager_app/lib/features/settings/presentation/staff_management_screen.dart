@@ -1,8 +1,11 @@
+// lib/features/staff/presentation/staff_management_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../domain/staff_notifier.dart';
 import '../domain/staff_model.dart';
 
@@ -41,7 +44,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
 
-    // Fetch staff for this court
     Future.microtask(
       () => ref
           .read(staffNotifierProvider.notifier)
@@ -68,13 +70,11 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header ───────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Back pill
                     GestureDetector(
                       onTapDown: (_) {
                         HapticFeedback.selectionClick();
@@ -127,8 +127,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                       ),
                     ),
                     const SizedBox(height: 14),
-
-                    // Title
                     RichText(
                       text: TextSpan(
                         style: GoogleFonts.antonSc(
@@ -179,8 +177,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                   ],
                 ),
               ),
-
-              // ── White Content ─────────────────────────────────────────────
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -236,8 +232,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
           ),
         ),
       ),
-
-      // ── FAB — Add Staff ───────────────────────────────────────────────────
       floatingActionButton: state.isLoading
           ? null
           : GestureDetector(
@@ -280,7 +274,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     );
   }
 
-  // ── Add Staff Bottom Sheet ─────────────────────────────────────────────────
   void _showAddSheet(BuildContext context) {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
@@ -291,65 +284,64 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          decoration: const BoxDecoration(
+            color: _white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-            decoration: const BoxDecoration(
-              color: _white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Handle
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE5E5E5),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E5E5),
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'Add New Staff',
-                  style: GoogleFonts.antonSc(
-                    fontSize: 22,
-                    color: _black,
-                    letterSpacing: -0.3,
-                  ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Add New Staff',
+                style: GoogleFonts.antonSc(
+                  fontSize: 22,
+                  color: _black,
+                  letterSpacing: -0.3,
                 ),
-                const SizedBox(height: 20),
-                _SheetField(
-                  controller: nameCtrl,
-                  label: 'Full Name',
-                  hint: 'Rahul Sharma',
-                ),
-                const SizedBox(height: 12),
-                _SheetField(
-                  controller: emailCtrl,
-                  label: 'Email',
-                  hint: 'rahul@etl.com',
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 12),
-                _SheetField(
-                  controller: passCtrl,
-                  label: 'Password',
-                  hint: '••••••••',
-                  obscure: true,
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: GestureDetector(
+              ),
+              const SizedBox(height: 20),
+              _SheetField(
+                controller: nameCtrl,
+                label: 'Full Name',
+                hint: 'Rahul Sharma',
+              ),
+              const SizedBox(height: 12),
+              _SheetField(
+                controller: emailCtrl,
+                label: 'Email',
+                hint: 'rahul@etl.com',
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 12),
+              _SheetField(
+                controller: passCtrl,
+                label: 'Password',
+                hint: '••••••••',
+                obscure: true,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: StatefulBuilder(
+                  builder: (ctx, setSheet) => GestureDetector(
                     onTap: loading
                         ? null
                         : () async {
@@ -418,15 +410,14 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  // ── Confirm Remove Dialog ──────────────────────────────────────────────────
   void _confirmRemove(BuildContext context, StaffModel staff) {
     showDialog(
       context: context,
@@ -473,14 +464,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     );
   }
 
-  // ── Reassign Court Sheet ───────────────────────────────────────────────────
   void _showReassignSheet(BuildContext context, StaffModel staff) {
-    // Courts hardcoded — same as backend
-    final courts = [
-      {'id': 1, 'name': 'ETL Food Court'},
-      {'id': 2, 'name': 'ETL Court 2'},
-      {'id': 3, 'name': 'ETL Court 3'},
-    ];
+    // CHANGED: Get real live courts from the notifier instead of hardcoded list
+    final dynamicCourts = ref.read(courtsNotifierProvider).value ?? [];
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -519,59 +506,62 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
               style: GoogleFonts.inter(fontSize: 13, color: _grey),
             ),
             const SizedBox(height: 16),
-            ...courts.map(
-              (c) => GestureDetector(
-                onTap: () async {
-                  Navigator.pop(context);
-                  await ref
-                      .read(staffNotifierProvider.notifier)
-                      .reassignStaff(staff.id, c['id'] as int, widget.courtId);
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: c['id'] == staff.courtId
-                        ? _black
-                        : const Color(0xFFF5F5F5),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: c['id'] == staff.courtId
+            if (dynamicCourts.isEmpty)
+              const Center(child: Text("No courts available for assignment"))
+            else
+              ...dynamicCourts.map(
+                (c) => GestureDetector(
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await ref
+                        .read(staffNotifierProvider.notifier)
+                        .reassignStaff(staff.id, c.id, widget.courtId);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: c.id == staff.courtId
                           ? _black
-                          : const Color(0xFFE5E5E5),
+                          : const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: c.id == staff.courtId
+                            ? _black
+                            : const Color(0xFFE5E5E5),
+                      ),
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.store_rounded,
-                        size: 18,
-                        color: c['id'] == staff.courtId ? _white : _grey,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        c['name'] as String,
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: c['id'] == staff.courtId ? _white : _black,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.store_rounded,
+                          size: 18,
+                          color: c.id == staff.courtId ? _white : _grey,
                         ),
-                      ),
-                      if (c['id'] == staff.courtId) ...[
-                        const Spacer(),
+                        const SizedBox(width: 12),
                         Text(
-                          'Current',
+                          c.name,
                           style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: _white.withOpacity(0.6),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: c.id == staff.courtId ? _white : _black,
                           ),
                         ),
+                        if (c.id == staff.courtId) ...[
+                          const Spacer(),
+                          Text(
+                            'Current',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: _white.withOpacity(0.6),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -579,7 +569,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
   }
 }
 
-// ─── Staff Card ───────────────────────────────────────────────────────────────
 class _StaffCard extends StatelessWidget {
   final StaffModel staff;
   final VoidCallback onRemove;
@@ -607,7 +596,6 @@ class _StaffCard extends StatelessWidget {
     ),
     child: Row(
       children: [
-        // Avatar
         Container(
           width: 44,
           height: 44,
@@ -644,7 +632,6 @@ class _StaffCard extends StatelessWidget {
             ],
           ),
         ),
-        // Actions
         GestureDetector(
           onTap: onReassign,
           child: Container(
@@ -681,7 +668,6 @@ class _StaffCard extends StatelessWidget {
   );
 }
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final VoidCallback onAdd;
   const _EmptyState({required this.onAdd});
@@ -723,7 +709,6 @@ class _EmptyState extends StatelessWidget {
   );
 }
 
-// ─── Sheet Field ──────────────────────────────────────────────────────────────
 class _SheetField extends StatelessWidget {
   final TextEditingController controller;
   final String label, hint;

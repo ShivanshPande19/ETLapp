@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
 import '../data/sales_repository.dart';
-
+import 'package:flutter/services.dart';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const _white = Color(0xFFFFFFFF);
@@ -54,6 +54,9 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
   String? _error;
   late AnimationController _barCtrl;
 
+  // FIX: Selected bar ko track karne ke liye state variable
+  int? _selectedIndex;
+
   @override
   void initState() {
     super.initState();
@@ -70,10 +73,24 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
         vendorName: widget.vendorName,
         courtId: widget.courtId,
       );
+
       if (mounted) {
         setState(() {
           _data = result;
           _loading = false;
+
+          // FIX: Load hone par automatically highest bar ko select karlo
+          if (result.dailyHistory.isNotEmpty) {
+            double maxVal = result.dailyHistory.first.totalSales;
+            int maxIdx = 0;
+            for (int i = 1; i < result.dailyHistory.length; i++) {
+              if (result.dailyHistory[i].totalSales > maxVal) {
+                maxVal = result.dailyHistory[i].totalSales;
+                maxIdx = i;
+              }
+            }
+            _selectedIndex = maxIdx;
+          }
         });
         _barCtrl.forward();
       }
@@ -153,7 +170,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: _border.withOpacity(0.15),
+                color: _border.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -332,9 +349,6 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
         ),
         const SizedBox(height: 16),
 
-        // Total fixed heights:
-        // label zone = 20, bar max = 120, gap = 5,
-        // day letter = 14, date num = 12  →  total = 171 < 190
         SizedBox(
           height: 190,
           child: AnimatedBuilder(
@@ -349,82 +363,100 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: d.dailyHistory.asMap().entries.map((e) {
                   final snap = e.value;
-                  final isLast = e.key == d.dailyHistory.length - 1;
-                  final isBestBar = snap.totalSales == maxSales;
+                  final index = e.key;
+                  final isLast = index == d.dailyHistory.length - 1;
+
+                  // FIX: Ab isBestBar ki jagah isSelected use ho raha hai
+                  final isSelected = _selectedIndex == index;
+
                   final ratio = maxSales > 0 ? snap.totalSales / maxSales : 0.0;
-                  // max bar = 120, always clamped
                   final barH = (120 * ratio * progress).clamp(2.0, 120.0);
 
                   return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.max,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          // Label zone — always 20px
-                          SizedBox(
-                            height: 20,
-                            child: isBestBar
-                                ? Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: Text(
-                                      _fmt(snap.totalSales),
-                                      style: GoogleFonts.inter(
-                                        fontSize: 9,
-                                        color: _black,
-                                        fontWeight: FontWeight.w700,
+                    child: GestureDetector(
+                      // FIX: Tap karne par selected index update hoga
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() {
+                          _selectedIndex = index;
+                        });
+                      },
+                      child: Container(
+                        // Tap target ko bada karne ke liye transparent background
+                        color: Colors.transparent,
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.max,
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            SizedBox(
+                              height: 20,
+                              // FIX: Value ab uske upar show hogi jo bar selected hai
+                              child: isSelected
+                                  ? Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Text(
+                                        _fmt(snap.totalSales),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 9,
+                                          color: _black,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      textAlign: TextAlign.center,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  )
-                                : const SizedBox.shrink(),
-                          ),
-                          // Bar — clamped height
-                          Container(
-                            height: barH,
-                            decoration: BoxDecoration(
-                              color: isLast
-                                  ? _black
-                                  : isBestBar
-                                  ? _border
-                                  : _lightGrey,
-                              borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(6),
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutCubic,
+                              height: barH,
+                              decoration: BoxDecoration(
+                                // FIX: Selected bar highlight hoga
+                                color: isSelected
+                                    ? _black
+                                    : isLast
+                                    ? _border.withValues(alpha: 0.6)
+                                    : _lightGrey,
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(6),
+                                ),
                               ),
                             ),
-                          ),
-                          // Gap — always 5px
-                          const SizedBox(height: 5),
-                          // Day letter — always 14px
-                          SizedBox(
-                            height: 14,
-                            child: Text(
-                              _dayLetter(snap.date),
-                              style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: isLast ? _black : _grey,
-                                fontWeight: isLast
-                                    ? FontWeight.w700
-                                    : FontWeight.w400,
+                            const SizedBox(height: 5),
+                            SizedBox(
+                              height: 14,
+                              child: Text(
+                                _dayLetter(snap.date),
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: isSelected ? _black : _grey,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w800
+                                      : FontWeight.w400,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
-                          ),
-                          // Date number — always 12px
-                          SizedBox(
-                            height: 12,
-                            child: Text(
-                              _shortDate(snap.date).split(' ').last,
-                              style: GoogleFonts.inter(
-                                fontSize: 9,
-                                color: _grey.withOpacity(0.5),
+                            SizedBox(
+                              height: 12,
+                              child: Text(
+                                _shortDate(snap.date).split(' ').last,
+                                style: GoogleFonts.inter(
+                                  fontSize: 9,
+                                  color: isSelected
+                                      ? _black.withValues(alpha: 0.6)
+                                      : _grey.withValues(alpha: 0.5),
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -475,7 +507,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withOpacity(0.2),
+                      color: Colors.amber.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(

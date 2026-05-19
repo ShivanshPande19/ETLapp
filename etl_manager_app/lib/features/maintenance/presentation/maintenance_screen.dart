@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+// NEW IMPORT: Dynamic Courts Notifier
+import '../../courts/domain/courts_notifier.dart';
 import '../data/maintenance_repository.dart';
 import '../domain/maintenance_model.dart';
 
@@ -28,11 +31,11 @@ class MaintenanceScreen extends ConsumerStatefulWidget {
 class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
-  late final AnimationController _listCtrl; // ← NEW
+  late final AnimationController _listCtrl;
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
-  int _filterCourt = 0;
+  int _filterCourt = 0; // 0 means 'All'
   String _filterStatus = 'all';
 
   @override
@@ -43,7 +46,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
       duration: const Duration(milliseconds: 350),
     );
     _listCtrl = AnimationController(
-      // ← NEW
       vsync: this,
       duration: const Duration(milliseconds: 900),
     );
@@ -66,12 +68,13 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
   void dispose() {
     _pollTimer?.cancel();
     _fadeCtrl.dispose();
-    _listCtrl.dispose(); // ← NEW
+    _listCtrl.dispose();
     super.dispose();
   }
 
   void _refresh() {
     ref.invalidate(maintenanceProvider);
+    ref.invalidate(courtsNotifierProvider);
     _listCtrl
       ..reset()
       ..forward();
@@ -89,6 +92,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(maintenanceProvider);
+    final courtsAsync = ref.watch(courtsNotifierProvider);
     final bottom = MediaQuery.of(context).padding.bottom + 92.0;
 
     return Scaffold(
@@ -99,7 +103,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
           bottom: false,
           child: Column(
             children: [
-              _buildHeader(),
+              _buildHeader(courtsAsync),
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -120,7 +124,16 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
                         ),
                       ),
                       error: (_, __) => _errorView(),
-                      data: (items) => _buildContent(items, bottom),
+                      data: (items) => courtsAsync.when(
+                        loading: () => const Center(
+                          child: CircularProgressIndicator(
+                            color: _black,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                        error: (_, __) => _errorView(),
+                        data: (courts) => _buildContent(items, bottom),
+                      ),
                     ),
                   ),
                 ),
@@ -132,7 +145,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     );
   }
 
-  Widget _buildHeader() => Padding(
+  Widget _buildHeader(AsyncValue<List<dynamic>> courtsAsync) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,17 +177,30 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            _courtTab('All', 0),
-            const SizedBox(width: 6),
-            _courtTab('Court 1', 1),
-            const SizedBox(width: 6),
-            _courtTab('Court 2', 2),
-            const SizedBox(width: 6),
-            _courtTab('Court 3', 3),
-          ],
+
+        // NEW: Dynamic Courts Tab Layout
+        courtsAsync.when(
+          loading: () => const SizedBox(height: 32),
+          error: (_, __) => const SizedBox(height: 32),
+          data: (courts) {
+            return SizedBox(
+              height: 32,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _courtTab('All', 0),
+                  ...courts.map(
+                    (c) => Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: _courtTab(c.name, c.id),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
+
         const SizedBox(height: 10),
         Container(
           padding: const EdgeInsets.all(4),
@@ -212,30 +238,28 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
 
   Widget _courtTab(String label, int court) {
     final sel = _filterCourt == court;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          setState(() => _filterCourt = court);
-          _listCtrl
-            ..reset()
-            ..forward();
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: sel ? _white : _white.withOpacity(0.07),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: sel ? _black : _grey,
-            ),
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _filterCourt = court);
+        _listCtrl
+          ..reset()
+          ..forward();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        decoration: BoxDecoration(
+          color: sel ? _white : _white.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: sel ? _black : _grey,
           ),
         ),
       ),
@@ -405,7 +429,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
   );
 }
 
-// ─── Stagger Item ─────────────────────────────────────────────────────────────
 class _StaggerItem extends StatelessWidget {
   final Animation<double> anim;
   final Widget child;
@@ -424,7 +447,6 @@ class _StaggerItem extends StatelessWidget {
   );
 }
 
-// ─── Summary Bar ─────────────────────────────────────────────────────────────
 class _SummaryBar extends StatelessWidget {
   final int total, open, inProg, resolved;
   const _SummaryBar({
@@ -484,7 +506,6 @@ class _Stat extends StatelessWidget {
   );
 }
 
-// ─── Issue Tile ───────────────────────────────────────────────────────────────
 class _IssueTile extends StatelessWidget {
   final MaintenanceIssue item;
   final void Function(String) onStatusChange;

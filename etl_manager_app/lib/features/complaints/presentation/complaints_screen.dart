@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+// NEW IMPORT: Dynamic Courts Notifier
+import '../../courts/domain/courts_notifier.dart';
 import '../data/complaints_repository.dart';
 import '../domain/complaint_model.dart';
 
@@ -27,11 +30,11 @@ class ComplaintsScreen extends ConsumerStatefulWidget {
 class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
-  late final AnimationController _listCtrl; // ← NEW
+  late final AnimationController _listCtrl;
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
-  int _filterCourt = 0;
+  int _filterCourt = 0; // 0 means 'All'
   String _filterStatus = 'all';
 
   @override
@@ -42,14 +45,13 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
       duration: const Duration(milliseconds: 350),
     );
     _listCtrl = AnimationController(
-      // ← NEW
       vsync: this,
       duration: const Duration(milliseconds: 900),
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
     Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) _listCtrl.forward(); // ← NEW
+      if (mounted) _listCtrl.forward();
     });
 
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -65,18 +67,18 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
   void dispose() {
     _pollTimer?.cancel();
     _fadeCtrl.dispose();
-    _listCtrl.dispose(); // ← NEW
+    _listCtrl.dispose();
     super.dispose();
   }
 
   void _refresh() {
     ref.invalidate(complaintsProvider);
+    ref.invalidate(courtsNotifierProvider);
     _listCtrl
       ..reset()
-      ..forward(); // ← NEW: re-animate on refresh
+      ..forward();
   }
 
-  // ── stagger helper ────────────────────────────────────────────────────────
   Animation<double> _itemAnim(int i) => CurvedAnimation(
     parent: _listCtrl,
     curve: Interval(
@@ -89,6 +91,7 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(complaintsProvider);
+    final courtsAsync = ref.watch(courtsNotifierProvider);
     final bottom = MediaQuery.of(context).padding.bottom + 92.0;
 
     return Scaffold(
@@ -99,7 +102,7 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           bottom: false,
           child: Column(
             children: [
-              _buildHeader(),
+              _buildHeader(courtsAsync),
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -120,7 +123,16 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
                         ),
                       ),
                       error: (_, __) => _errorView(),
-                      data: (items) => _buildContent(items, bottom),
+                      data: (items) => courtsAsync.when(
+                        loading: () => const Center(
+                          child: CircularProgressIndicator(
+                            color: _black,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                        error: (_, __) => _errorView(),
+                        data: (courts) => _buildContent(items, courts, bottom),
+                      ),
                     ),
                   ),
                 ),
@@ -132,7 +144,7 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     );
   }
 
-  Widget _buildHeader() => Padding(
+  Widget _buildHeader(AsyncValue<List<dynamic>> courtsAsync) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,17 +176,30 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            _courtTab('All', 0),
-            const SizedBox(width: 6),
-            _courtTab('Court 1', 1),
-            const SizedBox(width: 6),
-            _courtTab('Court 2', 2),
-            const SizedBox(width: 6),
-            _courtTab('Court 3', 3),
-          ],
+
+        // NEW: Dynamic Courts
+        courtsAsync.when(
+          loading: () => const SizedBox(height: 32),
+          error: (_, __) => const SizedBox(height: 32),
+          data: (courts) {
+            return SizedBox(
+              height: 32,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _courtTab('All', 0),
+                  ...courts.map(
+                    (c) => Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: _courtTab(c.name, c.id),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
+
         const SizedBox(height: 10),
         Container(
           padding: const EdgeInsets.all(4),
@@ -212,30 +237,28 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
 
   Widget _courtTab(String label, int court) {
     final sel = _filterCourt == court;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          setState(() => _filterCourt = court);
-          _listCtrl
-            ..reset()
-            ..forward(); // ← re-animate on filter change
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: sel ? _white : _white.withOpacity(0.07),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: sel ? _black : _grey,
-            ),
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _filterCourt = court);
+        _listCtrl
+          ..reset()
+          ..forward();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        decoration: BoxDecoration(
+          color: sel ? _white : _white.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: sel ? _black : _grey,
           ),
         ),
       ),
@@ -251,7 +274,7 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           setState(() => _filterStatus = val);
           _listCtrl
             ..reset()
-            ..forward(); // ← re-animate on filter change
+            ..forward();
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -274,7 +297,11 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     );
   }
 
-  Widget _buildContent(List<ComplaintModel> all, double navClearance) {
+  Widget _buildContent(
+    List<ComplaintModel> all,
+    List<dynamic> courts,
+    double navClearance,
+  ) {
     final filtered = all.where((c) {
       if (_filterCourt > 0 && c.courtId != _filterCourt) return false;
       if (_filterStatus != 'all' && c.status != _filterStatus) return false;
@@ -287,7 +314,6 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
       children: [
-        // Summary bar — index 0
         _StaggerItem(
           anim: _itemAnim(0),
           child: _SummaryBar(
@@ -304,7 +330,6 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           const SizedBox(height: 40),
           _StaggerItem(anim: _itemAnim(1), child: _emptyView()),
         ] else ...[
-          // Count label — index 1
           _StaggerItem(
             anim: _itemAnim(1),
             child: Text(
@@ -319,17 +344,26 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           ),
           const SizedBox(height: 10),
 
-          // Each tile — index 2, 3, 4, ...
-          ...filtered.asMap().entries.map(
-            (e) => _StaggerItem(
+          ...filtered.asMap().entries.map((e) {
+            final courtName =
+                courts
+                    .firstWhere(
+                      (c) => c.id == e.value.courtId,
+                      orElse: () => null,
+                    )
+                    ?.name ??
+                'Unknown Court';
+
+            return _StaggerItem(
               anim: _itemAnim(e.key + 2),
               child: _ComplaintTile(
                 key: ValueKey('complaint_${e.value.id}'),
                 item: e.value,
+                courtName: courtName,
                 onStatusChange: (s) => _updateStatus(e.value.id, s),
               ),
-            ),
-          ),
+            );
+          }),
 
           const SizedBox(height: 8),
           _StaggerItem(
@@ -428,7 +462,6 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
   );
 }
 
-// ─── Stagger Item ─────────────────────────────────────────────────────────────
 class _StaggerItem extends StatelessWidget {
   final Animation<double> anim;
   final Widget child;
@@ -447,7 +480,6 @@ class _StaggerItem extends StatelessWidget {
   );
 }
 
-// ─── Summary Bar ──────────────────────────────────────────────────────────────
 class _SummaryBar extends StatelessWidget {
   final int total, open, inProg, resolved;
   const _SummaryBar({
@@ -510,13 +542,14 @@ class _Stat extends StatelessWidget {
   );
 }
 
-// ─── Complaint Tile ───────────────────────────────────────────────────────────
 class _ComplaintTile extends StatelessWidget {
   final ComplaintModel item;
+  final String courtName;
   final void Function(String) onStatusChange;
   const _ComplaintTile({
     super.key,
     required this.item,
+    required this.courtName,
     required this.onStatusChange,
   });
 
@@ -570,7 +603,7 @@ class _ComplaintTile extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      'Court ${item.courtId}  ·  ${_fmtTime(item.createdAt)}',
+                      '$courtName  ·  ${_fmtTime(item.createdAt)}',
                       style: GoogleFonts.inter(fontSize: 12, color: _grey),
                     ),
                   ],

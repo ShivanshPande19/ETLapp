@@ -1,4 +1,3 @@
-# app/api/routes/complaints.py
 from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
@@ -10,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.complaint import Complaint
+# NAYA IMPORT: Court table import karna zaroori hai
+from ...models.sale import Court
 
 try:
     from ...core.security import get_current_user
@@ -22,8 +23,6 @@ except ImportError:
 
 router = APIRouter()
 
-_COURT_NAMES = {1: "Court 1", 2: "Court 2", 3: "Court 3"}
-
 _CATEGORIES = [
     ("food",        "\U0001f354", "Food Quality",    "Taste, hygiene, wrong order, cold food"),
     ("staff",       "\U0001f9d1", "Staff Behaviour", "Rude, inattentive, or unprofessional staff"),
@@ -34,8 +33,7 @@ _CATEGORIES = [
 
 # ─── HTML: Customer complaint form ───────────────────────────────────────────
 
-def _form_html(court_id: int) -> str:
-    court_name = _COURT_NAMES.get(court_id, f"Court {court_id}")
+def _form_html(court_id: int, court_name: str) -> str:
     options = ""
     for val, emoji, label, hint in _CATEGORIES:
         options += f"""
@@ -150,27 +148,38 @@ p{{font-size:14px;color:rgba(255,255,255,.5);line-height:1.6;max-width:280px;mar
 # ─── PUBLIC endpoints (no auth — customer form) ───────────────────────────────
 
 @router.get("/c/{court_id}", response_class=HTMLResponse, include_in_schema=False)
-def complaint_form(court_id: int = Path(..., ge=1, le=3)):
+def complaint_form(court_id: int = Path(..., ge=1), db: Session = Depends(get_db)):
     """QR code target — serves the mobile HTML complaint form."""
-    return HTMLResponse(_form_html(court_id))
+    # NAYA LOGIC: Database se court check karo
+    court = db.query(Court).filter(Court.id == court_id, Court.is_active == True).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found or inactive")
+        
+    return HTMLResponse(_form_html(court_id, court.name))
 
 
 @router.post("/c/{court_id}/submit", response_class=HTMLResponse, include_in_schema=False)
 def submit_complaint(
-    court_id:    int = Path(..., ge=1, le=3),
+    court_id:    int = Path(..., ge=1),
     category:    str = Form(...),
     description: str = Form(..., min_length=5),
     db: Session = Depends(get_db),
 ):
     """Receives form POST from customer's phone, saves to DB, returns thank-you page."""
+    # NAYA LOGIC: Database se court check karo
+    court = db.query(Court).filter(Court.id == court_id, Court.is_active == True).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found or inactive")
+
     if category not in {"food", "staff", "cleanliness", "other"}:
         raise HTTPException(status_code=422, detail="Invalid category")
+        
     db.add(Complaint(
         court_id=court_id, category=category,
         description=description.strip(), status="open",
     ))
     db.commit()
-    return HTMLResponse(_thanks_html(_COURT_NAMES.get(court_id, f"Court {court_id}")))
+    return HTMLResponse(_thanks_html(court.name))
 
 
 # ─── PRIVATE endpoints (manager Flutter app — auth required) ─────────────────
@@ -222,7 +231,7 @@ def update_status(
     if body.status == "resolved":
         c.resolved_at = datetime.now()
     db.commit(); db.refresh(c)
-    return ComplaintOut(
+    return Complaint -Out(
         id=c.id, court_id=c.court_id, category=c.category,
         description=c.description, status=c.status,
         created_at=c.created_at.isoformat() if c.created_at else None,

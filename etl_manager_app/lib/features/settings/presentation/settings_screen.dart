@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/biometric_service.dart';
 import '../../auth/domain/auth_notifier.dart';
+import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../presentation/manage_courts_screen.dart';
 
 const _bg = Color(0xFF080808);
@@ -33,7 +34,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   late final Animation<double> _heroFade;
   late final Animation<Offset> _heroSlide;
 
-  // ✅ Biometric state — Sales Alerts + Auto Refresh replace
   bool _biometricLock = false;
   bool _biometricAvailable = false;
   bool _backPressed = false;
@@ -78,11 +78,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     _loadPrefs();
   }
 
-  // ── Load saved biometric preference + check device availability ──────────
   Future<void> _loadPrefs() async {
     _prefs = await SharedPreferences.getInstance();
     final email = ref.read(authNotifierProvider).managerEmail ?? 'default';
-    final key = 'biometric_lock_$email'; // ✅ per-user key
+    final key = 'biometric_lock_$email';
     final saved = _prefs!.getBool(key) ?? false;
     final available = await BiometricService.isAvailable();
     if (mounted) {
@@ -93,7 +92,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     }
   }
 
-  // ── Toggle handler — enable karne ke liye pehle authenticate ─────────────
   Future<void> _onBiometricToggle(bool v) async {
     HapticFeedback.selectionClick();
     if (v) {
@@ -104,7 +102,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       }
     }
     final email = ref.read(authNotifierProvider).managerEmail ?? 'default';
-    final key = 'biometric_lock_$email'; // ✅ per-user key
+    final key = 'biometric_lock_$email';
     await _prefs?.setBool(key, v);
     if (mounted) setState(() => _biometricLock = v);
   }
@@ -145,6 +143,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authNotifierProvider);
+    final courtsAsync = ref.watch(courtsNotifierProvider); // NEW WATCH
     final name = auth.managerName ?? 'Manager';
     final email = auth.managerEmail ?? 'manager@etl.com';
 
@@ -157,13 +156,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── DARK HEADER ─────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Back pill
                     GestureDetector(
                       onTapDown: (_) {
                         HapticFeedback.selectionClick();
@@ -218,8 +215,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                       ),
                     ),
                     const SizedBox(height: 14),
-
-                    // Hero title
                     FadeTransition(
                       opacity: _heroFade,
                       child: SlideTransition(
@@ -246,8 +241,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                       ),
                     ),
                     const SizedBox(height: 6),
-
-                    // Subtitle badge
                     FadeTransition(
                       opacity: _heroFade,
                       child: Row(
@@ -281,8 +274,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   ],
                 ),
               ),
-
-              // ── WHITE CONTENT AREA ───────────────────────────────────────
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -302,14 +293,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ── Profile Card ───────────────────────────────
                         _StaggerItem(
                           anim: _itemAnim(0),
                           child: _ProfileCard(name: name, email: email),
                         ),
                         const SizedBox(height: 28),
-
-                        // ── App Settings ───────────────────────────────
                         _StaggerItem(
                           anim: _itemAnim(1),
                           child: const _SectionLabel('APP SETTINGS'),
@@ -319,7 +307,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           anim: _itemAnim(2),
                           child: _SettingsGroup(
                             children: [
-                              // ✅ Biometric Lock toggle
                               _ToggleTile(
                                 icon: Icons.fingerprint_rounded,
                                 label: 'Biometric Lock',
@@ -333,7 +320,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                     : null,
                               ),
                               _GroupDivider(),
-                              // ✅ Daily Sync info tile (read-only)
                               _InfoTile(
                                 icon: Icons.schedule_rounded,
                                 label: 'Sales Data Sync',
@@ -344,8 +330,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           ),
                         ),
                         const SizedBox(height: 24),
-
-                        // ── Courts ────────────────────────────────────
                         _StaggerItem(
                           anim: _itemAnim(3),
                           child: const _SectionLabel('COURTS'),
@@ -355,10 +339,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           anim: _itemAnim(4),
                           child: _SettingsGroup(
                             children: [
+                              // CHANGED: Linked subtitle dynamically to real counts
                               _NavTile(
                                 icon: Icons.store_rounded,
                                 label: 'Manage Courts',
-                                subtitle: 'ETL · 3 courts active',
+                                subtitle: courtsAsync.when(
+                                  loading: () => 'Loading courts...',
+                                  error: (_, __) => 'ETL Courts',
+                                  data: (list) =>
+                                      'ETL · ${list.length} active ${list.length == 1 ? 'court' : 'courts'}',
+                                ),
                                 onTap: () => Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -377,8 +367,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           ),
                         ),
                         const SizedBox(height: 24),
-
-                        // ── About ─────────────────────────────────────
                         _StaggerItem(
                           anim: _itemAnim(5),
                           child: const _SectionLabel('ABOUT'),
@@ -411,8 +399,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           ),
                         ),
                         const SizedBox(height: 32),
-
-                        // ── Logout Button ─────────────────────────────
                         _StaggerItem(
                           anim: _itemAnim(7),
                           child: _LogoutButton(
@@ -423,8 +409,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           ),
                         ),
                         const SizedBox(height: 24),
-
-                        // ── Footer ────────────────────────────────────
                         _StaggerItem(
                           anim: _itemAnim(8),
                           child: Center(
@@ -470,7 +454,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   }
 }
 
-// ─── Stagger Item ─────────────────────────────────────────────────────────────
 class _StaggerItem extends StatelessWidget {
   final Animation<double> anim;
   final Widget child;
@@ -489,7 +472,6 @@ class _StaggerItem extends StatelessWidget {
   );
 }
 
-// ─── Section Label ────────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
   final String text;
   const _SectionLabel(this.text);
@@ -519,7 +501,6 @@ class _SectionLabel extends StatelessWidget {
   );
 }
 
-// ─── Profile Card ─────────────────────────────────────────────────────────────
 class _ProfileCard extends StatelessWidget {
   final String name, email;
   const _ProfileCard({required this.name, required this.email});
@@ -614,7 +595,6 @@ class _ProfileCard extends StatelessWidget {
   );
 }
 
-// ─── Settings Group ───────────────────────────────────────────────────────────
 class _SettingsGroup extends StatelessWidget {
   final List<Widget> children;
   const _SettingsGroup({required this.children});
@@ -637,7 +617,6 @@ class _SettingsGroup extends StatelessWidget {
   );
 }
 
-// ─── Group Divider ────────────────────────────────────────────────────────────
 class _GroupDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
@@ -647,7 +626,6 @@ class _GroupDivider extends StatelessWidget {
   );
 }
 
-// ─── Icon Box ─────────────────────────────────────────────────────────────────
 class _IconBox extends StatelessWidget {
   final IconData icon;
   final Color color;
@@ -666,7 +644,6 @@ class _IconBox extends StatelessWidget {
   );
 }
 
-// ─── Toggle Tile ── ✅ enabled param added for biometric unavailable state ────
 class _ToggleTile extends StatelessWidget {
   final IconData icon;
   final String label, subtitle;
@@ -718,7 +695,6 @@ class _ToggleTile extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // Custom animated toggle
         GestureDetector(
           onTap: enabled && onChanged != null ? () => onChanged!(!value) : null,
           child: AnimatedContainer(
@@ -766,7 +742,6 @@ class _ToggleTile extends StatelessWidget {
   );
 }
 
-// ─── Nav Tile ─────────────────────────────────────────────────────────────────
 class _NavTile extends StatefulWidget {
   final IconData icon;
   final String label, subtitle;
@@ -835,7 +810,6 @@ class _NavTileState extends State<_NavTile> {
   );
 }
 
-// ─── Info Tile ────────────────────────────────────────────────────────────────
 class _InfoTile extends StatelessWidget {
   final IconData icon;
   final String label, value;
@@ -877,7 +851,6 @@ class _InfoTile extends StatelessWidget {
   );
 }
 
-// ─── Logout Button ────────────────────────────────────────────────────────────
 class _LogoutButton extends StatefulWidget {
   final VoidCallback onConfirm;
   const _LogoutButton({required this.onConfirm});

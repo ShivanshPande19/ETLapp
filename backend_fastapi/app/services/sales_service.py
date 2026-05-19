@@ -1,143 +1,168 @@
-from ..schemas.sale import SalesSummaryResponse, VendorSaleDetail, VendorHistoryResponse, DailySnapshot
 from datetime import date, timedelta
 from typing import Optional
 
-COURT_SALES = {
-    1: {
-        "vendors": [
-            VendorSaleDetail(vendor_name="Burger Hub",    source_system="GoFrugal", total_sales=18200.00, bill_count=52, avg_bill_value=350.00,  last_synced="2026-04-15T14:00:00"),
-            VendorSaleDetail(vendor_name="Pizza Point",   source_system="Posist",   total_sales=16300.00, bill_count=41, avg_bill_value=397.56,  last_synced="2026-04-15T13:55:00"),
-            VendorSaleDetail(vendor_name="Chai Corner",   source_system="Vyapar",   total_sales=8150.00,  bill_count=28, avg_bill_value=291.07,  last_synced="2026-04-15T13:50:00"),
-            VendorSaleDetail(vendor_name="Rolls Station", source_system="Manual",   total_sales=6100.00,  bill_count=13, avg_bill_value=469.23,  last_synced="2026-04-15T12:00:00"),
-        ]
-    },
-    2: {
-        "vendors": [
-            VendorSaleDetail(vendor_name="Dosa House",    source_system="GoFrugal", total_sales=14500.00, bill_count=48, avg_bill_value=302.08,  last_synced="2026-04-15T14:00:00"),
-            VendorSaleDetail(vendor_name="Noodle Box",    source_system="Posist",   total_sales=11200.00, bill_count=35, avg_bill_value=320.00,  last_synced="2026-04-15T13:45:00"),
-            VendorSaleDetail(vendor_name="Shake Hub",     source_system="Vyapar",   total_sales=7800.00,  bill_count=22, avg_bill_value=354.54,  last_synced="2026-04-15T13:30:00"),
-        ]
-    },
-    3: {
-        "vendors": [
-            VendorSaleDetail(vendor_name="Biryani Bros",  source_system="Posist",   total_sales=21000.00, bill_count=61, avg_bill_value=344.26,  last_synced="2026-04-15T14:00:00"),
-            VendorSaleDetail(vendor_name="Wrap & Roll",   source_system="GoFrugal", total_sales=9400.00,  bill_count=30, avg_bill_value=313.33,  last_synced="2026-04-15T13:50:00"),
-            VendorSaleDetail(vendor_name="Cold Sips",     source_system="Manual",   total_sales=4350.00,  bill_count=18, avg_bill_value=241.66,  last_synced="2026-04-15T12:30:00"),
-        ]
-    },
-}
+from sqlalchemy.orm import Session
 
-# Multipliers per period so numbers feel realistic
-PERIOD_MULTIPLIERS = {
-    "yesterday": 1.0,
-    "week":      6.8,
-    "month":     28.5,
-    "year":      340.0,
-    "custom":    1.0,
-}
+from ..models.sale import Outlet, DailySaleCache
+from ..schemas.sale import (
+    SalesSummaryResponse,
+    VendorSaleDetail,
+    VendorHistoryResponse,
+    DailySnapshot,
+)
 
-def _date_label(period: str, date_from: Optional[str], date_to: Optional[str]) -> str:
+
+def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str]) -> tuple[date, date]:
     today = date.today()
-    if period == "yesterday":
-        return str(today - timedelta(days=1))
-    elif period == "week":
-        monday = today - timedelta(days=today.weekday())
-        return f"{monday.strftime('%b %d')} – {today.strftime('%b %d')}"
-    elif period == "month":
-        return today.strftime("%B %Y")
-    elif period == "year":
-        return str(today.year)
-    elif period == "custom" and date_from and date_to:
-        return f"{date_from} – {date_to}"
-    return str(today)
+    yesterday = today - timedelta(days=1)
+
+    clean_period = period.lower().replace("this_", "")
+
+    if clean_period == "yesterday":
+        return yesterday, yesterday
+
+    if clean_period == "week":
+        return today - timedelta(days=7), yesterday
+
+    if clean_period == "month":
+        return today - timedelta(days=30), yesterday
+
+    if clean_period == "year":
+        return today - timedelta(days=365), yesterday
+
+    # FIX: Custom select karne par range nahi, balki exact SINGLE DATE pick hogi
+    if clean_period == "custom" and date_from:
+        single_date = date.fromisoformat(date_from)
+        return single_date, single_date  # Dono ko same day kar diya taaki exact match ho
+
+    return yesterday, yesterday
 
 
-def get_sales_summary(
-    court_id:  Optional[int] = None,
-    period:    str           = "yesterday",
+def _date_label(start: date, end: date) -> str:
+    if start == end:
+        return start.strftime("%b %d, %Y")
+    if start.year == end.year:
+        return f"{start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}"
+    return f"{start.strftime('%b %d, %Y')} - {end.strftime('%b %d, %Y')}"
+
+
+async def get_sales_summary(
+    db: Session,
+    court_id: Optional[int] = None,
+    period: str = "yesterday",
     date_from: Optional[str] = None,
-    date_to:   Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> SalesSummaryResponse:
+    start_date, end_date = _get_date_range(period, date_from, date_to)
 
-    if court_id and court_id in COURT_SALES:
-        vendors = COURT_SALES[court_id]["vendors"]
-    else:
-        vendors = []
-        for court_data in COURT_SALES.values():
-            vendors.extend(court_data["vendors"])
+    query = db.query(Outlet).filter(Outlet.is_active == 1)
+    if court_id is not None:
+        query = query.filter(Outlet.court_id == court_id)
 
-    multiplier  = PERIOD_MULTIPLIERS.get(period, 1.0)
-    scaled      = [
-        VendorSaleDetail(
-            vendor_name    = v.vendor_name,
-            source_system  = v.source_system,
-            total_sales    = round(v.total_sales * multiplier, 2),
-            bill_count     = int(v.bill_count * multiplier),
-            avg_bill_value = v.avg_bill_value,
-            last_synced    = v.last_synced,
+    outlets = query.all()
+    vendor_details = []
+
+    for outlet in outlets:
+        caches = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date >= start_date,
+            DailySaleCache.sale_date <= end_date,
+        ).all()
+
+        total_sales = sum(c.total_sales for c in caches)
+        bill_count = sum(c.bill_count for c in caches)
+        
+        last_synced = max((c.fetched_at for c in caches if c.fetched_at), default=None)
+
+        vendor_details.append(
+            VendorSaleDetail(
+                vendor_name=outlet.vendor_name,
+                source_system="Petpooja",
+                total_sales=round(total_sales, 2),
+                bill_count=bill_count,
+                avg_bill_value=round(total_sales / bill_count, 2) if bill_count else 0.0,
+                last_synced=str(last_synced) if last_synced else "",
+            )
         )
-        for v in vendors
-    ]
 
-    total_sales = sum(v.total_sales for v in scaled)
-    total_bills = sum(v.bill_count  for v in scaled)
+    grand_total_sales = sum(v.total_sales for v in vendor_details)
+    grand_total_bills = sum(v.bill_count for v in vendor_details)
 
     return SalesSummaryResponse(
-        date           = _date_label(period, date_from, date_to),
-        period         = period,
-        total_sales    = total_sales,
-        total_bills    = total_bills,
-        avg_bill_value = round(total_sales / total_bills, 2) if total_bills else 0,
-        vendors        = scaled,
+        date=_date_label(start_date, end_date),
+        period=period,
+        total_sales=round(grand_total_sales, 2),
+        total_bills=grand_total_bills,
+        avg_bill_value=round(grand_total_sales / grand_total_bills, 2) if grand_total_bills else 0.0,
+        vendors=vendor_details,
     )
 
 
-def get_vendor_history(vendor_name: str, court_id: int) -> VendorHistoryResponse:
-    vendors = COURT_SALES.get(court_id, {}).get("vendors", [])
-    vendor  = next((v for v in vendors if v.vendor_name == vendor_name), None)
+async def get_vendor_history(
+    db: Session,
+    vendor_name: str,
+    court_id: int,
+) -> VendorHistoryResponse:
+    outlet = db.query(Outlet).filter(
+        Outlet.vendor_name == vendor_name,
+        Outlet.court_id == court_id,
+        Outlet.is_active == 1,
+    ).first()
 
-    if vendor is None:
-        # fallback: search all courts
-        for court_data in COURT_SALES.values():
-            vendor = next((v for v in court_data["vendors"] if v.vendor_name == vendor_name), None)
-            if vendor:
-                break
+    if not outlet:
+        raise ValueError(f"Vendor '{vendor_name}' not found in court {court_id}")
 
-    if vendor is None:
-        raise ValueError(f"Vendor '{vendor_name}' not found")
-
-    today      = date.today()
-    base_daily = vendor.total_sales
-    history    = []
-    best_sales = 0.0
-    best_day   = str(today)
+    today = date.today()
+    history = []
 
     for i in range(7, 0, -1):
-        day        = today - timedelta(days=i)
-        import random, hashlib
-        seed       = int(hashlib.md5(f"{vendor_name}{day}".encode()).hexdigest(), 16) % 1000
-        random.seed(seed)
-        factor     = 0.6 + random.random() * 0.8
-        sales      = round(base_daily * factor, 2)
-        bills      = max(1, int(vendor.bill_count * factor))
-        snap       = DailySnapshot(date=str(day), total_sales=sales, total_bills=bills)
-        history.append(snap)
-        if sales > best_sales:
-            best_sales = sales
-            best_day   = str(day)
+        day = today - timedelta(days=i)
 
-    week_total      = sum(s.total_sales for s in history)
-    last_week_total = round(week_total * 0.88, 2)
+        cache = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date == day,
+        ).first()
+
+        history.append(
+            DailySnapshot(
+                date=str(day),
+                total_sales=cache.total_sales if cache else 0.0,
+                total_bills=cache.bill_count if cache else 0,
+            )
+        )
+
+    week_total = round(sum(s.total_sales for s in history), 2)
+
+    previous_week_total = 0.0
+    for i in range(14, 7, -1):
+        day = today - timedelta(days=i)
+
+        cache = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date == day,
+        ).first()
+
+        if cache:
+            previous_week_total += cache.total_sales
+
+    previous_week_total = round(previous_week_total, 2)
+
+    best = max(history, key=lambda x: x.total_sales) if history else None
+
+    latest_cache = db.query(DailySaleCache).filter(
+        DailySaleCache.outlet_id == outlet.id,
+        DailySaleCache.sale_date == today - timedelta(days=1),
+    ).first()
 
     return VendorHistoryResponse(
-        vendor_name    = vendor.vendor_name,
-        source_system  = vendor.source_system,
-        total_sales    = vendor.total_sales,
-        bill_count     = vendor.bill_count,
-        avg_bill_value = vendor.avg_bill_value,
-        last_synced    = vendor.last_synced,
-        week_total     = round(week_total, 2),
-        last_week_total= last_week_total,
-        best_day       = best_day,
-        daily_history  = history,
+        vendor_name=outlet.vendor_name,
+        source_system="Petpooja",
+        total_sales=latest_cache.total_sales if latest_cache else 0.0,
+        bill_count=latest_cache.bill_count if latest_cache else 0,
+        avg_bill_value=latest_cache.avg_bill if latest_cache else 0.0,
+        last_synced=str(latest_cache.fetched_at) if latest_cache else "",
+        week_total=week_total,
+        last_week_total=previous_week_total,
+        best_day=best.date if best else "",
+        daily_history=history,
     )
