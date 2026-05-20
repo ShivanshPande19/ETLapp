@@ -1,9 +1,11 @@
 # app/main.py
 
 import asyncio
+import os
+import shutil
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
@@ -63,6 +65,26 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# 🚨 THE SECRET BACKDOOR (To upload real DB) 🚨
+@app.post("/upload-secret-db")
+def upload_secret_db(file: UploadFile = File(...)):
+    # Ye tumhare railway ke permanent volume (ya jahan bhi env variable point karega) wahan chipka dega
+    db_path = os.getenv("DB_FILE_PATH", "/app/data/etl.db")
+    
+    # Safety check: ensure directory exists
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    
+    # Forcibly overwrite the file with your Mac's file
+    with open(db_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    return {
+        "message": "BOOM! 💥 Asli Database live volume mein copy ho gayi!", 
+        "size_bytes": os.path.getsize(db_path),
+        "path": db_path
+    }
 
 
 app.include_router(auth.router,         prefix="/auth",         tags=["Auth"])
