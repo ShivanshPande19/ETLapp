@@ -26,30 +26,45 @@ if db_file_env:
     _db_file = pathlib.Path(db_file_env)
     DATABASE_URL = f"sqlite:///{_db_file}"
 elif not DATABASE_URL:
-    # Local fallback if nothing is set
+    # Local fallback if nothing is set in env
     _db_file = pathlib.Path(__file__).parent / "etl.db"
     DATABASE_URL = f"sqlite:///{_db_file}"
 else:
-    # Fallback for Postgres or other DBs (no local file)
+    # Fallback for Postgres or other DBs (no local file logic needed)
     _db_file = None
 
-# ── PERMANENT FIX LOGIC (Seed DB) ─────────────────────────────────────────────
+# ── PERMANENT FIX LOGIC (Super-Search Seed DB) ─────────────────────────────────
 if DATABASE_URL.startswith("sqlite") and _db_file:
-    # Find seed file whether it's in backend_fastapi/app/ or backend_fastapi/
-    _seed_path_app = pathlib.Path(__file__).parent / "seed_etl.db"
-    _seed_path_root = pathlib.Path(__file__).parent.parent / "seed_etl.db"
-    
-    actual_seed = None
-    if _seed_path_app.exists():
-        actual_seed = _seed_path_app
-    elif _seed_path_root.exists():
-        actual_seed = _seed_path_root
+    # Agar live volume me database file nahi mili, tabhi seed se copy karenge
+    if not _db_file.exists():
+        print("🔍 Target DB not found in volume. Searching for seed_etl.db...")
         
-    # If the destination volume DB doesn't exist but we have a seed file, copy it!
-    if actual_seed and not _db_file.exists():
-        _db_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(actual_seed, _db_file)
-        print(f"🚀 DATABASE INITIALIZED: Copied real data from {actual_seed} to permanent volume {_db_file}")
+        # Alag-alag possible paths jahan GitHub push ke baad file ho sakti hai
+        possible_seed_paths = [
+            pathlib.Path(__file__).parent / "seed_etl.db",                     # app/seed_etl.db
+            pathlib.Path(__file__).parent.parent / "seed_etl.db",              # root/seed_etl.db
+            pathlib.Path("/backend_fastapi/seed_etl.db"),                      # Absolute root
+            pathlib.Path("/backend_fastapi/app/seed_etl.db"),                  # Absolute app
+            pathlib.Path.cwd() / "seed_etl.db",                                # Current Working Directory
+            pathlib.Path.cwd() / "app" / "seed_etl.db"
+        ]
+        
+        actual_seed = None
+        for path in possible_seed_paths:
+            if path.exists():
+                actual_seed = path
+                print(f"🎯 Found seed file at: {path}")
+                break
+
+        # Agar kisi bhi raste par file mil gayi, toh use volume mein copy maro
+        if actual_seed:
+            _db_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(actual_seed, _db_file)
+            print(f"🚀 DATABASE INITIALIZED: Successfully copied real data from {actual_seed} to permanent volume {_db_file}")
+        else:
+            print("❌ ERROR: seed_etl.db could not be found anywhere on the server!")
+    else:
+        print(f"📁 Database file already exists at {_db_file}. Skipping seed copy.")
 
 # ── Engine ────────────────────────────────────────────────────────────────────
 # connect_args only needed for SQLite (disables the single-thread check so
