@@ -16,3 +16,6 @@ __pycache__/
 # QR code output files
 ../qr_codes/
 ../maintenance_qr_codes/
+
+
+!seed_etl.db
