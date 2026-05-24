@@ -1,13 +1,19 @@
-FROM python:3.11-slim
+# Use official Python lightweight image
+FROM python:3.10-slim
 
-WORKDIR /backend_fastapi
+# Set the working directory inside the container
+WORKDIR /code
 
-COPY backend_fastapi/requirements.txt .
+# Copy requirements file first (for better caching)
+# Ab hum 'backend_fastapi/' prefix nahi lagayenge
+COPY requirements.txt .
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY backend_fastapi/ .
+# Copy the rest of the application code and your seed_etl.db
+# 'COPY . .' ka matlab hai saara current data uthao aur container mein daal do
+COPY . .
 
-EXPOSE 8000
-
-# Shell form (not exec form) — taaki $PORT runtime pe expand ho
+# Ensure the runtime dynamic port expansion works perfectly
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]

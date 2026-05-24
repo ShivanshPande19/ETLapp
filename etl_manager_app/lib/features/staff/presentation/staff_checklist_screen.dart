@@ -9,6 +9,9 @@ import 'package:image_picker/image_picker.dart';
 import '../domain/housekeeping_notifier.dart';
 import '../domain/housekeeping_models.dart' as hk;
 
+// ✅ NEW IMPORT: DB se real court name laane ke liye
+import '../../courts/domain/courts_notifier.dart';
+
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
 const _white = Color(0xFFFFFFFF);
@@ -585,13 +588,25 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
   @override
   Widget build(BuildContext context) {
     final hkState = ref.watch(housekeepingNotifierProvider);
+    final courtsAsync = ref.watch(courtsNotifierProvider);
+
     final shift = hkState.shift;
     final dailyTasks = _tasksForShift(shift);
     final totalVisible = dailyTasks.length + 2;
     final doneCount = hkState.lockedDoneCount;
-    final courtLabel = hkState.courtId != null
-        ? 'Court ${hkState.courtId}'
-        : 'Unassigned Court';
+
+    // ✅ FIX: Dynamic Court Name Fetching
+    String courtLabel = 'Unassigned Court';
+    if (hkState.courtId != null) {
+      courtLabel = 'Court ${hkState.courtId}'; // Fallback
+      courtsAsync.whenData((courts) {
+        final match = courts.where((c) => c.id == hkState.courtId);
+        if (match.isNotEmpty) {
+          courtLabel = match.first.name;
+        }
+      });
+    }
+
     final navBarClearance = MediaQuery.of(context).padding.bottom + 92.0;
     final shiftActive = _isShiftTimeActive(shift);
 

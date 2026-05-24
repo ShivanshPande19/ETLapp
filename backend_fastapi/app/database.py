@@ -3,11 +3,16 @@ import pathlib
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Sirf aur sirf live volume ya local path use karo, no copying!
-db_file_env = os.getenv("DB_FILE_PATH", "/app/data/etl.db")
-_db_file = pathlib.Path(db_file_env)
+# 🚀 BULLETPROOF LOGIC: Railway khud ek hidden variable deta hai. 
+# Agar wo variable hai, toh hum cloud par hain. Warna Mac par hain!
+if os.getenv("RAILWAY_ENVIRONMENT_NAME"):
+    db_path = "/app/data/etl.db"
+else:
+    db_path = "app/etl.db"
 
-# Ensure folder exists
+_db_file = pathlib.Path(db_path)
+
+# Ensure folder exists safely
 _db_file.parent.mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{_db_file}"

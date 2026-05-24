@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
 import '../data/sales_repository.dart';
 import 'package:flutter/services.dart';
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const _white = Color(0xFFFFFFFF);
@@ -21,6 +22,7 @@ void showVendorDetail({
 }) {
   showModalBottomSheet(
     context: context,
+    useRootNavigator: true, // ✅ THE MAGIC FIX: Nav bar ko override karega
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (_) => _VendorDetailSheet(
@@ -54,7 +56,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
   String? _error;
   late AnimationController _barCtrl;
 
-  // FIX: Selected bar ko track karne ke liye state variable
+  // Selected bar ko track karne ke liye state variable
   int? _selectedIndex;
 
   @override
@@ -79,7 +81,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
           _data = result;
           _loading = false;
 
-          // FIX: Load hone par automatically highest bar ko select karlo
+          // Load hone par automatically highest bar ko select karlo
           if (result.dailyHistory.isNotEmpty) {
             double maxVal = result.dailyHistory.first.totalSales;
             int maxIdx = 0;
@@ -366,7 +368,6 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
                   final index = e.key;
                   final isLast = index == d.dailyHistory.length - 1;
 
-                  // FIX: Ab isBestBar ki jagah isSelected use ho raha hai
                   final isSelected = _selectedIndex == index;
 
                   final ratio = maxSales > 0 ? snap.totalSales / maxSales : 0.0;
@@ -374,7 +375,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
 
                   return Expanded(
                     child: GestureDetector(
-                      // FIX: Tap karne par selected index update hoga
+                      // Tap karne par selected index update hoga
                       onTap: () {
                         HapticFeedback.selectionClick();
                         setState(() {
@@ -391,7 +392,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
                           children: [
                             SizedBox(
                               height: 20,
-                              // FIX: Value ab uske upar show hogi jo bar selected hai
+                              // Value ab uske upar show hogi jo bar selected hai
                               child: isSelected
                                   ? Align(
                                       alignment: Alignment.bottomCenter,
@@ -413,7 +414,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
                               curve: Curves.easeOutCubic,
                               height: barH,
                               decoration: BoxDecoration(
-                                // FIX: Selected bar highlight hoga
+                                // Selected bar highlight hoga
                                 color: isSelected
                                     ? _black
                                     : isLast

@@ -345,14 +345,11 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
           const SizedBox(height: 10),
 
           ...filtered.asMap().entries.map((e) {
-            final courtName =
-                courts
-                    .firstWhere(
-                      (c) => c.id == e.value.courtId,
-                      orElse: () => null,
-                    )
-                    ?.name ??
-                'Unknown Court';
+            // ✅ THE FIX: Safely finding the court without crashing
+            final matchedCourts = courts.where((c) => c.id == e.value.courtId);
+            final courtName = matchedCourts.isNotEmpty
+                ? matchedCourts.first.name
+                : 'Unknown Court';
 
             return _StaggerItem(
               anim: _itemAnim(e.key + 2),

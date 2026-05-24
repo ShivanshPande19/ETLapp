@@ -9,11 +9,10 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.maintenance import MaintenanceIssue
-# NEW IMPORT: Court table
-from ...models.sale import Court
+# NEW IMPORT: Court & Outlet tables
+from ...models.sale import Court, Outlet
 
 router = APIRouter()
-
 
 _ISSUE_TYPES = [
     ("electrical",  "⚡", "Electrical",      "Lights, fans, sockets, wiring issues"),
@@ -26,9 +25,7 @@ _ISSUE_TYPES = [
 
 # ── HTML Form ────────────────────────────────────────────────────────────────
 
-def _form_html(court_id: int, court_name: str, cart_id: str) -> str:
-    cart_name  = f"Cart {cart_id}"
-
+def _form_html(court_id: int, court_name: str, cart_name: str, cart_id: str) -> str:
     options = ""
     for val, emoji, label, hint in _ISSUE_TYPES:
         options += f"""
@@ -159,7 +156,14 @@ def maintenance_form(
     if not court:
         raise HTTPException(status_code=404, detail="Court not found or inactive")
         
-    return HTMLResponse(_form_html(court_id, court.name, cart_id.upper()))
+    # NAYA LOGIC: Resolve real outlet name dynamically
+    cart_name = f"Cart {cart_id.upper()}"
+    if cart_id.isdigit():
+        outlet = db.query(Outlet).filter(Outlet.id == int(cart_id)).first()
+        if outlet:
+            cart_name = outlet.vendor_name.split('(')[0].strip()
+
+    return HTMLResponse(_form_html(court_id, court.name, cart_name, cart_id.upper()))
 
 
 @router.post("/m/{court_id}/{cart_id}/submit", response_class=HTMLResponse, include_in_schema=False)
@@ -179,7 +183,12 @@ def submit_maintenance(
     if issue_type not in valid_types:
         raise HTTPException(status_code=422, detail="Invalid issue type")
 
-    cart_name  = f"Cart {cart_id.upper()}"
+    # NAYA LOGIC: Resolve real outlet name to save in database
+    cart_name = f"Cart {cart_id.upper()}"
+    if cart_id.isdigit():
+        outlet = db.query(Outlet).filter(Outlet.id == int(cart_id)).first()
+        if outlet:
+            cart_name = outlet.vendor_name.split('(')[0].strip()
 
     db.add(MaintenanceIssue(
         court_id=court_id,

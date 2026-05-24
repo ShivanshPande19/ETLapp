@@ -5,12 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+
 import '../../staff/domain/housekeeping_models.dart' as hk;
 import '../../staff/data/housekeeping_repository.dart';
 import '../../complaints/domain/complaint_model.dart';
 import '../../complaints/data/complaints_repository.dart';
 import 'staff_complaints_screen.dart';
-import '../../settings/presentation/staff_settings_screen.dart'; // ← NEW
+import '../../settings/presentation/staff_settings_screen.dart';
+
+// ✅ NEW IMPORT: DB se real court name laane ke liye
+import '../../courts/domain/courts_notifier.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -145,8 +149,12 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
     _cardsCtrl
       ..reset()
       ..forward();
+
+    // ✅ NEW: Refresh court names as well
+    ref.invalidate(courtsNotifierProvider);
     ref.invalidate(_staffHkProvider(_dateStr));
     ref.invalidate(_staffComplaintsProvider(widget.assignedCourt));
+
     await Future.wait([
       ref.read(_staffHkProvider(_dateStr).future).catchError((_) => null),
       ref
@@ -155,13 +163,14 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
     ]);
   }
 
-  void _openComplaints() {
+  // ✅ FIX: real court name accept karne ke liye update kiya
+  void _openComplaints(String courtName) {
     HapticFeedback.selectionClick();
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (_, anim, __) => StaffComplaintsScreen(
           courtId: widget.assignedCourt,
-          courtName: 'Court ${widget.assignedCourt}',
+          courtName: courtName,
         ),
         transitionsBuilder: (_, anim, __, child) {
           final curved = CurvedAnimation(
@@ -184,7 +193,6 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
     );
   }
 
-  // ── NEW: Navigation to StaffSettingsScreen ──────────────────────────────────
   void _openSettings() {
     HapticFeedback.selectionClick();
     Navigator.of(context).push(
@@ -224,6 +232,18 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
   Widget build(BuildContext context) {
     final hkAsync = ref.watch(_staffHkProvider(_dateStr));
     final cmpAsync = ref.watch(_staffComplaintsProvider(widget.assignedCourt));
+
+    // ✅ NEW: Fetch real court names from DB
+    final courtsAsync = ref.watch(courtsNotifierProvider);
+    String realCourtName = 'Court ${widget.assignedCourt}'; // Fallback
+
+    courtsAsync.whenData((courts) {
+      final match = courts.where((c) => c.id == widget.assignedCourt);
+      if (match.isNotEmpty) {
+        realCourtName = match.first.name;
+      }
+    });
+
     final navClearance = MediaQuery.of(context).padding.bottom + 92.0;
 
     return Scaffold(
@@ -258,12 +278,10 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                             ),
                           ),
                         ),
-
-                        // ── Avatar → tappable → opens Settings ──────
                         FadeTransition(
                           opacity: _heroFade,
                           child: GestureDetector(
-                            onTap: _openSettings, // ← NEW
+                            onTap: _openSettings,
                             child: Container(
                               width: 38,
                               height: 38,
@@ -389,14 +407,12 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                         ),
                         padding: EdgeInsets.fromLTRB(20, 24, 20, navClearance),
                         children: [
-                          // 1. Shift Card
                           _StaggerRow(
                             anim: _stagger(0),
                             child: _ShiftCard(shift: _currentShift, now: _now),
                           ),
                           const SizedBox(height: 10),
 
-                          // 2. Housekeeping Card
                           _StaggerRow(
                             anim: _stagger(1),
                             child: hkAsync.when(
@@ -435,7 +451,8 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                                 );
                                 return _HousekeepingCard(
                                   shift: _currentShift,
-                                  court: widget.assignedCourt,
+                                  courtName:
+                                      realCourtName, // ✅ FIX: Send real name
                                   done: shiftData.done,
                                   total: shiftData.total == 0
                                       ? hk.kTasksPerShift
@@ -447,7 +464,6 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                           ),
                           const SizedBox(height: 10),
 
-                          // 3. Complaints Card
                           _StaggerRow(
                             anim: _stagger(2),
                             child: cmpAsync.when(
@@ -463,7 +479,11 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                               data: (complaints) => _ComplaintsCard(
                                 openCount: complaints.length,
                                 courtId: widget.assignedCourt,
-                                onViewTap: _openComplaints,
+                                courtName:
+                                    realCourtName, // ✅ FIX: Send real name
+                                onViewTap: () => _openComplaints(
+                                  realCourtName,
+                                ), // Pass name to next screen
                               ),
                             ),
                           ),
@@ -613,15 +633,18 @@ class _ShiftCard extends StatelessWidget {
 // ─── Housekeeping Card ────────────────────────────────────────────────────────
 class _HousekeepingCard extends StatefulWidget {
   final hk.Shift shift;
-  final int court, done, total;
+  final String courtName; // ✅ FIX: int court -> String courtName
+  final int done, total;
   final VoidCallback onTap;
+
   const _HousekeepingCard({
     required this.shift,
-    required this.court,
+    required this.courtName,
     required this.done,
     required this.total,
     required this.onTap,
   });
+
   @override
   State<_HousekeepingCard> createState() => _HousekeepingCardState();
 }
@@ -692,7 +715,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                           ),
                         ),
                         Text(
-                          'Court ${widget.court} · ${_shiftLbl(widget.shift)} Shift',
+                          '${widget.courtName} · ${_shiftLbl(widget.shift)} Shift', // ✅ FIX: courtName apply
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             color: _grey,
@@ -775,12 +798,16 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
 // ─── Complaints Card ──────────────────────────────────────────────────────────
 class _ComplaintsCard extends StatefulWidget {
   final int openCount, courtId;
+  final String courtName; // ✅ FIX: Added courtName
   final VoidCallback onViewTap;
+
   const _ComplaintsCard({
     required this.openCount,
     required this.courtId,
+    required this.courtName,
     required this.onViewTap,
   });
+
   @override
   State<_ComplaintsCard> createState() => _ComplaintsCardState();
 }
@@ -834,7 +861,7 @@ class _ComplaintsCardState extends State<_ComplaintsCard> {
                       ),
                     ),
                     Text(
-                      'Court ${widget.courtId}',
+                      widget.courtName, // ✅ FIX: Real court name showing here
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         color: _grey,

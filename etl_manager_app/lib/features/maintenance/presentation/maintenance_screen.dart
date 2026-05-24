@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// NEW IMPORT: Dynamic Courts Notifier
 import '../../courts/domain/courts_notifier.dart';
 import '../data/maintenance_repository.dart';
 import '../domain/maintenance_model.dart';
@@ -35,7 +34,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
   late final Animation<double> _fadeAnim;
   Timer? _pollTimer;
 
-  int _filterCourt = 0; // 0 means 'All'
+  int _filterCourt = 0;
   String _filterStatus = 'all';
 
   @override
@@ -178,7 +177,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
         ),
         const SizedBox(height: 16),
 
-        // NEW: Dynamic Courts Tab Layout
         courtsAsync.when(
           loading: () => const SizedBox(height: 32),
           error: (_, __) => const SizedBox(height: 32),
@@ -509,6 +507,7 @@ class _Stat extends StatelessWidget {
 class _IssueTile extends StatelessWidget {
   final MaintenanceIssue item;
   final void Function(String) onStatusChange;
+
   const _IssueTile({
     super.key,
     required this.item,
@@ -565,6 +564,7 @@ class _IssueTile extends StatelessWidget {
                       ),
                     ),
                     Text(
+                      // DIRECTLY USING THE BACKEND VALUES NOW
                       '${item.courtName}  ·  ${item.cartName}  ·  ${_fmtTime(item.createdAt)}',
                       style: GoogleFonts.inter(fontSize: 12, color: _grey),
                     ),
