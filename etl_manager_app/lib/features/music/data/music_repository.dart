@@ -1,96 +1,124 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/network/api_client.dart';
 import '../domain/music_models.dart';
-import 'music_mock_data.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Set to false when real Spotify backend is ready
-const bool _useMock = true;
-// ─────────────────────────────────────────────────────────────────────────────
 
 class MusicRepository {
+  final Dio _dio;
+
+  MusicRepository(this._dio);
+
   Future<bool> getAuthStatus() async {
-    if (_useMock) { await _delay(); return true; }
-    throw UnimplementedError();
+    final res = await _dio.get('/music/auth/status');
+    return res.data['is_authenticated'] ?? false;
   }
 
   Future<String> getAuthUrl() async {
-    if (_useMock) return 'https://accounts.spotify.com/';
-    throw UnimplementedError();
+    final res = await _dio.get('/music/auth/url');
+    return res.data['auth_url'];
   }
 
-  Future<PlaybackState> getPlaybackState() async {
-    if (_useMock) {
-      await _delay(ms: 300);
-      return MusicMockData.playbackState();
-    }
-    throw UnimplementedError();
+  // Yahan ab optional courtId parameter add ho gaya hai
+  Future<PlaybackState> getPlaybackState({int? courtId}) async {
+    final res = await _dio.get(
+      '/music/playback',
+      queryParameters: {if (courtId != null) 'court_id': courtId},
+    );
+    return PlaybackState.fromJson(res.data);
   }
 
   Future<void> play({int? courtId, String? playlistUri}) async {
-    if (_useMock) { await _delay(ms: 200); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/play',
+      data: {
+        if (courtId != null) 'court_id': courtId,
+        if (playlistUri != null) 'playlist_uri': playlistUri,
+      },
+    );
   }
 
   Future<void> pause({int? courtId}) async {
-    if (_useMock) { await _delay(ms: 200); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/pause',
+      data: {if (courtId != null) 'court_id': courtId},
+    );
   }
 
   Future<void> skipNext({int? courtId}) async {
-    if (_useMock) { await _delay(ms: 200); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/next',
+      data: {if (courtId != null) 'court_id': courtId},
+    );
   }
 
   Future<void> skipPrevious({int? courtId}) async {
-    if (_useMock) { await _delay(ms: 200); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/previous',
+      data: {if (courtId != null) 'court_id': courtId},
+    );
   }
 
   Future<void> setVolume(int volume, {int? courtId}) async {
-    if (_useMock) { await _delay(ms: 100); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/volume',
+      data: {if (courtId != null) 'court_id': courtId, 'volume': volume},
+    );
   }
 
   Future<void> toggleShuffle(bool state, {int? courtId}) async {
-    if (_useMock) { await _delay(ms: 100); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/shuffle',
+      data: {if (courtId != null) 'court_id': courtId, 'state': state},
+    );
+  }
+
+  // Naya function jo error resolve karega
+  Future<void> toggleRepeat(String state, {int? courtId}) async {
+    await _dio.post(
+      '/music/repeat',
+      data: {if (courtId != null) 'court_id': courtId, 'state': state},
+    );
   }
 
   Future<List<SpotifyPlaylist>> getPlaylists() async {
-    if (_useMock) {
-      await _delay();
-      return MusicMockData.playlists;
-    }
-    throw UnimplementedError();
+    final res = await _dio.get('/music/playlists');
+    return (res.data['playlists'] as List)
+        .map((j) => SpotifyPlaylist.fromJson(j))
+        .toList();
   }
 
   Future<List<SpotifyDevice>> getDevices() async {
-    if (_useMock) {
-      await _delay();
-      return MusicMockData.devices;
-    }
-    throw UnimplementedError();
+    final res = await _dio.get('/music/devices');
+    return (res.data['devices'] as List)
+        .map((j) => SpotifyDevice.fromJson(j))
+        .toList();
   }
 
   Future<void> linkDevice({
-    required int    courtId,
+    required int courtId,
     required String deviceId,
     required String deviceName,
   }) async {
-    if (_useMock) { await _delay(ms: 300); return; }
-    throw UnimplementedError();
+    await _dio.post(
+      '/music/link-device',
+      data: {
+        'court_id': courtId,
+        'device_id': deviceId,
+        'device_name': deviceName,
+      },
+    );
   }
 
   Future<List<CourtDevice>> getCourtDevices() async {
-    if (_useMock) {
-      await _delay();
-      return MusicMockData.courtDevices;
-    }
-    throw UnimplementedError();
+    final res = await _dio.get('/music/court-devices');
+    return (res.data['court_devices'] as List)
+        .map((j) => CourtDevice.fromJson(j))
+        .toList();
   }
-
-  Future<void> _delay({int ms = 500}) =>
-      Future.delayed(Duration(milliseconds: ms));
 }
 
-final musicRepositoryProvider = Provider((ref) => MusicRepository());
+// Provider jisme existing API client inject ho raha hai
+final musicRepositoryProvider = Provider<MusicRepository>((ref) {
+  final dio = ref.watch(dioProvider);
+  return MusicRepository(dio);
+});

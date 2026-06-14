@@ -9,16 +9,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../domain/music_notifier.dart';
 import '../domain/music_models.dart';
 
-// ─── Palette (identical to complaints_screen & maintenance_screen) ─────────
+// ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
 const _black = Color(0xFF0A0A0A);
 const _white = Color(0xFFFFFFFF);
 const _grey = Color(0xFF888888);
 const _ok = Color(0xFF22C55E);
-const _warn = Color(0xFFF59E0B);
-const _danger = Color(0xFFEF4444);
-const _blue = Color(0xFF60A5FA);
-const _purple = Color(0xFFA78BFA);
 const _spotify = Color(0xFF1DB954);
 const _card = Color(0xFFF5F5F5);
 
@@ -30,13 +26,14 @@ class MusicScreen extends ConsumerStatefulWidget {
 }
 
 class _MusicScreenState extends ConsumerState<MusicScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fadeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 350),
@@ -50,8 +47,16 @@ class _MusicScreenState extends ConsumerState<MusicScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _fadeCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.read(musicNotifierProvider.notifier).refresh();
+    }
   }
 
   @override
@@ -122,10 +127,10 @@ class _MusicScreenState extends ConsumerState<MusicScreen>
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: _spotify.withOpacity(0.14),
+                  color: _spotify.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: _spotify.withOpacity(0.3),
+                    color: _spotify.withValues(alpha: 0.3),
                     width: 1,
                   ),
                 ),
@@ -153,19 +158,27 @@ class _MusicScreenState extends ConsumerState<MusicScreen>
           ],
         ),
 
-        // Court selector — only shown when authenticated
+        // Court selector — dynamically mapped from state.courtDevices
         if (state.isAuthenticated) ...[
           const SizedBox(height: 16),
-          Row(
-            children: [
-              _courtTab('All', null, state.selectedCourtId),
-              const SizedBox(width: 6),
-              _courtTab('Court 1', 1, state.selectedCourtId),
-              const SizedBox(width: 6),
-              _courtTab('Court 2', 2, state.selectedCourtId),
-              const SizedBox(width: 6),
-              _courtTab('Court 3', 3, state.selectedCourtId),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              children: [
+                _courtTab('All', null, state.selectedCourtId),
+                ...state.courtDevices.map(
+                  (c) => Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: _courtTab(
+                      c.courtName,
+                      c.courtId,
+                      state.selectedCourtId,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
 
@@ -180,9 +193,9 @@ class _MusicScreenState extends ConsumerState<MusicScreen>
       width: 36,
       height: 36,
       decoration: BoxDecoration(
-        color: _white.withOpacity(0.07),
+        color: _white.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _white.withOpacity(0.08)),
+        border: Border.all(color: _white.withValues(alpha: 0.08)),
       ),
       child: Icon(icon, size: 18, color: _grey),
     ),
@@ -190,27 +203,25 @@ class _MusicScreenState extends ConsumerState<MusicScreen>
 
   Widget _courtTab(String label, int? courtId, int? selected) {
     final sel = selected == courtId;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          ref.read(musicNotifierProvider.notifier).selectCourt(courtId);
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: sel ? _white : _white.withOpacity(0.07),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: sel ? _black : _grey,
-            ),
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        ref.read(musicNotifierProvider.notifier).selectCourt(courtId);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        decoration: BoxDecoration(
+          color: sel ? _white : _white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: sel ? _black : _grey,
           ),
         ),
       ),
@@ -232,15 +243,8 @@ class _MusicScreenState extends ConsumerState<MusicScreen>
     }
     if (!state.isAuthenticated) {
       return _SpotifyConnectState(
-        onConnect: () async {
-          final url = await ref
-              .read(musicNotifierProvider.notifier)
-              .getAuthUrl();
-          final uri = Uri.parse(url);
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-        },
+        onConnect: () =>
+            ref.read(musicNotifierProvider.notifier).connectSpotify(),
       );
     }
     return _Dashboard(state: state, navClearance: navClearance);
@@ -263,7 +267,7 @@ class _SpotifyConnectState extends StatelessWidget {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: _spotify.withOpacity(0.1),
+              color: _spotify.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: const Icon(
@@ -390,10 +394,10 @@ class _Dashboard extends ConsumerWidget {
           child: Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              'Pull to refresh  ·  auto-refresh 5s',
+              'Pull to refresh  ·  auto-refresh 20s',
               style: GoogleFonts.inter(
                 fontSize: 11,
-                color: _black.withOpacity(0.25),
+                color: _black.withValues(alpha: 0.25),
               ),
             ),
           ),
@@ -422,7 +426,7 @@ class _NowPlayingCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.10),
+            color: Colors.black.withValues(alpha: 0.10),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -437,7 +441,7 @@ class _NowPlayingCard extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: _spotify.withOpacity(0.18),
+                  color: _spotify.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -502,7 +506,7 @@ class _NowPlayingCard extends ConsumerWidget {
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.inter(
                           fontSize: 11,
-                          color: _grey.withOpacity(0.6),
+                          color: _grey.withValues(alpha: 0.6),
                         ),
                       ),
                   ],
@@ -519,7 +523,7 @@ class _NowPlayingCard extends ConsumerWidget {
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
                 value: track.progressFraction,
-                backgroundColor: _white.withOpacity(0.1),
+                backgroundColor: _white.withValues(alpha: 0.1),
                 valueColor: const AlwaysStoppedAnimation<Color>(_spotify),
                 minHeight: 3,
               ),
@@ -583,11 +587,13 @@ class _NowPlayingCard extends ConsumerWidget {
                 onTap: () => notifier.skipNext(),
                 size: 22,
               ),
-              // Repeat (display only — no backend method yet)
+              // Repeat
               _CtrlBtn(
-                icon: Icons.repeat_rounded,
+                icon: (state.playback?.repeat == 'track')
+                    ? Icons.repeat_one_rounded
+                    : Icons.repeat_rounded,
                 active: (state.playback?.repeat ?? 'off') != 'off',
-                onTap: () {}, // wired up when backend ready
+                onTap: () => notifier.toggleRepeat(),
               ),
             ],
           ),
@@ -609,9 +615,9 @@ class _NowPlayingCard extends ConsumerWidget {
                       overlayRadius: 14,
                     ),
                     activeTrackColor: _white,
-                    inactiveTrackColor: _white.withOpacity(0.15),
+                    inactiveTrackColor: _white.withValues(alpha: 0.15),
                     thumbColor: _white,
-                    overlayColor: _white.withOpacity(0.1),
+                    overlayColor: _white.withValues(alpha: 0.1),
                   ),
                   child: Slider(
                     value: volume.clamp(0, 100),
@@ -654,7 +660,9 @@ class _CtrlBtn extends StatelessWidget {
       width: 42,
       height: 42,
       decoration: BoxDecoration(
-        color: active ? _white.withOpacity(0.12) : _white.withOpacity(0.06),
+        color: active
+            ? _white.withValues(alpha: 0.12)
+            : _white.withValues(alpha: 0.06),
         shape: BoxShape.circle,
       ),
       child: Icon(icon, color: active ? _white : _grey, size: size),
@@ -695,14 +703,13 @@ class _PlaylistsRow extends ConsumerWidget {
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         itemCount: state.playlists.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (_, i) {
+        separatorBuilder: (context, index) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
           final pl = state.playlists[i];
           return _PlaylistCard(
             playlist: pl,
-            onTap: () => ref
-                .read(musicNotifierProvider.notifier)
-                .playPlaylist(pl), // ← passes full SpotifyPlaylist object
+            onTap: () =>
+                ref.read(musicNotifierProvider.notifier).playPlaylist(pl),
           );
         },
       ),
@@ -741,7 +748,8 @@ class _PlaylistCard extends StatelessWidget {
                     width: 84,
                     height: 64,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _imgPlaceholder(),
+                    errorBuilder: (context, error, stackTrace) =>
+                        _imgPlaceholder(),
                   )
                 : _imgPlaceholder(),
           ),
@@ -798,12 +806,12 @@ class _CourtDeviceTile extends StatelessWidget {
         color: _white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: linked ? _ok.withOpacity(0.25) : Colors.grey.shade200,
+          color: linked ? _ok.withValues(alpha: 0.25) : Colors.grey.shade200,
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -816,7 +824,7 @@ class _CourtDeviceTile extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: linked ? _ok.withOpacity(0.1) : Colors.grey.shade100,
+              color: linked ? _ok.withValues(alpha: 0.1) : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
@@ -860,7 +868,7 @@ class _CourtDeviceTile extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
-                color: _black.withOpacity(0.06),
+                color: _black.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -881,137 +889,145 @@ class _CourtDeviceTile extends StatelessWidget {
   void _showDevicePicker(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
       backgroundColor: _white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Select device for ${courtDevice.courtName}',
-              style: GoogleFonts.inter(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: _black,
-                letterSpacing: -.3,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            if (availableDevices.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Column(
-                  children: [
-                    const Icon(Icons.speaker_outlined, size: 36, color: _grey),
-                    const SizedBox(height: 8),
-                    Text(
-                      'No Spotify devices found.\nOpen Spotify on the court tablet first.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        color: _grey,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              ...availableDevices.map(
-                (d) => GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onLink(d.deviceId, d.name);
-                    Navigator.pop(context);
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: d.isActive
-                          ? _ok.withOpacity(0.05)
-                          : const Color(0xFFF5F5F5),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: d.isActive
-                            ? _ok.withOpacity(0.25)
-                            : Colors.grey.shade200,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          d.type.toLowerCase() == 'tablet'
-                              ? Icons.tablet_rounded
-                              : Icons.speaker_rounded,
-                          color: d.isActive ? _ok : _grey,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                d.name,
-                                style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: _black,
-                                ),
-                              ),
-                              Text(
-                                d.type,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: _grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (d.isActive)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _ok.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              'Active',
-                              style: GoogleFonts.inter(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: _ok,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                'Select device for ${courtDevice.courtName}',
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: _black,
+                  letterSpacing: -.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              if (availableDevices.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.speaker_outlined,
+                        size: 36,
+                        color: _grey,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No Spotify devices found.\nOpen Spotify on the court tablet first.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: _grey,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                ...availableDevices.map(
+                  (d) => GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      onLink(d.deviceId, d.name);
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: d.isActive
+                            ? _ok.withValues(alpha: 0.05)
+                            : const Color(0xFFF5F5F5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: d.isActive
+                              ? _ok.withValues(alpha: 0.25)
+                              : Colors.grey.shade200,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            d.type.toLowerCase() == 'tablet'
+                                ? Icons.tablet_rounded
+                                : Icons.speaker_rounded,
+                            color: d.isActive ? _ok : _grey,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  d.name,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: _black,
+                                  ),
+                                ),
+                                Text(
+                                  d.type,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: _grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (d.isActive)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _ok.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Active',
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: _ok,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1032,7 +1048,7 @@ class _AlbumArt extends StatelessWidget {
             width: 72,
             height: 72,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _placeholder(),
+            errorBuilder: (context, error, stackTrace) => _placeholder(),
           )
         : _placeholder(),
   );
@@ -1041,7 +1057,7 @@ class _AlbumArt extends StatelessWidget {
     width: 72,
     height: 72,
     decoration: BoxDecoration(
-      color: _white.withOpacity(0.08),
+      color: _white.withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(12),
     ),
     child: const Icon(Icons.music_note_rounded, color: _grey, size: 32),

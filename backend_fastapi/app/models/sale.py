@@ -66,3 +66,16 @@ class DailySaleCache(Base):
     )
 
     outlet = relationship("Outlet", back_populates="sales_cache")
+
+
+# NAYA TABLE: Individual bills ko track karne ke liye taaki overlap/duplicates na hon
+class PetpoojaOrder(Base):
+    __tablename__ = "petpooja_orders"
+
+    order_id = Column(Integer, primary_key=True, index=True) # Petpooja ka unique orderID
+    outlet_id = Column(Integer, ForeignKey("outlets.id"), nullable=False, index=True)
+    business_date = Column(Date, nullable=False, index=True) # Apna 4 AM buffer wala date
+    created_on = Column(DateTime, nullable=False) # Bill fatne ka exact time
+    total_amount = Column(Float, default=0.0)
+
+    outlet = relationship("Outlet")

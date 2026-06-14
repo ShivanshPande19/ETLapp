@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/token_storage.dart';
 
-const String baseUrl = 'https://etl-backend-fresh-production.up.railway.app';
+const String baseUrl = 'http://172.20.10.4:8080';
 
 final dioProvider = Provider<Dio>((ref) {
   final dio = Dio(

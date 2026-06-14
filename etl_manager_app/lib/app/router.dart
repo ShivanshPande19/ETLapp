@@ -3,25 +3,37 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/domain/auth_notifier.dart';
 import '../features/home/presentation/home_screen.dart';
+import '../features/home/presentation/outlet_home_screen.dart';
 import '../features/sales/presentation/sales_screen.dart';
+import '../features/sales/presentation/outlet_sales_screen.dart';
 import '../features/music/presentation/music_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../features/complaints/presentation/complaints_screen.dart';
 import '../features/maintenance/presentation/maintenance_screen.dart';
+
+// ✅ BOTH FEEDBACK SCREENS IMPORTED
+import '../features/feedbacks/presentation/outlet_feedback_screen.dart';
+import '../features/feedbacks/presentation/etl_feedbacks_screen.dart';
+
 import '../features/courts/presentation/court_detail_screen.dart';
 import '../features/courts/data/courts_repository.dart';
+
 import '../features/staff/presentation/staff_shell_screen.dart';
 import '../features/staff/presentation/staff_home_screen.dart';
 import '../features/staff/presentation/staff_checklist_screen.dart';
 import '../features/staff/presentation/staff_report_screen.dart';
-import 'shell_screen.dart';
-import 'biometric_gate.dart'; // ✅ new import
 
-// ─── Transition helper ────────────────────────────────────────────────────────
+import '../features/staff/presentation/outlet_staff_home_screen.dart';
+import '../features/staff/presentation/mark_attendance_screen.dart';
+
+import 'shell_screen.dart';
+import 'biometric_gate.dart';
+
 CustomTransitionPage<T> _buildPage<T>({
   required BuildContext context,
   required GoRouterState state,
@@ -81,33 +93,58 @@ CustomTransitionPage<T> _buildPage<T>({
   );
 }
 
-// ─── Router ───────────────────────────────────────────────────────────────────
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);
 
   return GoRouter(
     initialLocation: '/login',
-
-    // ✅ Redirect — sync only, koi async nahi
     redirect: (context, state) {
       final isLoggedIn = authState.status == AuthStatus.success;
       final onLogin = state.matchedLocation == '/login';
       final onBioGate = state.matchedLocation == '/biometric-gate';
+      final loc = state.matchedLocation;
 
-      // Logged out → login
       if (!isLoggedIn && !onLogin) return '/login';
-
-      // Logged in + login page → biometric gate se guzaro
       if (isLoggedIn && onLogin) return '/biometric-gate';
-
-      // Gate pe already hai → kuch mat karo
       if (onBioGate) return null;
 
+      if (isLoggedIn) {
+        final role = authState.role;
+
+        if (role == 'etl_staff') {
+          if (!loc.startsWith('/staff')) return '/staff/home';
+        } else if (role == 'outlet_staff') {
+          if (loc == '/staff/mark-attendance') return null;
+
+          if (loc == '/home' ||
+              loc == '/outlet-home' ||
+              loc == '/sales' ||
+              loc == '/outlet-sales' ||
+              loc == '/housekeeping' ||
+              loc == '/music' ||
+              loc.startsWith('/staff/') ||
+              loc == '/') {
+            return '/outlet-staff-home';
+          }
+        } else if (role == 'outlet_manager') {
+          if (loc == '/home') return '/outlet-home';
+          if (loc == '/sales') return '/outlet-sales';
+          if (loc == '/housekeeping' ||
+              loc == '/music' ||
+              loc.startsWith('/staff') ||
+              loc == '/outlet-staff-home') {
+            return '/outlet-home';
+          }
+        } else if (role == 'etl_manager') {
+          if (loc == '/outlet-home' || loc == '/outlet-staff-home')
+            return '/home';
+          if (loc == '/outlet-sales') return '/sales';
+        }
+      }
       return null;
     },
 
     routes: [
-      // ── Login ──────────────────────────────────────────────────────────────
       GoRoute(
         path: '/login',
         pageBuilder: (context, state) => _buildPage(
@@ -117,11 +154,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           fade: true,
         ),
       ),
-
-      // ── Biometric Gate ─────────────────────────────────────────────────────
-      // Login success ke baad yahan aata hai
-      // Biometric off ho toh seedha /home ya /staff/home
-      // Biometric on ho toh Face ID / fingerprint prompt
       GoRoute(
         path: '/biometric-gate',
         pageBuilder: (context, state) => _buildPage(
@@ -131,8 +163,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           fade: true,
         ),
       ),
-
-      // ── Settings — standalone, shell ke bahar ──────────────────────────────
       GoRoute(
         path: '/settings',
         pageBuilder: (context, state) => _buildPage(
@@ -142,8 +172,16 @@ final routerProvider = Provider<GoRouter>((ref) {
           slideFromRight: true,
         ),
       ),
+      GoRoute(
+        path: '/staff/mark-attendance',
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: const MarkAttendanceScreen(),
+          slideFromRight: true,
+        ),
+      ),
 
-      // ── Manager Shell ──────────────────────────────────────────────────────
       ShellRoute(
         builder: (context, state, child) => ShellScreen(child: child),
         routes: [
@@ -156,11 +194,35 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
+            path: '/outlet-home',
+            pageBuilder: (context, state) => _buildPage(
+              context: context,
+              state: state,
+              child: const OutletHomeScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/outlet-staff-home',
+            pageBuilder: (context, state) => _buildPage(
+              context: context,
+              state: state,
+              child: const OutletStaffHomeScreen(),
+            ),
+          ),
+          GoRoute(
             path: '/sales',
             pageBuilder: (context, state) => _buildPage(
               context: context,
               state: state,
               child: const SalesScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/outlet-sales',
+            pageBuilder: (context, state) => _buildPage(
+              context: context,
+              state: state,
+              child: const OutletSalesScreen(),
             ),
           ),
           GoRoute(
@@ -187,6 +249,24 @@ final routerProvider = Provider<GoRouter>((ref) {
               child: const ComplaintsScreen(),
             ),
           ),
+
+          // ✅ SMART ROUTE: Redirects to proper screen based on role
+          GoRoute(
+            path: '/feedbacks',
+            pageBuilder: (context, state) {
+              final isEtlManager =
+                  authState.role == 'etl_manager' ||
+                  authState.role == 'manager';
+              return _buildPage(
+                context: context,
+                state: state,
+                child: isEtlManager
+                    ? const EtlFeedbacksScreen()
+                    : const OutletFeedbacksScreen(),
+              );
+            },
+          ),
+
           GoRoute(
             path: '/maintenance',
             pageBuilder: (context, state) => _buildPage(
@@ -210,7 +290,6 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
-      // ── Staff Shell ────────────────────────────────────────────────────────
       ShellRoute(
         builder: (context, state, child) => StaffShellScreen(child: child),
         routes: [

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ETL Feedback Portal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html {
+            height: 100%; width: 100%;
+            font-family: 'Inter', sans-serif;
+            background-color: #080808;
+            overflow: hidden; 
+        }
+        
+        .scene { width: 100%; height: 100%; perspective: 1500px; }
+        .card {
+            width: 100%; height: 100%; position: relative;
+            transition: transform 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform-style: preserve-3d;
+        }
+        .card.flipped { transform: rotateX(180deg); }
+        
+        .card-face {
+            position: absolute; width: 100%; height: 100%;
+            backface-visibility: hidden; -webkit-backface-visibility: hidden;
+            display: flex; flex-direction: column;
+            transform: translateZ(0); /* Hardware acceleration fix */
+        }
+
+        /* 🌟 FRONT POSTER (🔴 RED PREMIUM THEME) */
+        .card-front {
+            background: linear-gradient(135deg, #0f0505 0%, #1a0a0a 100%);
+            padding: 40px 24px; justify-content: space-between; align-items: center; text-align: center;
+            background-image: radial-gradient(circle at top right, rgba(239, 68, 68, 0.2), transparent 50%),
+                              radial-gradient(circle at bottom left, rgba(139, 0, 0, 0.15), transparent 50%);
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        
+        /* 🐛 BUG FIX: Flipped hote hi front element ko completely hide karna */
+        .card.flipped .card-front {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        
+        .etl-brand h1 { 
+            font-family: 'Anton', sans-serif; 
+            font-size: 56px; 
+            color: #EF4444; /* 🔴 Premium Red */
+            line-height: 1.1; 
+            margin-bottom: 12px; 
+            text-transform: uppercase; 
+            letter-spacing: 1px;
+        }
+        
+        /* 📍 Front Poster Location Design */
+        .poster-location {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 8px 20px;
+            border-radius: 99px;
+            color: #FFFFFF;
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.1);
+        }
+        
+        .etl-brand p { font-size: 15px; color: #bbbbbb; line-height: 1.6; margin-bottom: 30px; padding: 0 10px; }
+        
+        .swipe-indicator { margin-bottom: 30px; animation: bounce 2s infinite; cursor: pointer; }
+        .swipe-indicator span { display: block; font-size: 13px; font-weight: 700; color: #aaaaaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px;}
+        .swipe-indicator i { font-size: 24px; color: #EF4444; }
+        @keyframes bounce { 0%, 20%, 50%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-12px); } 60% { transform: translateY(-6px); } }
+
+        /* 📋 BACK FORM (SCROLLABLE) */
+        .card-back {
+            background: #ffffff; color: #0A0A0A; transform: rotateX(180deg);
+            overflow-y: auto; padding: 24px 24px 80px 24px; -webkit-overflow-scrolling: touch;
+        }
+        
+        .back-nav { display: flex; justify-content: flex-start; margin-bottom: 10px; }
+        .back-nav span { font-size: 12px; font-weight: 800; color: #666; padding: 8px 12px; background: #f4f4f5; border-radius: 8px; cursor: pointer; }
+
+        .back-header { text-align: center; margin-bottom: 20px; }
+        .back-header h2 { font-family: 'Anton', sans-serif; font-size: 32px; color: #0A0A0A; letter-spacing: 0.5px; }
+        .court-chip { display: inline-block; background: #EF4444; color: #fff; padding: 6px 16px; border-radius: 99px; font-size: 12px; font-weight: 800; margin-top: 8px; box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2); }
+
+        .section-title { font-size: 15px; font-weight: 900; color: #0A0A0A; margin: 30px 0 16px 0; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 800; margin-bottom: 8px; color: #0A0A0A;}
+        
+        .trust-note { font-size: 11px; color: #555; background: #fff5f5; padding: 12px; border-radius: 8px; border-left: 3px solid #EF4444; margin-bottom: 20px; font-style: italic; font-weight: 600;}
+        
+        input, select, textarea { width: 100%; padding: 14px; border: 2px solid #eaeaea; border-radius: 12px; font-family: 'Inter', sans-serif; font-size: 15px; outline: none; transition: 0.3s; background: #FAFAFA; }
+        input:focus, select:focus, textarea:focus { border-color: #EF4444; background: #fff;}
+        
+        /* Star Rating Customization (🔴 Red Stars for Active state) */
+        .stars { display: flex; gap: 8px; justify-content: center; margin: 10px 0; direction: rtl;}
+        .stars input { display: none; }
+        .stars label { font-size: 36px; color: #dddddd; cursor: pointer; transition: 0.2s; }
+        .stars label:hover, .stars label:hover ~ label, .stars input:checked ~ label { color: #EF4444; }
+
+        .submit-btn { width: 100%; background: #0A0A0A; color: #ffffff; font-weight: 800; font-size: 16px; padding: 16px; border: none; border-radius: 16px; margin-top: 30px; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.15); transition: 0.2s; }
+        .submit-btn:active { transform: scale(0.98); }
+        
+        /* Lock State for Outlet Section */
+        .locked { opacity: 0.25; pointer-events: none; filter: grayscale(100%); transition: all 0.4s ease; }
+        .unlock-hint { text-align: center; font-size: 11px; color: #888; margin-top: -10px; margin-bottom: 15px; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="scene">
+    <div class="card" id="card">
+        
+        <div class="card-face card-front" id="front-face">
+            <div style="margin-top: 20px;"></div>
+            <div class="etl-brand">
+                <h1>Eat.<br>Truck.<br>Love.</h1>
+                
+                <div class="poster-location">
+                    <i class="fa-solid fa-location-dot"></i> {{ court_name }}
+                </div>
+                
+                <p>An organized outdoor food, dining, and lifestyle concept featuring modern mobile kitchens in vibrant public spaces.</p>
+            </div>
+            <div class="swipe-indicator" id="swipe-btn">
+                <span>Swipe up to give feedback</span>
+                <i class="fa-solid fa-chevron-up"></i>
+            </div>
+        </div>
+
+        <div class="card-face card-back" id="back-face">
+            <div class="back-nav">
+                <span onclick="flipCardBack()"><i class="fa-solid fa-chevron-left"></i> Back to Poster</span>
+            </div>
+            
+            <div class="back-header">
+                <h2>WE'RE LISTENING!</h2>
+                <div class="court-chip">📍 {{ court_name }}</div>
+            </div>
+
+            <form id="feedback-form">
+                <div class="trust-note">
+                    <i class="fa-solid fa-lock" style="color: #EF4444;"></i> Your details are strictly confidential. We need them to ensure our managers can address your concerns directly.
+                </div>
+                
+                <div class="form-group">
+                    <input type="text" id="customer_name" placeholder="Your Full Name" required>
+                </div>
+                <div class="form-group">
+                    <input type="tel" id="customer_phone" placeholder="Phone Number (e.g. 9876543210)" pattern="[0-9]{10}" required>
+                </div>
+
+                <div class="section-title">1. Rate The ETL Venue Experience</div>
+                <div class="form-group" style="text-align: center;">
+                    <div class="stars">
+                        <input type="radio" id="c_star5" name="court_rating" value="5"><label for="c_star5" class="fa-solid fa-star"></label>
+                        <input type="radio" id="c_star4" name="court_rating" value="4"><label for="c_star4" class="fa-solid fa-star"></label>
+                        <input type="radio" id="c_star3" name="court_rating" value="3"><label for="c_star3" class="fa-solid fa-star"></label>
+                        <input type="radio" id="c_star2" name="court_rating" value="2"><label for="c_star2" class="fa-solid fa-star"></label>
+                        <input type="radio" id="c_star1" name="court_rating" value="1"><label for="c_star1" class="fa-solid fa-star"></label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <textarea id="court_comments" rows="2" placeholder="Tell us what you liked/disliked about the venue..."></textarea>
+                </div>
+
+                <div class="section-title">2. Rate a Specific Outlet (Optional)</div>
+                <div class="form-group">
+                    <label>Select Outlet</label>
+                    <select id="outlet_id">
+                        <option value="" selected>None - I only want to rate the venue</option>
+                        {% for outlet in outlets %}
+                            <option value="{{ outlet.id }}">{{ outlet.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div id="outlet-fields-wrapper" class="locked">
+                    <div class="unlock-hint" id="unlock-hint">(Select an outlet above to unlock)</div>
+                    <div class="form-group" style="text-align: center;">
+                        <div class="stars">
+                            <input type="radio" id="o_star5" name="outlet_rating" value="5"><label for="o_star5" class="fa-solid fa-star"></label>
+                            <input type="radio" id="o_star4" name="outlet_rating" value="4"><label for="o_star4" class="fa-solid fa-star"></label>
+                            <input type="radio" id="o_star3" name="outlet_rating" value="3"><label for="o_star3" class="fa-solid fa-star"></label>
+                            <input type="radio" id="o_star2" name="outlet_rating" value="2"><label for="o_star2" class="fa-solid fa-star"></label>
+                            <input type="radio" id="o_star1" name="outlet_rating" value="1"><label for="o_star1" class="fa-solid fa-star"></label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <textarea id="outlet_comments" rows="2" placeholder="How was the food/service at this specific outlet?"></textarea>
+                    </div>
+                </div>
+
+                <button type="submit" class="submit-btn">Submit Feedback</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    const card = document.getElementById('card');
+    const frontFace = document.getElementById('front-face');
+    
+    // Swipe Logic (Strictly bounds touch tracking to front face)
+    let touchstartY = 0;
+    frontFace.addEventListener('touchstart', e => { touchstartY = e.changedTouches[0].screenY; });
+    frontFace.addEventListener('touchend', e => {
+        let touchendY = e.changedTouches[0].screenY;
+        if (touchstartY - touchendY > 50) { card.classList.add('flipped'); }
+    });
+    document.getElementById('swipe-btn').addEventListener('click', () => { card.classList.add('flipped'); });
+    function flipCardBack() { card.classList.remove('flipped'); }
+
+    // Outlet Selection Lock/Unlock Logic
+    const outletSelect = document.getElementById('outlet_id');
+    const outletFieldsWrapper = document.getElementById('outlet-fields-wrapper');
+    const unlockHint = document.getElementById('unlock-hint');
+
+    outletSelect.addEventListener('change', function() {
+        if (this.value === "") {
+            outletFieldsWrapper.classList.add('locked');
+            unlockHint.style.display = "block";
+            document.querySelectorAll('input[name="outlet_rating"]').forEach(el => el.checked = false);
+            document.getElementById('outlet_comments').value = "";
+        } else {
+            outletFieldsWrapper.classList.remove('locked');
+            unlockHint.style.display = "none";
+        }
+    });
+
+    // Form Submission
+    document.getElementById('feedback-form').addEventListener('submit', async (e) => {
+        e.preventDefault(); 
+
+        const c_rating = document.querySelector('input[name="court_rating"]:checked');
+        const o_rating = document.querySelector('input[name="outlet_rating"]:checked');
+        const outletIdVal = document.getElementById('outlet_id').value;
+
+        if (!c_rating && !o_rating) {
+            alert("Please provide a Star Rating for either the Venue or a Specific Outlet!");
+            return;
+        }
+
+        const payload = {
+            court_id: parseInt("{{ court_id }}"),
+            customer_name: document.getElementById('customer_name').value.trim(),
+            customer_phone: document.getElementById('customer_phone').value.trim(),
+            court_rating: c_rating ? parseInt(c_rating.value) : null,
+            court_comments: document.getElementById('court_comments').value || null,
+            outlet_id: outletIdVal !== "" ? parseInt(outletIdVal) : null,
+            outlet_rating: o_rating ? parseInt(o_rating.value) : null,
+            outlet_comments: document.getElementById('outlet_comments').value || null
+        };
+
+        try {
+            const response = await fetch('/feedback/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if(response.ok) {
+                document.querySelector('.card-back').innerHTML = `
+                    <div style="height: 100%; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+                        <i class="fa-solid fa-circle-check" style="font-size: 64px; color: #EF4444; margin-bottom: 20px;"></i>
+                        <h2 style="font-family: 'Anton', sans-serif; font-size: 36px; color: #0A0A0A;">THANK YOU!</h2>
+                        <p style="color: #666; font-size: 15px; margin-top:10px;">Your feedback helps us serve you better.</p>
+                        <button onclick="location.reload()" style="margin-top: 40px; padding: 10px 20px; border-radius: 8px; border: 1px solid #ddd; background: #fff; font-weight: bold; cursor: pointer;">Submit Another</button>
+                    </div>
+                `;
+            } else {
+                alert("Something went wrong. Please try again.");
+            }
+        } catch(err) {
+            alert("Network error. Please check your connection.");
+        }
+    });
+</script>
+</body>
+</html>

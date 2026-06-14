@@ -1,3 +1,5 @@
+// lib/features/auth/domain/auth_notifier.dart
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/auth_repository.dart';
@@ -13,6 +15,7 @@ class AuthState {
   final String? zone;
   final String? staffName;
   final int courtId;
+  final int? outletId;
 
   const AuthState({
     this.status = AuthStatus.idle,
@@ -23,10 +26,19 @@ class AuthState {
     this.zone,
     this.staffName,
     this.courtId = 1,
+    this.outletId,
   });
 
-  bool get isManager => role == 'manager';
-  bool get isStaff => role == 'staff';
+  // ✅ Naye Roles ke helpers
+  bool get isEtlManager => role == 'etl_manager';
+  bool get isOutletManager => role == 'outlet_manager';
+  bool get isEtlStaff => role == 'etl_staff';
+  bool get isOutletStaff => role == 'outlet_staff';
+
+  // ✅ CORRECTION: isStaff sirf ETL/Housekeeping staff ke liye true hoga, outlet_staff ke liye nahi!
+  bool get isManager =>
+      role == 'etl_manager' || role == 'outlet_manager' || role == 'manager';
+  bool get isStaff => role == 'etl_staff' || role == 'staff';
 
   AuthState copyWith({
     AuthStatus? status,
@@ -37,6 +49,7 @@ class AuthState {
     String? zone,
     String? staffName,
     int? courtId,
+    int? outletId,
   }) {
     return AuthState(
       status: status ?? this.status,
@@ -47,6 +60,7 @@ class AuthState {
       zone: zone ?? this.zone,
       staffName: staffName ?? this.staffName,
       courtId: courtId ?? this.courtId,
+      outletId: outletId ?? this.outletId,
     );
   }
 }
@@ -67,6 +81,11 @@ class AuthNotifier extends Notifier<AuthState> {
           ? zoneRaw
           : int.tryParse(zoneRaw?.toString() ?? '') ?? 1;
 
+      final outletRaw = data['outlet_id'];
+      final parsedOutletId = outletRaw is int
+          ? outletRaw
+          : int.tryParse(outletRaw?.toString() ?? '');
+
       state = state.copyWith(
         status: AuthStatus.success,
         managerName: data['manager_name'] as String?,
@@ -75,9 +94,9 @@ class AuthNotifier extends Notifier<AuthState> {
         zone: zoneRaw?.toString(),
         staffName: data['manager_name'] as String?,
         courtId: courtId,
+        outletId: parsedOutletId,
       );
     } on DioException catch (e) {
-      // Network / HTTP errors
       String message;
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
@@ -91,12 +110,8 @@ class AuthNotifier extends Notifier<AuthState> {
         message =
             'Error ${e.response?.statusCode}: ${e.response?.data ?? e.message}';
       }
-      print(
-        '[AUTH ERROR] DioException: $message | type: ${e.type} | msg: ${e.message}',
-      );
       state = state.copyWith(status: AuthStatus.error, errorMessage: message);
     } catch (e) {
-      print('[AUTH ERROR] Unknown: $e');
       state = state.copyWith(
         status: AuthStatus.error,
         errorMessage: 'Unexpected error: $e',

@@ -7,7 +7,8 @@ import 'package:http/http.dart' as http;
 import '../network/api_client.dart';
 import '../utils/token_storage.dart';
 import '../../features/staff/domain/housekeeping_notifier.dart';
-import '../../features/housekeeping/presentation/manager_housekeeping_screen.dart'; // ✅
+import '../../features/housekeeping/presentation/manager_housekeeping_screen.dart';
+import '../../features/maintenance/domain/maintenance_notifier.dart'; // ✅ NEW
 
 class SSEService {
   final Ref _ref;
@@ -75,13 +76,19 @@ class SSEService {
 
   void _handleEvent(Map<String, dynamic> data) {
     final type = data['type'];
-    if (type == 'housekeeping_update') {
-      // ✅ Staff side
-      _ref.invalidate(housekeepingNotifierProvider);
 
-      // ✅ Manager side — aaj ki date ke saath invalidate
+    if (type == 'housekeeping_update') {
+      _ref.invalidate(housekeepingNotifierProvider);
       final today = DateTime.now().toIso8601String().substring(0, 10);
       _ref.invalidate(managerHkProvider(today));
+    }
+
+    // ✅ NEW: Maintenance ticket update — list turant refresh
+    if (type == 'maintenance_update') {
+      debugPrint(
+        '[SSE] Maintenance update — issue #${data['issue_id']} → ${data['status']}',
+      );
+      _ref.invalidate(maintenanceNotifierProvider);
     }
   }
 

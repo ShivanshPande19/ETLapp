@@ -1,282 +1,347 @@
+# app/api/routes/maintenance.py
 from __future__ import annotations
+
 from datetime import datetime
+from enum import Enum
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.maintenance import MaintenanceIssue
-# NEW IMPORT: Court & Outlet tables
 from ...models.sale import Court, Outlet
+from ..deps import CurrentUser, get_current_user, require_etl_manager, require_outlet_user
+from .events import notify_clients
 
 router = APIRouter()
 
-_ISSUE_TYPES = [
-    ("electrical",  "⚡", "Electrical",      "Lights, fans, sockets, wiring issues"),
-    ("plumbing",    "🔧", "Plumbing",         "Leaks, blocked drains, water supply"),
-    ("furniture",   "🪑", "Furniture",        "Broken chairs, tables, counters"),
-    ("cleaning",    "🧹", "Deep Cleaning",    "Spill, pest, heavy cleaning needed"),
-    ("other",       "📋", "Other Issue",      "Anything else not listed above"),
-]
+# ─── Enums (strict validation) ───────────────────────────────────────────────
+
+class IssueType(str, Enum):
+    electrical = "electrical"
+    plumbing   = "plumbing"
+    furniture  = "furniture"
+    cleaning   = "cleaning"
+    other      = "other"
 
 
-# ── HTML Form ────────────────────────────────────────────────────────────────
-
-def _form_html(court_id: int, court_name: str, cart_name: str, cart_id: str) -> str:
-    options = ""
-    for val, emoji, label, hint in _ISSUE_TYPES:
-        options += f"""
-        <label class="opt" data-val="{val}">
-          <input type="radio" name="issue_type" value="{val}" required hidden>
-          <span class="emoji">{emoji}</span>
-          <span class="opt-body">
-            <span class="opt-title">{label}</span>
-            <span class="opt-hint">{hint}</span>
-          </span>
-          <span class="tick">&#10003;</span>
-        </label>"""
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Report Issue &middot; {cart_name}</title>
-<style>
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-:root{{--black:#0A0A0A;--white:#fff;--grey:#888;--lg:#F2F2F2;--border:#E0E0E0;--r:16px;--font:'Inter',system-ui,sans-serif}}
-html{{background:var(--lg);-webkit-text-size-adjust:100%}}
-body{{font-family:var(--font);color:var(--black);min-height:100dvh;padding-bottom:env(safe-area-inset-bottom,16px)}}
-.hdr{{background:var(--black);padding:20px 20px 18px;position:sticky;top:0;z-index:10}}
-.hdr-tag{{font-size:11px;font-weight:600;letter-spacing:1px;color:rgba(255,255,255,.4);text-transform:uppercase;margin-bottom:4px}}
-.hdr-title{{font-size:22px;font-weight:800;color:#fff;letter-spacing:-.4px}}
-.hdr-sub{{font-size:13px;color:rgba(255,255,255,.4);margin-top:3px}}
-form{{padding:20px;display:flex;flex-direction:column;gap:20px}}
-.section-label{{font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--grey);text-transform:uppercase;margin-bottom:8px}}
-.opts{{display:flex;flex-direction:column;gap:8px}}
-.opt{{display:flex;align-items:center;gap:12px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--r);padding:13px 14px;cursor:pointer;transition:border-color .15s,background .15s;-webkit-tap-highlight-color:transparent}}
-.opt.selected{{border-color:var(--black);background:#FAFAFA}}
-.emoji{{font-size:22px;flex-shrink:0;width:30px;text-align:center}}
-.opt-body{{flex:1}}
-.opt-title{{font-size:14px;font-weight:700;display:block}}
-.opt-hint{{font-size:12px;color:var(--grey);display:block;margin-top:2px}}
-.tick{{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);font-size:11px;display:flex;align-items:center;justify-content:center;color:transparent;flex-shrink:0;transition:all .15s}}
-.opt.selected .tick{{background:var(--black);border-color:var(--black);color:#fff}}
-input[type=text]{{width:100%;padding:14px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--r);font:14px/1.5 var(--font);color:var(--black);outline:none;transition:border-color .15s;-webkit-appearance:none}}
-input[type=text]:focus{{border-color:var(--black)}}
-input[type=text]::placeholder{{color:#BBB}}
-textarea{{width:100%;min-height:100px;padding:14px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--r);font:14px/1.5 var(--font);color:var(--black);resize:none;outline:none;transition:border-color .15s;-webkit-appearance:none}}
-textarea:focus{{border-color:var(--black)}}
-textarea::placeholder{{color:#BBB}}
-.submit-btn{{width:100%;padding:16px;background:var(--black);color:#fff;border:none;border-radius:var(--r);font:700 15px var(--font);cursor:pointer;transition:opacity .15s;-webkit-tap-highlight-color:transparent}}
-.submit-btn:active{{opacity:.85}}
-.submit-btn:disabled{{opacity:.4;cursor:not-allowed}}
-.footer-note{{text-align:center;font-size:11px;color:var(--grey);padding-bottom:12px}}
-</style>
-</head>
-<body>
-<div class="hdr">
-  <div class="hdr-tag">{court_name} &middot; {cart_name}</div>
-  <div class="hdr-title">Report an Issue</div>
-  <div class="hdr-sub">Manager will be notified immediately</div>
-</div>
-<form id="form" method="POST" action="/m/{court_id}/{cart_id}/submit">
-  <div>
-    <div class="section-label">Your Name</div>
-    <input type="text" name="staff_name" placeholder="Enter your name" required minlength="2">
-  </div>
-  <div>
-    <div class="section-label">Type of Issue</div>
-    <div class="opts">{options}</div>
-  </div>
-  <div>
-    <div class="section-label">Describe the problem</div>
-    <textarea name="description" placeholder="Describe what needs to be fixed..." required minlength="5"></textarea>
-  </div>
-  <button class="submit-btn" type="submit" id="btn">Submit Issue</button>
-  <p class="footer-note">{court_name} &middot; {cart_name}</p>
-</form>
-<script>
-document.querySelectorAll('.opt').forEach(function(o){{
-  o.addEventListener('click',function(){{
-    document.querySelectorAll('.opt').forEach(function(x){{x.classList.remove('selected');}});
-    o.classList.add('selected');
-    o.querySelector('input').checked=true;
-  }});
-}});
-document.getElementById('form').addEventListener('submit',function(){{
-  var b=document.getElementById('btn');
-  b.disabled=true;b.textContent='Submitting...';
-}});
-</script>
-</body>
-</html>"""
+class IssuePriority(str, Enum):
+    low    = "low"
+    medium = "medium"
+    high   = "high"
 
 
-def _thanks_html(court_name: str, cart_name: str) -> str:
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Done &middot; ETL Food Courts</title>
-<style>
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:'Inter',system-ui;background:#0A0A0A;color:#fff;min-height:100dvh;
-     display:flex;align-items:center;justify-content:center;padding:32px 24px;text-align:center}}
-.icon{{font-size:56px;margin-bottom:20px}}
-h1{{font-size:24px;font-weight:800;letter-spacing:-.4px;margin-bottom:10px}}
-p{{font-size:14px;color:rgba(255,255,255,.5);line-height:1.6;max-width:280px;margin:0 auto}}
-.tag{{margin-top:24px;display:inline-block;padding:6px 16px;background:rgba(255,255,255,.08);
-      border-radius:999px;font-size:12px;color:rgba(255,255,255,.4)}}
-</style>
-</head>
-<body>
-  <div>
-    <div class="icon">&#128295;</div>
-    <h1>Issue Reported</h1>
-    <p>Your report has been sent to the manager. Someone will address it shortly.</p>
-    <div class="tag">{court_name} &middot; {cart_name}</div>
-  </div>
-</body>
-</html>"""
+class IssueStatus(str, Enum):
+    RAISED   = "RAISED"
+    ASSIGNED = "ASSIGNED"
+    RESOLVED = "RESOLVED"
+    CLOSED   = "CLOSED"
+    DISPUTED = "DISPUTED"
 
 
-# ── Public endpoints (staff scan QR on phone) ────────────────────────────────
+# ─── Request / Response Schemas ──────────────────────────────────────────────
 
-@router.get("/m/{court_id}/{cart_id}", response_class=HTMLResponse, include_in_schema=False)
-def maintenance_form(
-    court_id: int = Path(..., ge=1),
-    cart_id:  str = Path(...),
-    db: Session = Depends(get_db)
-):
-    court = db.query(Court).filter(Court.id == court_id, Court.is_active == True).first()
-    if not court:
-        raise HTTPException(status_code=404, detail="Court not found or inactive")
-        
-    # NAYA LOGIC: Resolve real outlet name dynamically
-    cart_name = f"Cart {cart_id.upper()}"
-    if cart_id.isdigit():
-        outlet = db.query(Outlet).filter(Outlet.id == int(cart_id)).first()
-        if outlet:
-            cart_name = outlet.vendor_name.split('(')[0].strip()
+class RaiseTicketInput(BaseModel):
+    issue_type:  IssueType
+    priority:    IssuePriority = IssuePriority.medium
+    description: str = Field(..., min_length=5, max_length=1000)
+    photo_url:   Optional[str] = Field(None, max_length=500)
 
-    return HTMLResponse(_form_html(court_id, court.name, cart_name, cart_id.upper()))
+    @field_validator("description")
+    @classmethod
+    def strip_desc(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError("Description must be at least 5 characters.")
+        return v
 
 
-@router.post("/m/{court_id}/{cart_id}/submit", response_class=HTMLResponse, include_in_schema=False)
-def submit_maintenance(
-    court_id:   int = Path(..., ge=1),
-    cart_id:    str = Path(...),
-    staff_name: str = Form(..., min_length=2),
-    issue_type: str = Form(...),
-    description: str = Form(..., min_length=5),
-    db: Session = Depends(get_db),
-):
-    court = db.query(Court).filter(Court.id == court_id, Court.is_active == True).first()
-    if not court:
-        raise HTTPException(status_code=404, detail="Court not found or inactive")
-        
-    valid_types = {t[0] for t in _ISSUE_TYPES}
-    if issue_type not in valid_types:
-        raise HTTPException(status_code=422, detail="Invalid issue type")
+class AssignTechnicianInput(BaseModel):
+    technician_name:  str = Field(..., min_length=2, max_length=100)
+    technician_phone: str = Field(..., min_length=7, max_length=15)
 
-    # NAYA LOGIC: Resolve real outlet name to save in database
-    cart_name = f"Cart {cart_id.upper()}"
-    if cart_id.isdigit():
-        outlet = db.query(Outlet).filter(Outlet.id == int(cart_id)).first()
-        if outlet:
-            cart_name = outlet.vendor_name.split('(')[0].strip()
-
-    db.add(MaintenanceIssue(
-        court_id=court_id,
-        court_name=court.name,
-        cart_id=cart_id.upper(),
-        cart_name=cart_name,
-        staff_name=staff_name.strip(),
-        issue_type=issue_type,
-        description=description.strip(),
-        status="open",
-    ))
-    db.commit()
-    return HTMLResponse(_thanks_html(court.name, cart_name))
+    @field_validator("technician_phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        cleaned = v.strip().replace(" ", "").replace("-", "")
+        if not cleaned.lstrip("+").isdigit():
+            raise ValueError("Invalid phone number.")
+        return cleaned
 
 
-# ── Private endpoints (manager Flutter app) ──────────────────────────────────
+class VerifyTicketInput(BaseModel):
+    is_satisfied: bool
+
 
 class IssueOut(BaseModel):
     id: int
     court_id: int
     court_name: str
-    cart_id: str
-    cart_name: str
+    outlet_id: int
+    outlet_name: str
     staff_name: str
     issue_type: str
+    priority: str
     description: str
+    photo_url: Optional[str] = None
     status: str
-    created_at: Optional[str]
-    updated_at: Optional[str]
-    resolved_at: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-class StatusUpdate(BaseModel):
-    status: str  # open | in_progress | resolved
+    technician_name: Optional[str] = None
+    technician_phone: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    resolved_at: Optional[str] = None
+    closed_at: Optional[str] = None
+    auto_close_at: Optional[str] = None   # resolved_at + 24h, for UI countdown
 
 
-def _fmt(dt) -> Optional[str]:
-    return dt.isoformat() if dt else None
+class IssueListOut(BaseModel):
+    items: List[IssueOut]
+    total: int
+    limit: int
+    offset: int
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+VERIFICATION_WINDOW_HOURS = 24
+
+
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Always emit explicit UTC so Flutter parses correctly."""
+    if dt is None:
+        return None
+    return dt.isoformat() + "Z"
 
 
 def _to_out(i: MaintenanceIssue) -> IssueOut:
+    auto_close = None
+    if i.status == IssueStatus.RESOLVED.value and i.resolved_at:
+        from datetime import timedelta
+        auto_close = _utc_iso(i.resolved_at + timedelta(hours=VERIFICATION_WINDOW_HOURS))
+
     return IssueOut(
         id=i.id,
         court_id=i.court_id,
         court_name=i.court_name,
-        cart_id=i.cart_id,
-        cart_name=i.cart_name,
+        outlet_id=i.outlet_id,
+        outlet_name=i.outlet_name,
         staff_name=i.staff_name,
         issue_type=i.issue_type,
+        priority=i.priority or "medium",
         description=i.description,
+        photo_url=i.photo_url,
         status=i.status,
-        created_at=_fmt(i.created_at),
-        updated_at=_fmt(i.updated_at),
-        resolved_at=_fmt(i.resolved_at),
+        technician_name=i.technician_name,
+        technician_phone=i.technician_phone,
+        created_at=_utc_iso(i.created_at),
+        updated_at=_utc_iso(i.updated_at),
+        resolved_at=_utc_iso(i.resolved_at),
+        closed_at=_utc_iso(i.closed_at),
+        auto_close_at=auto_close,
     )
 
 
-@router.get("/maintenance", response_model=List[IssueOut])
-def list_issues(
-    court_id: Optional[int] = Query(None),
-    status:   Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    q = db.query(MaintenanceIssue)
-    if court_id:
-        q = q.filter(MaintenanceIssue.court_id == court_id)
-    if status:
-        q = q.filter(MaintenanceIssue.status == status)
-    return [_to_out(i) for i in q.order_by(MaintenanceIssue.created_at.desc()).all()]
-
-
-@router.patch("/maintenance/{issue_id}", response_model=IssueOut)
-def update_issue_status(
-    issue_id: int = Path(..., ge=1),
-    body: StatusUpdate = ...,
-    db: Session = Depends(get_db),
-):
+def _get_issue_or_404(db: Session, issue_id: int) -> MaintenanceIssue:
     issue = db.query(MaintenanceIssue).filter(MaintenanceIssue.id == issue_id).first()
     if not issue:
-        raise HTTPException(status_code=404, detail="Issue not found")
-    if body.status not in {"open", "in_progress", "resolved"}:
-        raise HTTPException(status_code=422, detail="Invalid status")
-    issue.status = body.status
-    if body.status == "resolved":
-        issue.resolved_at = datetime.utcnow()
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+    return issue
+
+
+def _assert_outlet_owns(user: CurrentUser, issue: MaintenanceIssue):
+    if issue.outlet_id != user.outlet_id:
+        raise HTTPException(status_code=403, detail="This ticket belongs to another outlet.")
+
+
+async def _notify(issue: MaintenanceIssue):
+    try:
+        await notify_clients({
+            "type": "maintenance_update",
+            "court_id": issue.court_id,
+            "issue_id": issue.id,
+            "status": issue.status,
+        })
+    except Exception:
+        pass  # SSE failure must never break the API call
+
+
+# ─── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/maintenance/", response_model=IssueOut, status_code=201)
+async def raise_ticket(
+    body: RaiseTicketInput,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_outlet_user),
+):
+    """Outlet staff/manager raises a ticket for THEIR OWN outlet (from JWT)."""
+    outlet = db.query(Outlet).filter(
+        Outlet.id == user.outlet_id, Outlet.is_active == 1
+    ).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Your outlet was not found or is inactive.")
+
+    court = db.query(Court).filter(Court.id == outlet.court_id).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Associated court not found.")
+
+    issue = MaintenanceIssue(
+        court_id=court.id,
+        court_name=court.name,
+        outlet_id=outlet.id,
+        outlet_name=outlet.vendor_name.split("(")[0].strip(),
+        staff_name=user.name,              # ✅ identity from JWT, not body
+        raised_by_email=user.email,
+        issue_type=body.issue_type.value,
+        priority=body.priority.value,
+        description=body.description,
+        photo_url=body.photo_url,
+        status=IssueStatus.RAISED.value,
+    )
+    db.add(issue)
     db.commit()
     db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+@router.get("/maintenance", response_model=IssueListOut)
+async def list_issues(
+    status_filter: Optional[IssueStatus] = Query(None, alias="status"),
+    priority: Optional[IssuePriority] = Query(None),
+    court_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Role-scoped listing. Outlet users see only their outlet; ETL managers see all courts."""
+    q = db.query(MaintenanceIssue)
+
+    if user.is_outlet_user:
+        if user.outlet_id is None:
+            raise HTTPException(status_code=403, detail="No outlet assigned.")
+        q = q.filter(MaintenanceIssue.outlet_id == user.outlet_id)
+    elif user.is_etl_manager:
+        if court_id:
+            q = q.filter(MaintenanceIssue.court_id == court_id)
+    elif user.is_etl_staff:
+        if user.court_id is None:
+            raise HTTPException(status_code=403, detail="No court assigned.")
+        q = q.filter(MaintenanceIssue.court_id == user.court_id)
+    else:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    if status_filter:
+        q = q.filter(MaintenanceIssue.status == status_filter.value)
+    if priority:
+        q = q.filter(MaintenanceIssue.priority == priority.value)
+
+    total = q.count()
+    rows = (
+        q.order_by(MaintenanceIssue.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return IssueListOut(
+        items=[_to_out(i) for i in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/maintenance/{issue_id}", response_model=IssueOut)
+async def get_issue(
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    issue = _get_issue_or_404(db, issue_id)
+    if user.is_outlet_user:
+        _assert_outlet_owns(user, issue)
+    return _to_out(issue)
+
+
+@router.put("/maintenance/{issue_id}/assign", response_model=IssueOut)
+async def assign_technician(
+    body: AssignTechnicianInput,
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """Manager assigns a technician. Only valid from RAISED or DISPUTED."""
+    issue = _get_issue_or_404(db, issue_id)
+
+    if issue.status not in (IssueStatus.RAISED.value, IssueStatus.DISPUTED.value):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot assign technician — ticket is {issue.status}.",
+        )
+
+    issue.technician_name = body.technician_name.strip()
+    issue.technician_phone = body.technician_phone
+    issue.status = IssueStatus.ASSIGNED.value
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+@router.put("/maintenance/{issue_id}/resolve", response_model=IssueOut)
+async def mark_resolved(
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """Manager marks resolved — starts the 24h verification window for the outlet."""
+    issue = _get_issue_or_404(db, issue_id)
+
+    if issue.status not in (IssueStatus.RAISED.value, IssueStatus.ASSIGNED.value, IssueStatus.DISPUTED.value):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot resolve — ticket is {issue.status}.",
+        )
+
+    issue.status = IssueStatus.RESOLVED.value
+    issue.resolved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+@router.put("/maintenance/{issue_id}/verify", response_model=IssueOut)
+async def verify_closure(
+    body: VerifyTicketInput,
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_outlet_user),
+):
+    """Outlet verifies the fix. Only THEIR ticket, only when RESOLVED."""
+    issue = _get_issue_or_404(db, issue_id)
+    _assert_outlet_owns(user, issue)
+
+    if issue.status != IssueStatus.RESOLVED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot verify — ticket is {issue.status}, must be RESOLVED.",
+        )
+
+    if body.is_satisfied:
+        issue.status = IssueStatus.CLOSED.value
+        issue.closed_at = datetime.utcnow()
+    else:
+        issue.status = IssueStatus.DISPUTED.value
+        issue.resolved_at = None
+
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
     return _to_out(issue)

@@ -17,7 +17,15 @@ class Settings(BaseSettings):
     PETPOOJA_ACCESS_TOKEN: str = ""
     PETPOOJA_COOKIE: str = ""
 
+    # Spotify credentials
+    spotify_client_id: Optional[str] = None
+    spotify_client_secret: Optional[str] = None
+    spotify_redirect_uri: Optional[str] = None
+
     class Config:
         env_file = ".env"
+        # Ye line zaroori hai taaki `.env` file mein agar koi extra 
+        # variable ho toh Pydantic use ignore kar de aur crash na ho
+        extra = "ignore" 
 
 settings = Settings()

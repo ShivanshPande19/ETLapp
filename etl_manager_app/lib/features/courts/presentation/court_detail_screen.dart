@@ -9,10 +9,13 @@ import '../data/courts_repository.dart';
 import '../../sales/data/sales_repository.dart';
 import '../../complaints/data/complaints_repository.dart';
 import '../../complaints/domain/complaint_model.dart';
-import '../../maintenance/data/maintenance_repository.dart';
-import '../../maintenance/domain/maintenance_model.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart';
+
+// ✅ NEW: api_client (dioProvider) + new maintenance model
+import '../../../core/network/api_client.dart';
+import '../../maintenance/domain/maintenance_notifier.dart'
+    show MaintenanceIssueModel;
 
 // ─── Palette (matches app exactly) ───────────────────────────────────────────
 
@@ -25,7 +28,6 @@ const _warn = Color(0xFFF59E0B);
 const _danger = Color(0xFFEF4444);
 const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
-const _orange = Color(0xFFFB923C);
 
 // ─── Court-scoped Providers ───────────────────────────────────────────────────
 
@@ -41,9 +43,17 @@ final _courtComplaintsProvider = FutureProvider.autoDispose
       return ref.read(complaintsRepoProvider).getComplaints(courtId: id);
     });
 
+// ✅ NEW: New backend format {items: [...]} + JWT-authenticated dio
 final _courtMaintenanceProvider = FutureProvider.autoDispose
-    .family<List<MaintenanceIssue>, int>((ref, id) async {
-      return ref.read(maintenanceRepoProvider).getIssues(courtId: id);
+    .family<List<MaintenanceIssueModel>, int>((ref, id) async {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get(
+        '/maintenance',
+        queryParameters: {'court_id': id, 'limit': 100, 'offset': 0},
+      );
+      return (res.data['items'] as List? ?? [])
+          .map((e) => MaintenanceIssueModel.fromJson(e as Map<String, dynamic>))
+          .toList();
     });
 
 final _courtHkProvider = FutureProvider.autoDispose.family<List<_HkShift>, int>(
@@ -160,9 +170,11 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
             .whenData((l) => l.where((c) => c.status == 'open').length)
             .value ??
         0;
+
+    // ✅ FIX: "Open" = anything not CLOSED (new status system)
     final openMaintenance =
         maintenanceAsync
-            .whenData((l) => l.where((i) => i.status == 'open').length)
+            .whenData((l) => l.where((i) => i.status != 'CLOSED').length)
             .value ??
         0;
 
@@ -252,7 +264,7 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                         ),
                         const SizedBox(height: 24),
 
-                        // ── Maintenance ────────────────────────
+                        // ── Maintenance (read-only summary) ────
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -271,11 +283,7 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                                   Icons.build_outlined,
                                   'No maintenance issues for this court',
                                 )
-                              : _MaintenanceSection(
-                                  items: list,
-                                  onStatusChange: (id, s) =>
-                                      _updateMaintenance(id, s),
-                                ),
+                              : _MaintenanceSection(items: list),
                         ),
                         const SizedBox(height: 8),
                         Center(
@@ -404,24 +412,11 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
     );
   }
 
-  // ── Status update handlers ────────────────────────────────────────────────
+  // ── Status update handler (complaints only) ───────────────────────────────
   Future<void> _updateComplaint(int id, String newStatus) async {
     try {
       await ref.read(complaintsRepoProvider).updateStatus(id, newStatus);
       ref.invalidate(_courtComplaintsProvider(widget.court.id));
-      HapticFeedback.mediumImpact();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to update — please retry')),
-      );
-    }
-  }
-
-  Future<void> _updateMaintenance(int id, String newStatus) async {
-    try {
-      await ref.read(maintenanceRepoProvider).updateStatus(id, newStatus);
-      ref.invalidate(_courtMaintenanceProvider(widget.court.id));
       HapticFeedback.mediumImpact();
     } catch (_) {
       if (!mounted) return;
@@ -811,7 +806,6 @@ class _ComplaintsSection extends StatelessWidget {
 
     return Column(
       children: [
-        // Summary bar — matches complaints_screen.dart style
         _SummaryBar(
           total: items.length,
           open: open.length,
@@ -833,42 +827,164 @@ class _ComplaintsSection extends StatelessWidget {
   }
 }
 
-// ─── Maintenance Section ──────────────────────────────────────────────────────
+// ─── Maintenance Section (read-only summary) ─────────────────────────────────
+// ✅ NEW: New status system, actions Maintenance tab mein hote hain
 
 class _MaintenanceSection extends StatelessWidget {
-  final List<MaintenanceIssue> items;
-  final void Function(int id, String status) onStatusChange;
-  const _MaintenanceSection({
-    required this.items,
-    required this.onStatusChange,
-  });
+  final List<MaintenanceIssueModel> items;
+  const _MaintenanceSection({required this.items});
 
   @override
   Widget build(BuildContext context) {
-    final open = items.where((i) => i.status == 'open').toList();
-    final inProg = items.where((i) => i.status == 'in_progress').toList();
-    final resolved = items.where((i) => i.status == 'resolved').toList();
-    final sorted = [...open, ...inProg, ...resolved];
+    final newCount = items
+        .where((i) => i.status == 'RAISED' || i.status == 'DISPUTED')
+        .length;
+    final active = items
+        .where((i) => i.status == 'ASSIGNED' || i.status == 'RESOLVED')
+        .length;
+    final closed = items.where((i) => i.status == 'CLOSED').length;
+
+    // Open tickets pehle, closed last
+    final sorted = [...items]
+      ..sort((a, b) {
+        if (a.status == 'CLOSED' && b.status != 'CLOSED') return 1;
+        if (a.status != 'CLOSED' && b.status == 'CLOSED') return -1;
+        return (b.createdAt ?? DateTime(2000)).compareTo(
+          a.createdAt ?? DateTime(2000),
+        );
+      });
 
     return Column(
       children: [
         _SummaryBar(
           total: items.length,
-          open: open.length,
-          inProg: inProg.length,
-          resolved: resolved.length,
+          open: newCount,
+          inProg: active,
+          resolved: closed,
         ),
         const SizedBox(height: 10),
-        ...sorted.map(
-          (i) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _IssueTile(
-              item: i,
-              onStatusChange: (s) => onStatusChange(i.id, s),
+        ...sorted
+            .take(5)
+            .map(
+              (i) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _MaintenanceTile(item: i),
+              ),
+            ),
+        if (sorted.length > 5)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              '+ ${sorted.length - 5} more in Maintenance tab',
+              style: GoogleFonts.inter(fontSize: 12, color: _grey),
             ),
           ),
-        ),
       ],
+    );
+  }
+}
+
+class _MStatusMeta {
+  final String label;
+  final Color color;
+  const _MStatusMeta(this.label, this.color);
+}
+
+_MStatusMeta _mStatusMeta(String s) => switch (s) {
+  'RAISED' => const _MStatusMeta('Raised', _warn),
+  'ASSIGNED' => const _MStatusMeta('Assigned', _blue),
+  'RESOLVED' => const _MStatusMeta('Verify', _purple),
+  'CLOSED' => const _MStatusMeta('Closed', _ok),
+  'DISPUTED' => const _MStatusMeta('Disputed', _danger),
+  _ => const _MStatusMeta('Unknown', _grey),
+};
+
+String _mTypeEmoji(String t) => switch (t) {
+  'electrical' => '⚡',
+  'plumbing' => '🔧',
+  'furniture' => '🪑',
+  'cleaning' => '🧹',
+  _ => '📋',
+};
+
+class _MaintenanceTile extends StatelessWidget {
+  final MaintenanceIssueModel item;
+  const _MaintenanceTile({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final st = _mStatusMeta(item.status);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: st.color.withOpacity(0.2), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: st.color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Center(
+              child: Text(
+                _mTypeEmoji(item.issueType),
+                style: const TextStyle(fontSize: 19),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: _black,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${item.outletName}  ·  ${_fmtTime(item.createdAt)}',
+                  style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: st.color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              st.label,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: st.color,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1048,125 +1164,6 @@ class _ComplaintTile extends StatelessWidget {
   }
 }
 
-// ─── Issue Tile (matches maintenance_screen.dart exactly) ────────────────────
-
-class _IssueTile extends StatelessWidget {
-  final MaintenanceIssue item;
-  final void Function(String) onStatusChange;
-  const _IssueTile({required this.item, required this.onStatusChange});
-
-  @override
-  Widget build(BuildContext context) {
-    final meta = _issueMeta(item.issueType);
-    final status = _statusMeta(item.status);
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: status.color.withOpacity(0.2), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: meta.color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Center(
-                  child: Text(meta.emoji, style: const TextStyle(fontSize: 19)),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      meta.label,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: _black,
-                      ),
-                    ),
-                    Text(
-                      '${item.cartName.isNotEmpty ? item.cartName : item.cartId}  ·  ${_fmtTime(item.createdAt)}',
-                      style: GoogleFonts.inter(fontSize: 12, color: _grey),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: status.color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  status.label,
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: status.color,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Divider(color: Colors.grey.shade100, height: 1),
-          const SizedBox(height: 10),
-          Text(
-            item.description,
-            style: GoogleFonts.inter(fontSize: 13, color: _black, height: 1.5),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Icon(Icons.person_outline_rounded, size: 13, color: _grey),
-              const SizedBox(width: 4),
-              Text(
-                'Reported by ${item.staffName}',
-                style: GoogleFonts.inter(fontSize: 12, color: _grey),
-              ),
-            ],
-          ),
-          if (item.status != 'resolved') ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                if (item.status == 'open') ...[
-                  _ActionBtn(
-                    'In Progress',
-                    _warn,
-                    () => onStatusChange('in_progress'),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                _ActionBtn('Resolve', _ok, () => onStatusChange('resolved')),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Action Button ────────────────────────────────────────────────────────────
 
 class _ActionBtn extends StatelessWidget {
@@ -1234,12 +1231,6 @@ class _CatMeta {
   const _CatMeta(this.emoji, this.label, this.color);
 }
 
-class _IssueMetaD {
-  final String emoji, label;
-  final Color color;
-  const _IssueMetaD(this.emoji, this.label, this.color);
-}
-
 class _StatusMetaD {
   final String label;
   final Color color;
@@ -1251,15 +1242,6 @@ _CatMeta _catMeta(String cat) => switch (cat) {
   'staff' => const _CatMeta('🧑', 'Staff Behaviour', _danger),
   'cleanliness' => const _CatMeta('🧹', 'Cleanliness', _purple),
   _ => const _CatMeta('📋', 'Other Issue', _grey),
-};
-
-_IssueMetaD _issueMeta(String type) => switch (type.toLowerCase()) {
-  'electrical' => const _IssueMetaD('⚡', 'Electrical', _warn),
-  'plumbing' => const _IssueMetaD('💧', 'Plumbing', _blue),
-  'equipment' => const _IssueMetaD('🔧', 'Equipment', _orange),
-  'cleaning' => const _IssueMetaD('🧹', 'Cleaning', _purple),
-  'safety' => const _IssueMetaD('🛡️', 'Safety', _danger),
-  _ => const _IssueMetaD('🔨', 'Other Issue', _grey),
 };
 
 _StatusMetaD _statusMeta(String s) => switch (s) {

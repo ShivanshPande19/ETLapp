@@ -2,63 +2,120 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../features/auth/domain/auth_notifier.dart';
 
-class ShellScreen extends StatelessWidget {
+class NavItem {
+  final IconData icon;
+  final String label;
+  final String route;
+  const NavItem({required this.icon, required this.label, required this.route});
+}
+
+class ShellScreen extends ConsumerWidget {
   final Widget child;
   const ShellScreen({super.key, required this.child});
 
-  int _selectedIndex(BuildContext context) {
+  List<NavItem> _getNavItems(AuthState authState) {
+    if (authState.isEtlManager) {
+      return const [
+        NavItem(icon: Icons.grid_view_rounded, label: 'Home', route: '/home'),
+        NavItem(icon: Icons.bar_chart_rounded, label: 'Sales', route: '/sales'),
+        NavItem(
+          icon: Icons.cleaning_services_rounded,
+          label: 'Tasks',
+          route: '/housekeeping',
+        ),
+        NavItem(
+          icon: Icons.star_rounded,
+          label: 'Feedbacks',
+          route: '/feedbacks',
+        ),
+        NavItem(
+          icon: Icons.feedback_rounded,
+          label: 'Issues',
+          route: '/complaints',
+        ),
+      ];
+    } else if (authState.isOutletManager) {
+      return const [
+        NavItem(
+          icon: Icons.grid_view_rounded,
+          label: 'Home',
+          route: '/outlet-home',
+        ),
+        NavItem(
+          icon: Icons.bar_chart_rounded,
+          label: 'Sales',
+          route: '/outlet-sales',
+        ),
+        NavItem(
+          icon: Icons.feedback_rounded,
+          label: 'Issues',
+          route: '/complaints',
+        ),
+        NavItem(
+          icon: Icons.star_rounded,
+          label: 'Feedbacks',
+          route: '/feedbacks',
+        ),
+        NavItem(
+          icon: Icons.handyman_rounded,
+          label: 'Repairs',
+          route: '/maintenance',
+        ),
+      ];
+    } else if (authState.isOutletStaff) {
+      // ✅ CHANGED: Issues (complaints) hataya, Repairs (maintenance) add kiya
+      return const [
+        NavItem(
+          icon: Icons.grid_view_rounded,
+          label: 'Home',
+          route: '/outlet-staff-home',
+        ),
+        NavItem(
+          icon: Icons.handyman_rounded,
+          label: 'Repairs',
+          route: '/maintenance',
+        ),
+        NavItem(
+          icon: Icons.star_rounded,
+          label: 'Feedbacks',
+          route: '/feedbacks',
+        ),
+      ];
+    }
+
+    // Default fallback
+    return const [
+      NavItem(
+        icon: Icons.feedback_rounded,
+        label: 'Issues',
+        route: '/complaints',
+      ),
+    ];
+  }
+
+  int _selectedIndex(BuildContext context, List<NavItem> items) {
     final loc = GoRouterState.of(context).uri.toString();
-    if (loc.startsWith('/sales')) return 1;
-    if (loc.startsWith('/music')) return 2;
-    if (loc.startsWith('/housekeeping')) return 3;
-    if (loc.startsWith('/complaints')) return 4;
-    if (loc.startsWith('/maintenance')) return 5;
+    for (int i = 0; i < items.length; i++) {
+      if (loc.startsWith(items[i].route)) return i;
+    }
     return 0;
   }
 
-  void _onTap(BuildContext context, int index) {
-    switch (index) {
-      case 0:
-        context.go('/home');
-        break;
-      case 1:
-        context.go('/sales');
-        break;
-      case 2:
-        context.go('/music');
-        break;
-      case 3:
-        context.go('/housekeeping');
-        break;
-      case 4:
-        context.go('/complaints');
-        break;
-      case 5:
-        context.go('/maintenance');
-        break;
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final selectedIndex = _selectedIndex(context);
+    final authState = ref.watch(authNotifierProvider);
+    final items = _getNavItems(authState);
+    final selectedIndex = _selectedIndex(context, items);
 
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
     );
-
-    const items = [
-      NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
-      NavItem(icon: Icons.bar_chart_rounded, label: 'Sales'),
-      NavItem(icon: Icons.music_note_rounded, label: 'Music'),
-      NavItem(icon: Icons.cleaning_services_rounded, label: 'Tasks'),
-      NavItem(icon: Icons.feedback_rounded, label: 'Issues'),
-      NavItem(icon: Icons.handyman_rounded, label: 'Repairs'),
-    ];
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFFFFF),
@@ -72,7 +129,7 @@ class ShellScreen extends StatelessWidget {
             child: NavBar(
               items: items,
               selectedIndex: selectedIndex,
-              onTap: (i) => _onTap(context, i),
+              onTap: (i) => context.go(items[i].route),
             ),
           ),
         ],
@@ -81,6 +138,7 @@ class ShellScreen extends StatelessWidget {
   }
 }
 
+// ─── NavBar widget ───
 class NavBar extends StatelessWidget {
   final List<NavItem> items;
   final int selectedIndex;
@@ -103,7 +161,7 @@ class NavBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.18),
+            color: Colors.black.withValues(alpha: 0.18),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -138,7 +196,7 @@ class NavBar extends StatelessWidget {
                     size: 17,
                     color: isSelected
                         ? const Color(0xFF0A0A0A)
-                        : Colors.white.withOpacity(0.45),
+                        : Colors.white.withValues(alpha: 0.45),
                   ),
                   AnimatedSize(
                     duration: const Duration(milliseconds: 220),
@@ -167,10 +225,4 @@ class NavBar extends StatelessWidget {
       ),
     );
   }
-}
-
-class NavItem {
-  final IconData icon;
-  final String label;
-  const NavItem({required this.icon, required this.label});
 }

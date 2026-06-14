@@ -4,9 +4,10 @@ from datetime import date, timedelta, datetime
 import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import func
 
 from ..core.config import settings
-from ..models.sale import Outlet, DailySaleCache, Court
+from ..models.sale import Outlet, DailySaleCache, Court, PetpoojaOrder
 
 PETPOOJA_URL = "https://api.petpooja.com/V1/thirdparty/generic_get_orders/"
 
@@ -55,101 +56,98 @@ def is_success(raw: dict) -> bool:
     return str(raw.get("success")) == "1" or str(raw.get("code")) == "200"
 
 
-def summarise_raw(raw: dict) -> dict:
-    orders = extract_orders(raw)
-
-    if not orders:
-        return {
-            "total_sales": 0.0,
-            "bill_count": 0,
-            "avg_bill": 0.0,
-        }
-
-    total = 0.0
-    for order in orders:
-        try:
-            total += float(order.get("Order", {}).get("total", 0) or 0)
-        except Exception:
-            continue
-
-    count = len(orders)
-    return {
-        "total_sales": round(total, 2),
-        "bill_count": count,
-        "avg_bill": round(total / count, 2) if count else 0.0,
-    }
-
-
-async def sync_outlet_for_date(
+async def sync_outlet_for_dates(
     db: Session,
     outlet: Outlet,
-    target_business_date: date,
-    api_fetch_date: date,
-    force_refresh: bool = False,
-) -> DailySaleCache:
+    api_fetch_dates: list[date]
+):
+    affected_business_dates = set()
     
-    api_date_str = api_fetch_date.strftime("%Y-%m-%d")
-    
-    existing = db.query(DailySaleCache).filter(
-        DailySaleCache.outlet_id == outlet.id,
-        DailySaleCache.sale_date == target_business_date,
-    ).first()
+    # 1. T, T-1, T-2 ka data fetch karke aapas mein merge karna
+    for api_date in api_fetch_dates:
+        api_date_str = api_date.strftime("%Y-%m-%d")
+        print(f"[FETCHING] vendor={outlet.vendor_name} date={api_date_str}")
+        
+        try:
+            raw = await fetch_raw(outlet.rest_id, api_date_str)
+        except Exception as e:
+            print(f"[PETPOOJA ERROR] Exception while fetching {outlet.rest_id} on {api_date_str}: {e}")
+            continue
 
-    if existing and not force_refresh:
-        print(
-            f"[CACHE HIT] vendor={outlet.vendor_name} rest_id={outlet.rest_id} "
-            f"sale_date={target_business_date} total_sales={existing.total_sales}"
+        if not is_success(raw):
+            continue
+            
+        orders = extract_orders(raw)
+        
+        for item in orders:
+            order = item.get("Order", {})
+            created_on_str = order.get("created_on", "")
+            if not created_on_str:
+                continue
+                
+            created_on = datetime.strptime(created_on_str, "%Y-%m-%d %H:%M:%S")
+            
+            # --- 4 AM BUFFER BUSINESS DAY LOGIC ---
+            if created_on.hour < 4:
+                business_date = (created_on - timedelta(days=1)).date()
+            else:
+                business_date = created_on.date()
+                
+            affected_business_dates.add(business_date)
+            
+            order_id = int(order.get("orderID", 0))
+            total_amt = float(order.get("total", 0))
+            
+            # --- UPSERT: Individual Bill in PetpoojaOrder (Duplicate Blocking) ---
+            stmt = sqlite_insert(PetpoojaOrder).values(
+                order_id=order_id,
+                outlet_id=outlet.id,
+                business_date=business_date,
+                created_on=created_on,
+                total_amount=total_amt
+            ).on_conflict_do_update(
+                index_elements=['order_id'],
+                set_={'total_amount': total_amt}
+            )
+            db.execute(stmt)
+            
+    db.commit() # Individual bills safely database mein chale gaye
+
+    # 2. DailySaleCache ko Re-calculate aur Upsert karna
+    for b_date in affected_business_dates:
+        stats = db.query(
+            func.sum(PetpoojaOrder.total_amount).label("tot"),
+            func.count(PetpoojaOrder.order_id).label("cnt")
+        ).filter(
+            PetpoojaOrder.outlet_id == outlet.id,
+            PetpoojaOrder.business_date == b_date
+        ).first()
+        
+        tot = stats.tot or 0.0
+        cnt = stats.cnt or 0
+        avg = round(tot / cnt, 2) if cnt > 0 else 0.0
+        now = datetime.utcnow()
+        
+        cache_stmt = sqlite_insert(DailySaleCache).values(
+            outlet_id=outlet.id,
+            sale_date=b_date,
+            total_sales=tot,
+            bill_count=cnt,
+            avg_bill=avg,
+            fetched_at=now
+        ).on_conflict_do_update(
+            index_elements=['outlet_id', 'sale_date'],
+            set_={
+                'total_sales': tot,
+                'bill_count': cnt,
+                'avg_bill': avg,
+                'fetched_at': now
+            }
         )
-        return existing
-
-    print(
-        f"[CACHE {'REFRESH' if existing else 'MISS'}] vendor={outlet.vendor_name} "
-        f"business_date={target_business_date} petpooja_api_date={api_date_str}"
-    )
-
-    raw = await fetch_raw(outlet.rest_id, api_date_str)
-
-    if not is_success(raw):
-        print(f"[PETPOOJA ERROR] Failed for {outlet.rest_id}. Response: {raw}")
-        if existing:
-            return existing
-        return None
-
-    summary = summarise_raw(raw)
-    now = datetime.utcnow()
-
-    # SQLite Native UPSERT (Insert or Update if exists based on unique index)
-    stmt = sqlite_insert(DailySaleCache).values(
-        outlet_id=outlet.id,
-        sale_date=target_business_date,
-        total_sales=summary["total_sales"],
-        bill_count=summary["bill_count"],
-        avg_bill=summary["avg_bill"],
-        raw_json=json.dumps(raw),
-        fetched_at=now
-    ).on_conflict_do_update(
-        index_elements=['outlet_id', 'sale_date'],
-        set_={
-            'total_sales': summary["total_sales"],
-            'bill_count': summary["bill_count"],
-            'avg_bill': summary["avg_bill"],
-            'raw_json': json.dumps(raw),
-            'fetched_at': now
-        }
-    )
-
-    db.execute(stmt)
+        db.execute(cache_stmt)
+        
     db.commit()
-
-    cache = db.query(DailySaleCache).filter_by(
-        outlet_id=outlet.id, sale_date=target_business_date
-    ).first()
-
-    print(
-        f"[CACHE SAVED] vendor={outlet.vendor_name} "
-        f"sale_date={cache.sale_date} total_sales={cache.total_sales}"
-    )
-    return cache
+    return list(affected_business_dates)
 
 
 # === ROUTE HANDLERS === 
@@ -160,54 +158,29 @@ async def sync_court_by_fetch_date(
     fetch_for_date: date,
     force_refresh: bool = True,
 ) -> dict:
-    """ Ye function `sales.py` route se single court sync karne ke liye use hota hai """
-    business_date = fetch_for_date - timedelta(days=1)
-
-    court = db.query(Court).filter(
-        Court.court_uid == court_uid,
-        Court.is_active == 1,
-    ).first()
+    court = db.query(Court).filter(Court.court_uid == court_uid, Court.is_active == 1).first()
     if not court:
         raise ValueError("Court not found")
 
-    outlets = db.query(Outlet).filter(
-        Outlet.court_id == court.id,
-        Outlet.is_active == 1,
-    ).all()
+    # The 3-Day Deep Sync Window
+    dates_to_fetch = [fetch_for_date, fetch_for_date - timedelta(days=1), fetch_for_date - timedelta(days=2)]
+    outlets = db.query(Outlet).filter(Outlet.court_id == court.id, Outlet.is_active == 1).all()
 
     results = []
     for outlet in outlets:
-        cache = await sync_outlet_for_date(
-            db=db,
-            outlet=outlet,
-            target_business_date=business_date,
-            api_fetch_date=fetch_for_date,
-            force_refresh=force_refresh,
-        )
-        if cache:
-            results.append({
-                "outlet_id": outlet.id,
-                "vendor_name": outlet.vendor_name,
-                "rest_id": outlet.rest_id,
-                "court_id": outlet.court_id,
-                "fetch_for_date": str(fetch_for_date),
-                "business_date": str(business_date),
-                "petpooja_api_date": str(fetch_for_date),
-                "sale_date": str(cache.sale_date),
-                "total_sales": cache.total_sales,
-                "bill_count": cache.bill_count,
-                "avg_bill": cache.avg_bill,
-                "fetched_at": str(cache.fetched_at),
-            })
+        affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
+        results.append({
+            "outlet_id": outlet.id,
+            "vendor_name": outlet.vendor_name,
+            "updated_business_dates": [str(d) for d in affected_dates]
+        })
 
     return {
         "court_uid": court.court_uid,
         "court_name": court.name,
-        "fetch_for_date": str(fetch_for_date),
-        "business_date": str(business_date),
-        "petpooja_api_date": str(fetch_for_date),
-        "outlets_synced": len(results),
-        "results": results,
+        "sync_trigger_date": str(fetch_for_date),
+        "outlets_synced": len(outlets),
+        "details": results
     }
 
 
@@ -216,39 +189,24 @@ async def sync_all_active_outlets_by_fetch_date(
     fetch_for_date: date,
     force_refresh: bool = True,
 ) -> dict:
-    """ Ye function Cron Job aur "Sync All" route ke liye use hota hai """
-    business_date = fetch_for_date - timedelta(days=1)
+    # The 3-Day Deep Sync Window Automatically applied
+    dates_to_fetch = [fetch_for_date, fetch_for_date - timedelta(days=1), fetch_for_date - timedelta(days=2)]
+    
     outlets = db.query(Outlet).filter(Outlet.is_active == 1).all()
-
     results = []
+    
     for outlet in outlets:
-        cache = await sync_outlet_for_date(
-            db=db,
-            outlet=outlet,
-            target_business_date=business_date,
-            api_fetch_date=fetch_for_date,
-            force_refresh=force_refresh,
-        )
-        if cache:
-            results.append({
-                "outlet_id": outlet.id,
-                "vendor_name": outlet.vendor_name,
-                "rest_id": outlet.rest_id,
-                "court_id": outlet.court_id,
-                "fetch_for_date": str(fetch_for_date),
-                "business_date": str(business_date),
-                "petpooja_api_date": str(fetch_for_date),
-                "sale_date": str(cache.sale_date),
-                "total_sales": cache.total_sales,
-                "bill_count": cache.bill_count,
-                "avg_bill": cache.avg_bill,
-                "fetched_at": str(cache.fetched_at),
-            })
+        affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
+        results.append({
+            "outlet_id": outlet.id,
+            "vendor_name": outlet.vendor_name,
+            "updated_business_dates": [str(d) for d in affected_dates]
+        })
 
     return {
-        "fetch_for_date": str(fetch_for_date),
-        "business_date": str(business_date),
-        "petpooja_api_date": str(fetch_for_date),
-        "outlets_synced": len(results),
-        "results": results,
+        "sync_trigger_date": str(fetch_for_date),
+        "petpooja_api_date": str(fetch_for_date), # Keeping for backwards compatibility with scheduler
+        "business_date": str(fetch_for_date - timedelta(days=1)), # Keeping for backwards compatibility 
+        "outlets_synced": len(outlets),
+        "details": results
     }

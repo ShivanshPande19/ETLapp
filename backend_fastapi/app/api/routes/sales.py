@@ -18,6 +18,7 @@ router = APIRouter()
 @router.get("/summary", response_model=SalesSummaryResponse)
 async def sales_summary(
     court_id: Optional[int] = Query(None),
+    outlet_id: Optional[int] = Query(None), # ✅ NAYA: Outlet ID parameter
     period: str = Query("yesterday"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -26,6 +27,7 @@ async def sales_summary(
     return await get_sales_summary(
         db=db,
         court_id=court_id,
+        outlet_id=outlet_id, # ✅ Service ko pass kar diya
         period=period,
         date_from=date_from,
         date_to=date_to,
@@ -34,8 +36,9 @@ async def sales_summary(
 
 @router.get("/vendor/history", response_model=VendorHistoryResponse)
 async def vendor_history(
-    vendor_name: str = Query(...),
-    court_id: int = Query(...),
+    vendor_name: Optional[str] = Query(None), # ✅ NAYA: Made optional
+    court_id: Optional[int] = Query(None),    # ✅ NAYA: Made optional
+    outlet_id: Optional[int] = Query(None),   # ✅ NAYA: Added outlet_id
     db: Session = Depends(get_db),
 ):
     try:
@@ -43,6 +46,7 @@ async def vendor_history(
             db=db,
             vendor_name=vendor_name,
             court_id=court_id,
+            outlet_id=outlet_id, # ✅ Service ko id pass kardi
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

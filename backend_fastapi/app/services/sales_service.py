@@ -49,14 +49,20 @@ def _date_label(start: date, end: date) -> str:
 async def get_sales_summary(
     db: Session,
     court_id: Optional[int] = None,
+    outlet_id: Optional[int] = None, # ✅ Added outlet_id
     period: str = "yesterday",
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> SalesSummaryResponse:
     start_date, end_date = _get_date_range(period, date_from, date_to)
 
+    # Base query on Outlet
     query = db.query(Outlet).filter(Outlet.is_active == 1)
-    if court_id is not None:
+
+    # ✅ Logic: Outlet_id priority par hai, agar wo nahi toh court_id
+    if outlet_id:
+        query = query.filter(Outlet.id == outlet_id)
+    elif court_id:
         query = query.filter(Outlet.court_id == court_id)
 
     outlets = query.all()
@@ -100,17 +106,28 @@ async def get_sales_summary(
 
 async def get_vendor_history(
     db: Session,
-    vendor_name: str,
-    court_id: int,
+    vendor_name: Optional[str] = None, # ✅ Made Optional
+    court_id: Optional[int] = None,    # ✅ Made Optional
+    outlet_id: Optional[int] = None,   # ✅ Added outlet_id
 ) -> VendorHistoryResponse:
-    outlet = db.query(Outlet).filter(
-        Outlet.vendor_name == vendor_name,
-        Outlet.court_id == court_id,
-        Outlet.is_active == 1,
-    ).first()
+    
+    # ✅ Smart routing: Agar outlet_id h toh seedha fetch, warna purana method
+    if outlet_id:
+        outlet = db.query(Outlet).filter(
+            Outlet.id == outlet_id,
+            Outlet.is_active == 1,
+        ).first()
+    elif vendor_name and court_id is not None:
+        outlet = db.query(Outlet).filter(
+            Outlet.vendor_name == vendor_name,
+            Outlet.court_id == court_id,
+            Outlet.is_active == 1,
+        ).first()
+    else:
+        raise ValueError("Must provide either outlet_id, or both vendor_name and court_id")
 
     if not outlet:
-        raise ValueError(f"Vendor '{vendor_name}' not found in court {court_id}")
+        raise ValueError("Outlet not found")
 
     today = date.today()
     history = []

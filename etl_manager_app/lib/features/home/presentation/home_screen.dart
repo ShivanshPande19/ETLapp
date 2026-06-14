@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../../core/utils/token_storage.dart';
 import '../../courts/domain/courts_notifier.dart';
 import 'home_providers.dart';
-import 'package:go_router/go_router.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
@@ -109,7 +110,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ref.invalidate(homeMonthSalesProvider);
     ref.read(courtsNotifierProvider.notifier).fetchCourts();
     ref.invalidate(homeHousekeepingProvider);
-    ref.invalidate(homeComplaintsProvider);
+    ref.invalidate(
+      homeFeedbacksProvider,
+    ); // 🟢 FIX: Updated to Feedbacks Provider
     ref.invalidate(homeMaintenanceProvider);
   }
 
@@ -134,7 +137,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final monthAsync = ref.watch(homeMonthSalesProvider);
     final courtsAsync = ref.watch(courtsNotifierProvider);
     final hkAsync = ref.watch(homeHousekeepingProvider);
-    final complaintsAsync = ref.watch(homeComplaintsProvider);
+    final feedbackAsync = ref.watch(
+      homeFeedbacksProvider,
+    ); // 🟢 FIX: Feedbacks Provider
     final maintenanceAsync = ref.watch(homeMaintenanceProvider);
 
     final yesterdaySales = yesterdayAsync.maybeWhen(
@@ -154,10 +159,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
     final hkLoading = hkAsync is AsyncLoading;
 
-    final complaintsCount = complaintsAsync.maybeWhen(
+    // 🟢 FIX: Feedback Count extract kiya
+    final feedbackCount = feedbackAsync.maybeWhen(
       data: (v) => v,
       orElse: () => 0,
     );
+
     final maintenanceCount = maintenanceAsync.maybeWhen(
       data: (v) => v,
       orElse: () => 0,
@@ -489,7 +496,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                           const SizedBox(height: 10),
 
-                          // ── Complaints + Maintenance — stagger 2 ──────
+                          // ── Feedback + Maintenance — stagger 2 ──────
                           _StaggerRow(
                             anim: _stagger(2),
                             child: SizedBox(
@@ -500,7 +507,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     child: GestureDetector(
                                       onTap: () {
                                         HapticFeedback.selectionClick();
-                                        context.go('/complaints');
+                                        context.go(
+                                          '/feedbacks',
+                                        ); // 🟢 FIX: Feedback route wired
                                       },
                                       child: _OutlineCard(
                                         child: Column(
@@ -515,7 +524,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                       .spaceBetween,
                                               children: [
                                                 Text(
-                                                  'Complaints',
+                                                  'Feedback', // 🟢 FIX: Name changed
                                                   style: GoogleFonts.inter(
                                                     fontSize: 12,
                                                     color: _grey,
@@ -534,7 +543,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.end,
                                               children: [
-                                                complaintsAsync is AsyncLoading
+                                                feedbackAsync is AsyncLoading
                                                     ? const _Skeleton(
                                                         width: 36,
                                                         height: 32,
@@ -568,9 +577,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                               ),
                                                             ),
                                                         child: Text(
-                                                          '$complaintsCount',
+                                                          '$feedbackCount', // 🟢 FIX: Connected to feedback count
                                                           key: ValueKey(
-                                                            complaintsCount,
+                                                            feedbackCount,
                                                           ),
                                                           style:
                                                               GoogleFonts.antonSc(
@@ -587,7 +596,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                         bottom: 3,
                                                       ),
                                                   child: Text(
-                                                    'open',
+                                                    'new', // Updated for feedbacks
                                                     style: GoogleFonts.inter(
                                                       fontSize: 12,
                                                       color: _grey,

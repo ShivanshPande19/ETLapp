@@ -7,6 +7,7 @@ import '../../../core/network/api_client.dart';
 import '../../sales/data/sales_repository.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart';
+import '../../auth/domain/auth_notifier.dart';
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -139,23 +140,23 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
   }
 });
 
-// ─── Open Complaints Count ────────────────────────────────────────────────────
+// ─── Feedbacks Count (Replaced Complaints) ──────────────────────────────────
 
-final homeComplaintsProvider = FutureProvider.autoDispose<int>((ref) async {
+final homeFeedbacksProvider = FutureProvider.autoDispose<int>((ref) async {
   try {
     final dio = ref.read(dioProvider);
-    final res = await dio.get<dynamic>(
-      '/complaints',
-      queryParameters: {'status': 'open'},
-    );
+    final res = await dio.get<dynamic>('/feedback/all');
+
     final data = res.data;
     if (data is List) return data.length;
-    if (data is Map && data['complaints'] is List)
-      return (data['complaints'] as List).length;
+    if (data is Map && data['feedbacks'] is List) {
+      return (data['feedbacks'] as List).length;
+    }
     if (data is Map && data['total'] is int) return data['total'] as int;
+
     return 0;
   } on DioException catch (e) {
-    debugPrint('🔴 [COMPLAINTS] DioError: ${e.response?.statusCode}');
+    debugPrint('🔴 [FEEDBACKS] DioError: ${e.response?.statusCode}');
     return 0;
   } catch (_) {
     return 0;
@@ -167,20 +168,110 @@ final homeComplaintsProvider = FutureProvider.autoDispose<int>((ref) async {
 final homeMaintenanceProvider = FutureProvider.autoDispose<int>((ref) async {
   try {
     final dio = ref.read(dioProvider);
+    // ✅ FIX: New API format {items: [...]} + new statuses
     final res = await dio.get<dynamic>(
       '/maintenance',
-      queryParameters: {'status': 'open'},
+      queryParameters: {'limit': 100, 'offset': 0},
     );
     final data = res.data;
-    if (data is List) return data.length;
-    if (data is Map && data['issues'] is List)
-      return (data['issues'] as List).length;
-    if (data is Map && data['total'] is int) return data['total'] as int;
+    if (data is Map && data['items'] is List) {
+      // "Pending" = jo bhi CLOSED nahi hai
+      return (data['items'] as List)
+          .where((i) => i is Map && i['status'] != 'CLOSED')
+          .length;
+    }
     return 0;
   } on DioException catch (e) {
     debugPrint('🔧 [MAINTENANCE] DioError: ${e.response?.statusCode}');
     return 0;
   } catch (_) {
     return 0;
+  }
+});
+
+// ─── OUTLET DASHBOARD PROVIDER (NAYA) ───────────────────────────────────────
+
+final outletDashboardProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+      final authState = ref.watch(authNotifierProvider);
+      final outletId = authState.outletId;
+
+      if (outletId == null) {
+        throw Exception("No outlet assigned to this manager");
+      }
+
+      try {
+        final dio = ref.read(dioProvider);
+
+        // Purani existing ETL API ko call kiya hai outlet_id ke sath
+        final response = await dio.get(
+          '/sales/summary',
+          queryParameters: {'period': 'yesterday', 'outlet_id': outletId},
+        );
+
+        final data = response.data;
+
+        return {
+          'revenue': data['total_sales'] ?? 0,
+          'orders': data['total_bills'] ?? 0,
+          'rating': '4.2', // Tech-Debt
+          'attendance': '4/5 Present', // Tech-Debt
+          'top_item': 'Paneer Tikka', // Tech-Debt
+        };
+      } catch (e) {
+        debugPrint('🔴 [OUTLET_DASHBOARD] Exception: $e');
+        throw e;
+      }
+    });
+
+// ─── WEEKLY INSIGHTS PROVIDER (REAL DB DATA) ────────────────────────────────
+
+final weeklyInsightsProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
+  (ref) async {
+    final authState = ref.watch(authNotifierProvider);
+    final outletId = authState.outletId;
+
+    if (outletId == null) {
+      throw Exception("No outlet assigned to this manager");
+    }
+
+    try {
+      final dio = ref.read(dioProvider);
+
+      final response = await dio.get(
+        '/sales/vendor/history',
+        queryParameters: {'outlet_id': outletId},
+      );
+
+      return response.data;
+    } catch (e) {
+      debugPrint('🔴 [WEEKLY_INSIGHTS] Exception: $e');
+      throw e;
+    }
+  },
+);
+
+// ─── ROSTER PROVIDER (REAL DB DATA) ─────────────────────────────────────────
+
+final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
+  ref,
+) async {
+  final authState = ref.watch(authNotifierProvider);
+  final outletId = authState.outletId;
+
+  if (outletId == null) throw Exception("No outlet assigned");
+
+  try {
+    final dio = ref.read(dioProvider);
+    // Aaj ki date ka roster automatically fetch karega backend (kyunki date optional banayi thi humne)
+    final response = await dio.get(
+      '/roster',
+      queryParameters: {'outlet_id': outletId},
+    );
+
+    return response.data;
+  } catch (e) {
+    debugPrint('🔴 [ROSTER] Exception: $e');
+    throw e;
   }
 });

@@ -26,16 +26,21 @@
     <string>$(FLUTTER_BUILD_NUMBER)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    
     <key>NSCameraUsageDescription</key>
-    <string>Required to take proof photos for housekeeping tasks</string>
+    <string>Required to take proof photos for housekeeping tasks and mark attendance</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Required to upload proof photos</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Required to save proof photos</string>
 
-    <!-- ✅ Face ID permission — local_auth ke liye zaroori -->
     <key>NSFaceIDUsageDescription</key>
     <string>ETL Manager uses Face ID to keep your data secure</string>
+
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>This app needs your location to verify your attendance.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>This app needs your location to verify your attendance.</string>
 
     <key>UIApplicationSceneManifest</key>
     <dict>

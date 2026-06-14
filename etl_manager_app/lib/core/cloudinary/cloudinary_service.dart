@@ -114,4 +114,16 @@ class HousekeepingStorageService {
     date: date,
     taskId: 'fire_safety_audit',
   );
+
+  // ── Maintenance ticket proof photo ─────────────────────────────────────────
+  static Future<String?> uploadMaintenancePhoto({required File photo}) async {
+    final date = DateTime.now().toIso8601String().substring(0, 10);
+    return uploadTaskPhoto(
+      photo: photo,
+      courtId: 0, // folder grouping ke liye — maintenance/court_0/...
+      shift: 'maintenance',
+      date: date,
+      taskId: 'ticket',
+    );
+  }
 }

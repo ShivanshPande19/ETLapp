@@ -1,0 +1,3542 @@
+
+# ======== app/core/config.py ========
+from pydantic_settings import BaseSettings
+from typing import Optional
+
+class Settings(BaseSettings):
+    APP_NAME: str = "ETL Manager API"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = True
+    SECRET_KEY: str = "changethisinsecretkey123"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+
+    # Database
+    DATABASE_URL: str = "sqlite:///./app/etl.db"
+
+    # Petpooja API credentials
+    PETPOOJA_APP_KEY: str = ""
+    PETPOOJA_APP_SECRET: str = ""
+    PETPOOJA_ACCESS_TOKEN: str = ""
+    PETPOOJA_COOKIE: str = ""
+
+    # Spotify credentials
+    spotify_client_id: Optional[str] = None
+    spotify_client_secret: Optional[str] = None
+    spotify_redirect_uri: Optional[str] = None
+
+    class Config:
+        env_file = ".env"
+        # Ye line zaroori hai taaki `.env` file mein agar koi extra 
+        # variable ho toh Pydantic use ignore kar de aur crash na ho
+        extra = "ignore" 
+
+settings = Settings()
+
+# ======== app/core/database.py ========
+
+
+# ======== app/core/security.py ========
+from datetime import datetime, timedelta
+import bcrypt
+from jose import jwt
+from .config import settings
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+def create_access_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+
+# ======== app/core/__init__.py ========
+
+
+# ======== app/database.py ========
+import os
+import pathlib
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# 🚀 BULLETPROOF LOGIC: Railway khud ek hidden variable deta hai. 
+# Agar wo variable hai, toh hum cloud par hain. Warna Mac par hain!
+if os.getenv("RAILWAY_ENVIRONMENT_NAME"):
+    db_path = "/app/data/etl.db"
+else:
+    db_path = "app/etl.db"
+
+_db_file = pathlib.Path(db_path)
+
+# Ensure folder exists safely
+_db_file.parent.mkdir(parents=True, exist_ok=True)
+
+DATABASE_URL = f"sqlite:///{_db_file}"
+
+_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=_connect_args,
+    pool_pre_ping=True,
+    echo=False,
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ======== app/__init__.py ========
+
+
+# ======== app/models/staff.py ========
+# backend_fastapi/app/models/staff.py
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, func, ForeignKey
+from ..database import Base
+
+class Staff(Base):
+    __tablename__ = "staff"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    name            = Column(String,  nullable=False)
+    email           = Column(String,  nullable=False, unique=True, index=True)
+    hashed_password = Column(String,  nullable=False)
+    
+    # Role can be 'etl_staff' or 'outlet_staff'
+    role            = Column(String,  nullable=False, default="etl_staff")
+    
+    # ETL staff ke liye court assign hoga
+    court_id        = Column(Integer, ForeignKey("courts.id"), nullable=True)   
+    
+    # Outlet staff ke liye outlet assign hoga
+    outlet_id       = Column(Integer, ForeignKey("outlets.id"), nullable=True)
+    
+    is_active       = Column(Boolean, nullable=False, default=True)
+    created_at      = Column(DateTime, server_default=func.now())
+
+# ======== app/models/vendor.py ========
+
+
+
+# ======== app/models/maintenance.py ========
+# app/models/maintenance.py
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, DateTime
+from ..database import Base
+
+
+class MaintenanceIssue(Base):
+    __tablename__ = "maintenance_issues"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    court_id    = Column(Integer, nullable=False, index=True)
+    court_name  = Column(String,  nullable=False, default="")
+
+    outlet_id   = Column(Integer, nullable=False, index=True)
+    outlet_name = Column(String,  nullable=False, default="")
+
+    # Identity now comes from JWT, not client body
+    staff_name      = Column(String, nullable=False, default="")
+    raised_by_email = Column(String, nullable=True)
+
+    issue_type  = Column(String, nullable=False)            # electrical|plumbing|furniture|cleaning|other
+    priority    = Column(String, nullable=False, default="medium")  # low|medium|high
+    description = Column(String, nullable=False)
+    photo_url   = Column(String, nullable=True)             # Cloudinary proof photo
+
+    # Lifecycle: RAISED -> ASSIGNED -> RESOLVED -> CLOSED | DISPUTED
+    status      = Column(String, nullable=False, default="RAISED", index=True)
+
+    technician_name  = Column(String, nullable=True)
+    technician_phone = Column(String, nullable=True)
+
+    # All timestamps stored as UTC
+    created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)   # starts 24h verification window
+    closed_at   = Column(DateTime, nullable=True)
+
+
+# ======== app/models/feedback.py ========
+# app/models/feedback.py
+
+from sqlalchemy import Column, Integer, String, DateTime, func, ForeignKey
+from ..database import Base
+
+class Feedback(Base):
+    __tablename__ = "feedbacks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    court_id = Column(Integer, ForeignKey("courts.id", ondelete="CASCADE"), nullable=False, index=True)
+    outlet_id = Column(Integer, ForeignKey("outlets.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    customer_name = Column(String, nullable=False)
+    customer_phone = Column(String, nullable=False)
+    
+    court_rating = Column(Integer, nullable=True)   # 1-5 only
+    court_comments = Column(String, nullable=True)
+    
+    outlet_rating = Column(Integer, nullable=True)  # 1-5 only
+    outlet_comments = Column(String, nullable=True)
+    
+    # ✅ NEW: Track source for analytics
+    source = Column(String, nullable=False, default="qr")  # qr | app
+    
+    created_at = Column(DateTime, server_default=func.now())
+
+
+# ======== app/models/attendance.py ========
+# app/models/attendance.py
+
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy.sql import func
+from app.database import Base
+
+class Attendance(Base):
+    __tablename__ = "attendance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 🔗 Linked to Staff table (Yahan 'staff.id' use kiya h)
+    staff_id = Column(Integer, ForeignKey("staff.id", ondelete="CASCADE"), nullable=False)
+    
+    # 🔗 Nullable rakha hai taaki ETL aur Outlet dono staff chal jayein
+    outlet_id = Column(Integer, ForeignKey("outlets.id", ondelete="CASCADE"), nullable=True)
+    court_id = Column(Integer, ForeignKey("courts.id", ondelete="CASCADE"), nullable=True)
+    
+    # --- Check-in Details ---
+    check_in_time = Column(DateTime(timezone=True), server_default=func.now())
+    check_in_lat = Column(Float, nullable=False)
+    check_in_lng = Column(Float, nullable=False)
+    
+    # Readable Address
+    check_in_address = Column(String, nullable=True) 
+    
+    # Photo proof ka server link 
+    check_in_photo_url = Column(String, nullable=False)
+
+# ======== app/models/__init__.py ========
+
+
+
+# ======== app/models/housekeeping.py ========
+# app/models/housekeeping.py
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLAlchemy ORM models for housekeeping tables.
+# Imported in main.py so Base.metadata.create_all() picks them up on startup.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
+from sqlalchemy.orm import declarative_mixin
+
+from ..database import Base          # your existing Base from app/database.py
+
+
+class HkTask(Base):
+    """
+    One row per (court_id, shift, date, task_id).
+    UPSERT on re-submission — no duplicate rows.
+    """
+    __tablename__ = "hk_tasks"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    court_id     = Column(Integer,  nullable=False, index=True)
+    shift        = Column(String,   nullable=False)   # morning | day | night
+    date         = Column(String,   nullable=False)   # YYYY-MM-DD
+    task_id      = Column(String,   nullable=False)
+    task_title   = Column(String,   nullable=True)
+    is_done      = Column(Boolean,  nullable=False, default=False)
+    photo_url    = Column(String,   nullable=True)
+    done_at      = Column(String,   nullable=True)    # ISO-8601 from Flutter
+    submitted_at = Column(DateTime, server_default=func.now())
+
+    # Composite unique constraint — enforced at DB level
+    from sqlalchemy import UniqueConstraint
+    __table_args__ = (
+        UniqueConstraint("court_id", "shift", "date", "task_id",
+                         name="uq_hk_tasks_submission"),
+    )
+
+
+class HkRecurring(Base):
+    """
+    Audit trail for weekly (flags washing) and monthly (fire safety) tasks.
+    Every completion adds a new row — the latest row per (court, type) is
+    used to compute next_due_at / is_overdue.
+    """
+    __tablename__ = "hk_recurring"
+
+    id         = Column(Integer,  primary_key=True, autoincrement=True)
+    court_id   = Column(Integer,  nullable=False, index=True)
+    task_type  = Column(String,   nullable=False)   # weekly | monthly
+    task_id    = Column(String,   nullable=False)   # flagswash | fireaudit
+    done_at    = Column(String,   nullable=False)   # ISO-8601
+    photo_url  = Column(String,   nullable=True)
+    done_by    = Column(Integer,  nullable=True)    # staff user id
+    created_at = Column(DateTime, server_default=func.now())
+
+
+# ======== app/models/manager.py ========
+# backend_fastapi/app/models/manager.py
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, func, ForeignKey
+from ..database import Base
+
+class Manager(Base):
+    __tablename__ = "managers"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    name            = Column(String,  nullable=False)
+    email           = Column(String,  nullable=False, unique=True, index=True)
+    hashed_password = Column(String,  nullable=False)
+    
+    # Role can be 'etl_manager' or 'outlet_manager'
+    role            = Column(String,  nullable=False, default="etl_manager")
+    
+    # Agar outlet_manager hai toh uski outlet ID, ETL Manager ke liye Null
+    outlet_id       = Column(Integer, ForeignKey("outlets.id"), nullable=True)
+    
+    is_active       = Column(Boolean, nullable=False, default=True)
+    created_at      = Column(DateTime, server_default=func.now())
+
+# ======== app/models/sale.py ========
+from datetime import datetime
+import uuid
+
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    Date,
+    DateTime,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+)
+from sqlalchemy.orm import relationship
+
+from ..database import Base
+
+
+def gen_uid():
+    return uuid.uuid4().hex[:12].upper()
+
+
+class Court(Base):
+    __tablename__ = "courts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    court_uid = Column(String, unique=True, nullable=False, default=gen_uid)
+    name = Column(String, nullable=False)
+    manager_id = Column(Integer, ForeignKey("managers.id"), nullable=True)
+    is_active = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    outlets = relationship("Outlet", back_populates="court", cascade="all, delete-orphan")
+
+
+class Outlet(Base):
+    __tablename__ = "outlets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    court_id = Column(Integer, ForeignKey("courts.id"), nullable=False, index=True)
+    vendor_name = Column(String, nullable=False)
+    rest_id = Column(String, unique=True, nullable=False)
+    is_active = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    court = relationship("Court", back_populates="outlets")
+    sales_cache = relationship("DailySaleCache", back_populates="outlet", cascade="all, delete-orphan")
+
+
+class DailySaleCache(Base):
+    __tablename__ = "daily_sale_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    outlet_id = Column(Integer, ForeignKey("outlets.id"), nullable=False, index=True)
+    sale_date = Column(Date, nullable=False, index=True)
+    total_sales = Column(Float, default=0.0)
+    bill_count = Column(Integer, default=0)
+    avg_bill = Column(Float, default=0.0)
+    raw_json = Column(String, nullable=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("outlet_id", "sale_date", name="uq_outlet_sale_date"),
+        Index("ix_daily_sale_cache_outlet_date", "outlet_id", "sale_date"),
+    )
+
+    outlet = relationship("Outlet", back_populates="sales_cache")
+
+
+# NAYA TABLE: Individual bills ko track karne ke liye taaki overlap/duplicates na hon
+class PetpoojaOrder(Base):
+    __tablename__ = "petpooja_orders"
+
+    order_id = Column(Integer, primary_key=True, index=True) # Petpooja ka unique orderID
+    outlet_id = Column(Integer, ForeignKey("outlets.id"), nullable=False, index=True)
+    business_date = Column(Date, nullable=False, index=True) # Apna 4 AM buffer wala date
+    created_on = Column(DateTime, nullable=False) # Bill fatne ka exact time
+    total_amount = Column(Float, default=0.0)
+
+    outlet = relationship("Outlet")
+
+# ======== app/schemas/auth.py ========
+# backend_fastapi/app/schemas/auth.py
+from pydantic import BaseModel
+from typing import Optional
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    manager_name: str
+    manager_email: str
+    role: str
+    zone: Optional[int] = None       # Ye etl_staff (court_id) ke liye kaam aayega
+    outlet_id: Optional[int] = None  # Naya column outlet_manager/outlet_staff ke liye
+
+# ======== app/schemas/staff.py ========
+# backend_fastapi/app/schemas/staff.py
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+
+class StaffCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    court_id: int
+
+class StaffResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+    court_id: Optional[int]
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+class StaffListResponse(BaseModel):
+    staff: list[StaffResponse]
+
+class CourtAssignRequest(BaseModel):
+    court_id: int
+
+# ======== app/schemas/court.py ========
+from pydantic import BaseModel
+from typing import List, Optional
+
+class Court(BaseModel):
+    id: int
+    court_uid: Optional[str] = None
+    name: str
+    location: Optional[str] = "Food Court"
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+class CourtsResponse(BaseModel):
+    courts: List[Court]
+
+# ======== app/schemas/feedback.py ========
+# app/schemas/feedback.py
+
+from pydantic import BaseModel, model_validator, field_validator, Field
+from typing import Optional
+from datetime import datetime
+
+
+class FeedbackCreate(BaseModel):
+    court_id: int = Field(..., ge=1)
+    outlet_id: Optional[int] = Field(None, ge=1)
+    customer_name: str = Field(..., min_length=2, max_length=100)
+    customer_phone: str = Field(..., min_length=7, max_length=15)
+    
+    # ✅ FIX: Strict 1-5 range validation
+    court_rating: Optional[int] = Field(None, ge=1, le=5)
+    court_comments: Optional[str] = Field(None, max_length=1000)
+    outlet_rating: Optional[int] = Field(None, ge=1, le=5)
+    outlet_comments: Optional[str] = Field(None, max_length=1000)
+    
+    source: str = Field(default="qr")
+
+    @field_validator("customer_phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        cleaned = v.strip().replace(" ", "").replace("-", "")
+        if not cleaned.lstrip("+").isdigit():
+            raise ValueError("Invalid phone number.")
+        if len(cleaned) < 7 or len(cleaned) > 15:
+            raise ValueError("Phone number must be 7-15 digits.")
+        return cleaned
+
+    @field_validator("customer_name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Name must be at least 2 characters.")
+        return v
+
+    @field_validator("court_comments", "outlet_comments", mode="before")
+    @classmethod
+    def clean_comments(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v if v else None
+
+    # ✅ FIX: Double Optional removed, proper check
+    @model_validator(mode="after")
+    def check_at_least_one_feedback(self):
+        if self.court_rating is None and self.outlet_rating is None:
+            raise ValueError(
+                "At least one rating (Court or Outlet) is required."
+            )
+        # Outlet rating requires outlet_id
+        if self.outlet_rating is not None and self.outlet_id is None:
+            raise ValueError(
+                "outlet_id is required when providing outlet_rating."
+            )
+        return self
+
+
+class FeedbackOut(BaseModel):
+    id: int
+    court_id: int
+    outlet_id: Optional[int]
+    customer_name: str
+    # ✅ Phone partially masked for privacy
+    customer_phone_masked: str
+    court_rating: Optional[int]
+    court_comments: Optional[str]
+    outlet_rating: Optional[int]
+    outlet_comments: Optional[str]
+    source: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    @classmethod
+    def from_orm_masked(cls, obj) -> "FeedbackOut":
+        phone = obj.customer_phone or ""
+        masked = phone[:3] + "****" + phone[-2:] if len(phone) > 5 else "***"
+        return cls(
+            id=obj.id,
+            court_id=obj.court_id,
+            outlet_id=obj.outlet_id,
+            customer_name=obj.customer_name,
+            customer_phone_masked=masked,
+            court_rating=obj.court_rating,
+            court_comments=obj.court_comments,
+            outlet_rating=obj.outlet_rating,
+            outlet_comments=obj.outlet_comments,
+            source=getattr(obj, "source", "qr"),
+            created_at=obj.created_at,
+        )
+
+
+class FeedbackAnalytics(BaseModel):
+    total_count: int
+    avg_court_rating: Optional[float]
+    avg_outlet_rating: Optional[float]
+    five_star_count: int
+    one_star_count: int
+    this_week_count: int
+    last_week_count: int
+
+
+# ======== app/schemas/attendance.py ========
+# backend_fastapi/app/schemas/attendance.py
+
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import date, datetime
+
+class StaffRosterItem(BaseModel):
+    staff_id: int
+    name: str
+    status: str  # "present" or "absent"
+    check_in_time: Optional[datetime] = None
+    selfie_url: Optional[str] = None
+
+class RosterResponse(BaseModel):
+    date: date
+    total_staff: int
+    present_count: int
+    staff_list: List[StaffRosterItem]
+
+# ======== app/schemas/__init__.py ========
+
+
+# ======== app/schemas/music.py ========
+
+
+# ======== app/schemas/dashboard.py ========
+from pydantic import BaseModel
+from typing import List
+
+class VendorSale(BaseModel):
+    vendor_name: str
+    source_system: str
+    total_sales: float
+    bill_count: int
+
+class DashboardSummary(BaseModel):
+    date: str
+    total_sales: float
+    total_bills: int
+    vendor_breakdown: List[VendorSale]
+    last_synced: str
+
+# ======== app/schemas/housekeeping.py ========
+# schemas/housekeeping.py
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+from enum import Enum
+
+class ShiftEnum(str, Enum):
+    morning = "morning"
+    day     = "day"
+    night   = "night"
+
+# ── Request bodies ─────────────────────────────────────────────────────────────
+
+class TaskSubmitItem(BaseModel):
+    task_id    : str
+    task_title : str
+    is_done    : bool
+    photo_url  : Optional[str] = None
+    done_at    : Optional[datetime] = None
+
+class ShiftSubmitRequest(BaseModel):
+    court_id     : int = Field(..., ge=1, le=3)
+    shift        : ShiftEnum
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")  # YYYY-MM-DD
+    tasks        : List[TaskSubmitItem]
+    submitted_by : Optional[int] = None
+
+class WeeklyTaskDoneRequest(BaseModel):
+    court_id  : int = Field(..., ge=1, le=3)
+    photo_url : Optional[str] = None
+    done_by   : Optional[int] = None
+
+class MonthlyTaskDoneRequest(BaseModel):
+    court_id  : int = Field(..., ge=1, le=3)
+    photo_url : Optional[str] = None
+    done_by   : Optional[int] = None
+
+# ── Response bodies ────────────────────────────────────────────────────────────
+
+class TaskStatusItem(BaseModel):
+    task_id    : str
+    task_title : str
+    is_done    : bool
+    photo_url  : Optional[str]
+    done_at    : Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+class ShiftStatus(BaseModel):
+    shift      : ShiftEnum
+    total      : int
+    done       : int
+    submitted  : bool
+    tasks      : List[TaskStatusItem]
+
+class CourtDayStatus(BaseModel):
+    court_id : int
+    date     : str
+    shifts   : List[ShiftStatus]
+
+class WeeklyTaskStatus(BaseModel):
+    court_id     : int
+    last_done_at : Optional[datetime]
+    next_due_at  : Optional[datetime]   # last_done_at + 7 days
+    photo_url    : Optional[str]
+    is_overdue   : bool
+
+    class Config:
+        from_attributes = True
+
+class MonthlyTaskStatus(BaseModel):
+    court_id     : int
+    last_done_at : Optional[datetime]
+    next_due_at  : Optional[datetime]   # last_done_at + 30 days
+    photo_url    : Optional[str]
+    is_overdue   : bool
+
+    class Config:
+        from_attributes = True
+
+class FullStatusResponse(BaseModel):
+    date          : str
+    courts        : List[CourtDayStatus]
+    weekly_tasks  : List[WeeklyTaskStatus]
+    monthly_tasks : List[MonthlyTaskStatus]
+
+class SubmitResponse(BaseModel):
+    success  : bool
+    message  : str
+    court_id : int
+    shift    : ShiftEnum
+    date     : str
+
+
+# ======== app/schemas/sale.py ========
+from pydantic import BaseModel
+from typing import List, Optional
+
+
+class CourtCreate(BaseModel):
+    name: str
+    manager_id: Optional[int] = None
+
+
+class CourtResponse(BaseModel):
+    id: int
+    court_uid: str
+    name: str
+    manager_id: Optional[int]
+    is_active: int
+
+    class Config:
+        from_attributes = True
+
+
+class OutletCreate(BaseModel):
+    vendor_name: str
+    rest_id: str
+
+
+class OutletResponse(BaseModel):
+    id: int
+    court_id: int
+    vendor_name: str
+    rest_id: str
+    is_active: int
+
+    class Config:
+        from_attributes = True
+
+
+class VendorSaleDetail(BaseModel):
+    vendor_name: str
+    source_system: str
+    total_sales: float
+    bill_count: int
+    avg_bill_value: float
+    last_synced: str
+
+
+class SalesSummaryResponse(BaseModel):
+    date: str
+    period: str
+    total_sales: float
+    total_bills: int
+    avg_bill_value: float
+    vendors: List[VendorSaleDetail]
+
+
+class DailySnapshot(BaseModel):
+    date: str
+    total_sales: float
+    total_bills: int
+
+
+class VendorHistoryResponse(BaseModel):
+    vendor_name: str
+    source_system: str
+    total_sales: float
+    bill_count: int
+    avg_bill_value: float
+    last_synced: str
+    week_total: float
+    last_week_total: float
+    best_day: str
+    daily_history: List[DailySnapshot]
+
+# ======== app/api/deps.py ========
+# app/api/deps.py
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError, ExpiredSignatureError
+from sqlalchemy.orm import Session
+
+from ..core.security import decode_token
+from ..database import get_db
+from ..models.manager import Manager
+from ..models.staff import Staff
+
+
+class CurrentUser:
+    """Authenticated user — resolved fresh from DB on every request."""
+
+    def __init__(
+        self,
+        id: int,
+        name: str,
+        email: str,
+        role: str,
+        court_id: int | None = None,
+        outlet_id: int | None = None,
+    ):
+        self.id = id
+        self.name = name
+        self.email = email
+        self.role = role
+        self.court_id = court_id
+        self.outlet_id = outlet_id
+
+    @property
+    def is_etl_manager(self) -> bool:
+        return self.role in ("etl_manager", "manager")
+
+    @property
+    def is_outlet_user(self) -> bool:
+        return self.role in ("outlet_manager", "outlet_staff")
+
+    @property
+    def is_etl_staff(self) -> bool:
+        return self.role in ("etl_staff", "staff")
+
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> CurrentUser:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = decode_token(credentials.credentials)
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired. Please log in again.")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+
+    email = payload.get("sub")
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid token payload.")
+
+    # Fresh DB lookup — deactivated users lose access immediately
+    user = db.query(Manager).filter(
+        Manager.email == email, Manager.is_active == True
+    ).first()
+
+    if user:
+        return CurrentUser(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            role=user.role,
+            outlet_id=user.outlet_id,
+        )
+
+    staff = db.query(Staff).filter(
+        Staff.email == email, Staff.is_active == True
+    ).first()
+
+    if staff:
+        return CurrentUser(
+            id=staff.id,
+            name=staff.name,
+            email=staff.email,
+            role=staff.role,
+            court_id=staff.court_id,
+            outlet_id=staff.outlet_id,
+        )
+
+    raise HTTPException(status_code=401, detail="User not found or deactivated.")
+
+
+def require_etl_manager(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    return user
+
+
+def require_outlet_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.is_outlet_user:
+        raise HTTPException(status_code=403, detail="Outlet access required.")
+    if user.outlet_id is None:
+        raise HTTPException(status_code=403, detail="No outlet assigned to your account.")
+    return user
+
+
+# ======== app/api/__init__.py ========
+
+
+# ======== app/api/routes/auth.py ========
+# backend_fastapi/app/api/routes/auth.py
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from ...schemas.auth import LoginRequest, TokenResponse
+from ...services.auth_service import login_manager
+from ...database import get_db
+from ...models.manager import Manager
+from ...models.staff import Staff
+from ...core.security import hash_password
+from pydantic import BaseModel
+
+router = APIRouter()
+
+@router.post("/login", response_model=TokenResponse)
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    try:
+        result = login_manager(request, db)
+        print(f"[ROUTE] Result: {result}")
+        if not result:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ROUTE] EXCEPTION: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class SeedRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str = "manager"
+
+@router.post("/seed", include_in_schema=False)
+def seed_user(req: SeedRequest, db: Session = Depends(get_db)):
+    exists = db.query(Manager).filter(Manager.email == req.email).first()
+    if exists:
+        raise HTTPException(status_code=400, detail="Already exists")
+    user = Manager(
+        name=req.name,
+        email=req.email,
+        hashed_password=hash_password(req.password),
+        role=req.role,
+    )
+    db.add(user)
+    db.commit()
+    return {"message": f"{req.role} created: {req.email}"}
+
+# ======== app/api/routes/staff.py ========
+# backend_fastapi/app/api/routes/staff.py
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from ...database import get_db
+from ...schemas.staff import StaffCreate, StaffResponse, StaffListResponse, CourtAssignRequest
+from ...services.staff_service import (
+    get_all_staff, get_staff_by_court,
+    create_staff, deactivate_staff, reassign_court
+)
+
+router = APIRouter()
+
+# ── GET all staff (manager only) ──────────────────────────────────────────────
+@router.get("/", response_model=StaffListResponse)
+def list_all_staff(db: Session = Depends(get_db)):
+    return StaffListResponse(staff=get_all_staff(db))
+
+# ── GET staff by court ────────────────────────────────────────────────────────
+@router.get("/court/{court_id}", response_model=StaffListResponse)
+def list_staff_by_court(court_id: int, db: Session = Depends(get_db)):
+    return StaffListResponse(staff=get_staff_by_court(court_id, db))
+
+# ── POST add new staff ────────────────────────────────────────────────────────
+@router.post("/", response_model=StaffResponse, status_code=201)
+def add_staff(data: StaffCreate, db: Session = Depends(get_db)):
+    staff = create_staff(data, db)
+    if not staff:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    return staff
+
+# ── PATCH deactivate (remove access) ─────────────────────────────────────────
+@router.patch("/{staff_id}/deactivate")
+def remove_staff_access(staff_id: int, db: Session = Depends(get_db)):
+    success = deactivate_staff(staff_id, db)
+    if not success:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    return {"message": "Access removed successfully"}
+
+# ── PATCH reassign court ──────────────────────────────────────────────────────
+@router.patch("/{staff_id}/court", response_model=StaffResponse)
+def assign_court(staff_id: int, req: CourtAssignRequest, db: Session = Depends(get_db)):
+    staff = reassign_court(staff_id, req.court_id, db)
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    return staff
+
+# ======== app/api/routes/maintenance.py ========
+# app/api/routes/maintenance.py
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
+
+from ...database import get_db
+from ...models.maintenance import MaintenanceIssue
+from ...models.sale import Court, Outlet
+from ..deps import CurrentUser, get_current_user, require_etl_manager, require_outlet_user
+from .events import notify_clients
+
+router = APIRouter()
+
+# ─── Enums (strict validation) ───────────────────────────────────────────────
+
+class IssueType(str, Enum):
+    electrical = "electrical"
+    plumbing   = "plumbing"
+    furniture  = "furniture"
+    cleaning   = "cleaning"
+    other      = "other"
+
+
+class IssuePriority(str, Enum):
+    low    = "low"
+    medium = "medium"
+    high   = "high"
+
+
+class IssueStatus(str, Enum):
+    RAISED   = "RAISED"
+    ASSIGNED = "ASSIGNED"
+    RESOLVED = "RESOLVED"
+    CLOSED   = "CLOSED"
+    DISPUTED = "DISPUTED"
+
+
+# ─── Request / Response Schemas ──────────────────────────────────────────────
+
+class RaiseTicketInput(BaseModel):
+    issue_type:  IssueType
+    priority:    IssuePriority = IssuePriority.medium
+    description: str = Field(..., min_length=5, max_length=1000)
+    photo_url:   Optional[str] = Field(None, max_length=500)
+
+    @field_validator("description")
+    @classmethod
+    def strip_desc(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError("Description must be at least 5 characters.")
+        return v
+
+
+class AssignTechnicianInput(BaseModel):
+    technician_name:  str = Field(..., min_length=2, max_length=100)
+    technician_phone: str = Field(..., min_length=7, max_length=15)
+
+    @field_validator("technician_phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        cleaned = v.strip().replace(" ", "").replace("-", "")
+        if not cleaned.lstrip("+").isdigit():
+            raise ValueError("Invalid phone number.")
+        return cleaned
+
+
+class VerifyTicketInput(BaseModel):
+    is_satisfied: bool
+
+
+class IssueOut(BaseModel):
+    id: int
+    court_id: int
+    court_name: str
+    outlet_id: int
+    outlet_name: str
+    staff_name: str
+    issue_type: str
+    priority: str
+    description: str
+    photo_url: Optional[str] = None
+    status: str
+    technician_name: Optional[str] = None
+    technician_phone: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    resolved_at: Optional[str] = None
+    closed_at: Optional[str] = None
+    auto_close_at: Optional[str] = None   # resolved_at + 24h, for UI countdown
+
+
+class IssueListOut(BaseModel):
+    items: List[IssueOut]
+    total: int
+    limit: int
+    offset: int
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+VERIFICATION_WINDOW_HOURS = 24
+
+
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Always emit explicit UTC so Flutter parses correctly."""
+    if dt is None:
+        return None
+    return dt.isoformat() + "Z"
+
+
+def _to_out(i: MaintenanceIssue) -> IssueOut:
+    auto_close = None
+    if i.status == IssueStatus.RESOLVED.value and i.resolved_at:
+        from datetime import timedelta
+        auto_close = _utc_iso(i.resolved_at + timedelta(hours=VERIFICATION_WINDOW_HOURS))
+
+    return IssueOut(
+        id=i.id,
+        court_id=i.court_id,
+        court_name=i.court_name,
+        outlet_id=i.outlet_id,
+        outlet_name=i.outlet_name,
+        staff_name=i.staff_name,
+        issue_type=i.issue_type,
+        priority=i.priority or "medium",
+        description=i.description,
+        photo_url=i.photo_url,
+        status=i.status,
+        technician_name=i.technician_name,
+        technician_phone=i.technician_phone,
+        created_at=_utc_iso(i.created_at),
+        updated_at=_utc_iso(i.updated_at),
+        resolved_at=_utc_iso(i.resolved_at),
+        closed_at=_utc_iso(i.closed_at),
+        auto_close_at=auto_close,
+    )
+
+
+def _get_issue_or_404(db: Session, issue_id: int) -> MaintenanceIssue:
+    issue = db.query(MaintenanceIssue).filter(MaintenanceIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+    return issue
+
+
+def _assert_outlet_owns(user: CurrentUser, issue: MaintenanceIssue):
+    if issue.outlet_id != user.outlet_id:
+        raise HTTPException(status_code=403, detail="This ticket belongs to another outlet.")
+
+
+async def _notify(issue: MaintenanceIssue):
+    try:
+        await notify_clients({
+            "type": "maintenance_update",
+            "court_id": issue.court_id,
+            "issue_id": issue.id,
+            "status": issue.status,
+        })
+    except Exception:
+        pass  # SSE failure must never break the API call
+
+
+# ─── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/maintenance/", response_model=IssueOut, status_code=201)
+async def raise_ticket(
+    body: RaiseTicketInput,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_outlet_user),
+):
+    """Outlet staff/manager raises a ticket for THEIR OWN outlet (from JWT)."""
+    outlet = db.query(Outlet).filter(
+        Outlet.id == user.outlet_id, Outlet.is_active == 1
+    ).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Your outlet was not found or is inactive.")
+
+    court = db.query(Court).filter(Court.id == outlet.court_id).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Associated court not found.")
+
+    issue = MaintenanceIssue(
+        court_id=court.id,
+        court_name=court.name,
+        outlet_id=outlet.id,
+        outlet_name=outlet.vendor_name.split("(")[0].strip(),
+        staff_name=user.name,              # ✅ identity from JWT, not body
+        raised_by_email=user.email,
+        issue_type=body.issue_type.value,
+        priority=body.priority.value,
+        description=body.description,
+        photo_url=body.photo_url,
+        status=IssueStatus.RAISED.value,
+    )
+    db.add(issue)
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+@router.get("/maintenance", response_model=IssueListOut)
+async def list_issues(
+    status_filter: Optional[IssueStatus] = Query(None, alias="status"),
+    priority: Optional[IssuePriority] = Query(None),
+    court_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Role-scoped listing. Outlet users see only their outlet; ETL managers see all courts."""
+    q = db.query(MaintenanceIssue)
+
+    if user.is_outlet_user:
+        if user.outlet_id is None:
+            raise HTTPException(status_code=403, detail="No outlet assigned.")
+        q = q.filter(MaintenanceIssue.outlet_id == user.outlet_id)
+    elif user.is_etl_manager:
+        if court_id:
+            q = q.filter(MaintenanceIssue.court_id == court_id)
+    elif user.is_etl_staff:
+        if user.court_id is None:
+            raise HTTPException(status_code=403, detail="No court assigned.")
+        q = q.filter(MaintenanceIssue.court_id == user.court_id)
+    else:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    if status_filter:
+        q = q.filter(MaintenanceIssue.status == status_filter.value)
+    if priority:
+        q = q.filter(MaintenanceIssue.priority == priority.value)
+
+    total = q.count()
+    rows = (
+        q.order_by(MaintenanceIssue.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return IssueListOut(
+        items=[_to_out(i) for i in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/maintenance/{issue_id}", response_model=IssueOut)
+async def get_issue(
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    issue = _get_issue_or_404(db, issue_id)
+    if user.is_outlet_user:
+        _assert_outlet_owns(user, issue)
+    return _to_out(issue)
+
+
+@router.put("/maintenance/{issue_id}/assign", response_model=IssueOut)
+async def assign_technician(
+    body: AssignTechnicianInput,
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """Manager assigns a technician. Only valid from RAISED or DISPUTED."""
+    issue = _get_issue_or_404(db, issue_id)
+
+    if issue.status not in (IssueStatus.RAISED.value, IssueStatus.DISPUTED.value):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot assign technician — ticket is {issue.status}.",
+        )
+
+    issue.technician_name = body.technician_name.strip()
+    issue.technician_phone = body.technician_phone
+    issue.status = IssueStatus.ASSIGNED.value
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+@router.put("/maintenance/{issue_id}/resolve", response_model=IssueOut)
+async def mark_resolved(
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """Manager marks resolved — starts the 24h verification window for the outlet."""
+    issue = _get_issue_or_404(db, issue_id)
+
+    if issue.status not in (IssueStatus.RAISED.value, IssueStatus.ASSIGNED.value, IssueStatus.DISPUTED.value):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot resolve — ticket is {issue.status}.",
+        )
+
+    issue.status = IssueStatus.RESOLVED.value
+    issue.resolved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+@router.put("/maintenance/{issue_id}/verify", response_model=IssueOut)
+async def verify_closure(
+    body: VerifyTicketInput,
+    issue_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_outlet_user),
+):
+    """Outlet verifies the fix. Only THEIR ticket, only when RESOLVED."""
+    issue = _get_issue_or_404(db, issue_id)
+    _assert_outlet_owns(user, issue)
+
+    if issue.status != IssueStatus.RESOLVED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot verify — ticket is {issue.status}, must be RESOLVED.",
+        )
+
+    if body.is_satisfied:
+        issue.status = IssueStatus.CLOSED.value
+        issue.closed_at = datetime.utcnow()
+    else:
+        issue.status = IssueStatus.DISPUTED.value
+        issue.resolved_at = None
+
+    db.commit()
+    db.refresh(issue)
+
+    await _notify(issue)
+    return _to_out(issue)
+
+
+# ======== app/api/routes/courts.py ========
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from ...schemas.court import CourtsResponse
+from ...services.court_service import get_all_courts
+from ...database import get_db
+
+router = APIRouter()
+
+@router.get("/", response_model=CourtsResponse)
+def list_courts(db: Session = Depends(get_db)):
+    return get_all_courts(db)
+
+# ======== app/api/routes/sales.py ========
+from datetime import date
+from typing import Optional
+
+from fastapi import APIRouter, Query, HTTPException, Depends
+from sqlalchemy.orm import Session
+
+from ...database import get_db
+from ...schemas.sale import SalesSummaryResponse, VendorHistoryResponse
+from ...services.sales_service import get_sales_summary, get_vendor_history
+from ...services.petpooja_service import (
+    sync_court_by_fetch_date,
+    sync_all_active_outlets_by_fetch_date,
+)
+
+router = APIRouter()
+
+
+@router.get("/summary", response_model=SalesSummaryResponse)
+async def sales_summary(
+    court_id: Optional[int] = Query(None),
+    outlet_id: Optional[int] = Query(None), # ✅ NAYA: Outlet ID parameter
+    period: str = Query("yesterday"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return await get_sales_summary(
+        db=db,
+        court_id=court_id,
+        outlet_id=outlet_id, # ✅ Service ko pass kar diya
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+@router.get("/vendor/history", response_model=VendorHistoryResponse)
+async def vendor_history(
+    vendor_name: Optional[str] = Query(None), # ✅ NAYA: Made optional
+    court_id: Optional[int] = Query(None),    # ✅ NAYA: Made optional
+    outlet_id: Optional[int] = Query(None),   # ✅ NAYA: Added outlet_id
+    db: Session = Depends(get_db),
+):
+    try:
+        return await get_vendor_history(
+            db=db,
+            vendor_name=vendor_name,
+            court_id=court_id,
+            outlet_id=outlet_id, # ✅ Service ko id pass kardi
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/sync")
+async def sync_sales(
+    fetch_for_date: str = Query(..., description="Date to send to Petpooja, e.g. 2026-05-16"),
+    court_uid: Optional[str] = Query(None, description="Optional court UID; if omitted all active outlets sync"),
+    force_refresh: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    try:
+        parsed_fetch_date = date.fromisoformat(fetch_for_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid fetch_for_date. Use YYYY-MM-DD")
+
+    try:
+        if court_uid:
+            return await sync_court_by_fetch_date(
+                db=db,
+                court_uid=court_uid,
+                fetch_for_date=parsed_fetch_date,
+                force_refresh=force_refresh,
+            )
+
+        return await sync_all_active_outlets_by_fetch_date(
+            db=db,
+            fetch_for_date=parsed_fetch_date,
+            force_refresh=force_refresh,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+# ======== app/api/routes/events.py ========
+# app/api/routes/events.py
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
+
+router = APIRouter()
+
+# court_id → list of queues
+# court_id = 0 means manager (gets all events)
+_clients: dict[int, list[asyncio.Queue]] = {}
+
+
+async def notify_clients(event: dict):
+    court_id = event.get("court_id")
+
+    # Sirf us court ke clients + managers (court_id=0)
+    queues         = list(_clients.get(court_id, []))
+    manager_queues = list(_clients.get(0, []))
+    all_queues     = queues + manager_queues
+
+    dead = []
+    for q in all_queues:
+        try:
+            await q.put(event)
+        except Exception:
+            dead.append(q)
+
+    # Dead clients cleanup
+    for court, qlist in _clients.items():
+        for q in dead:
+            if q in qlist:
+                qlist.remove(q)
+
+
+@router.get("/stream")
+async def event_stream(court_id: int = 0):
+    queue: asyncio.Queue = asyncio.Queue()
+
+    if court_id not in _clients:
+        _clients[court_id] = []
+    _clients[court_id].append(queue)
+
+    async def generate():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # keep-alive
+        except asyncio.CancelledError:
+            if court_id in _clients and queue in _clients[court_id]:
+                _clients[court_id].remove(queue)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+# ======== app/api/routes/feedback.py ========
+# app/api/routes/feedback.py
+
+import os
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from ...database import get_db
+from ...models.feedback import Feedback
+from ...models.sale import Court, Outlet
+from ...schemas.feedback import FeedbackCreate, FeedbackOut, FeedbackAnalytics
+from ..deps import get_current_user, CurrentUser
+
+router = APIRouter()
+
+templates_dir = os.path.join(os.getcwd(), "app", "templates")
+templates = Jinja2Templates(directory=templates_dir)
+
+
+# ─── Helper ──────────────────────────────────────────────────────────────────
+
+def _to_out(f: Feedback) -> FeedbackOut:
+    return FeedbackOut.from_orm_masked(f)
+
+
+def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
+    total = len(feedbacks)
+    court_ratings = [f.court_rating for f in feedbacks if f.court_rating]
+    outlet_ratings = [f.outlet_rating for f in feedbacks if f.outlet_rating]
+    all_ratings = court_ratings + outlet_ratings
+
+    now = datetime.utcnow()
+    week_start = now - timedelta(days=7)
+    last_week_start = now - timedelta(days=14)
+
+    this_week = sum(
+        1 for f in feedbacks
+        if f.created_at and f.created_at >= week_start
+    )
+    last_week = sum(
+        1 for f in feedbacks
+        if f.created_at
+        and last_week_start <= f.created_at < week_start
+    )
+
+    return FeedbackAnalytics(
+        total_count=total,
+        avg_court_rating=round(sum(court_ratings) / len(court_ratings), 1)
+        if court_ratings else None,
+        avg_outlet_rating=round(sum(outlet_ratings) / len(outlet_ratings), 1)
+        if outlet_ratings else None,
+        five_star_count=sum(1 for r in all_ratings if r == 5),
+        one_star_count=sum(1 for r in all_ratings if r == 1),
+        this_week_count=this_week,
+        last_week_count=last_week,
+    )
+
+
+# ─── PUBLIC: QR Portal ───────────────────────────────────────────────────────
+
+@router.get("/portal", response_class=HTMLResponse)
+def serve_feedback_portal(
+    request: Request,
+    court_id: int = Query(1, ge=1),
+    db: Session = Depends(get_db),
+):
+    # ✅ FIX: Validate court exists
+    court = db.query(Court).filter(
+        Court.id == court_id, Court.is_active == 1
+    ).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found.")
+
+    court_name = court.name
+    outlets = db.query(Outlet).filter(
+        Outlet.court_id == court_id, Outlet.is_active == 1
+    ).all()
+    outlets_data = [{"id": o.id, "name": o.vendor_name} for o in outlets]
+
+    return templates.TemplateResponse(
+        request=request,
+        name="feedback.html",
+        context={
+            "request": request,
+            "court_id": court_id,
+            "court_name": court_name,
+            "outlets": outlets_data,
+        },
+    )
+
+
+# ─── PUBLIC: Customer submits feedback (QR scan) ─────────────────────────────
+
+@router.post(
+    "/submit",
+    response_model=FeedbackOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def submit_feedback(payload: FeedbackCreate, db: Session = Depends(get_db)):
+    # ✅ Validate court exists
+    court = db.query(Court).filter(
+        Court.id == payload.court_id, Court.is_active == 1
+    ).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found.")
+
+    # ✅ Validate outlet belongs to court
+    if payload.outlet_id:
+        outlet = db.query(Outlet).filter(
+            Outlet.id == payload.outlet_id,
+            Outlet.court_id == payload.court_id,
+            Outlet.is_active == 1,
+        ).first()
+        if not outlet:
+            raise HTTPException(
+                status_code=404,
+                detail="Outlet not found or does not belong to this court.",
+            )
+
+    try:
+        new_feedback = Feedback(
+            court_id=payload.court_id,
+            outlet_id=payload.outlet_id,
+            customer_name=payload.customer_name,
+            customer_phone=payload.customer_phone,
+            court_rating=payload.court_rating,
+            court_comments=payload.court_comments,
+            outlet_rating=payload.outlet_rating,
+            outlet_comments=payload.outlet_comments,
+            source=payload.source,
+        )
+        db.add(new_feedback)
+        db.commit()
+        db.refresh(new_feedback)
+        return _to_out(new_feedback)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save feedback.",
+        )
+
+
+# ─── PROTECTED: ETL Manager — all feedbacks ──────────────────────────────────
+
+@router.get("/court/{court_id}", response_model=List[FeedbackOut])
+def get_court_feedbacks(
+    court_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # ✅ FIX: Auth required + ETL manager only
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    feedbacks = (
+        db.query(Feedback)
+        .filter(Feedback.court_id == court_id)
+        .order_by(Feedback.created_at.desc())
+        .all()
+    )
+    return [_to_out(f) for f in feedbacks]
+
+
+@router.get("/court/{court_id}/analytics", response_model=FeedbackAnalytics)
+def get_court_analytics(
+    court_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    feedbacks = db.query(Feedback).filter(
+        Feedback.court_id == court_id
+    ).all()
+    return _analytics(feedbacks)
+
+
+# ─── PROTECTED: Outlet Manager/Staff — own outlet only ───────────────────────
+
+@router.get("/outlet/{outlet_id}", response_model=List[FeedbackOut])
+def get_outlet_feedbacks(
+    outlet_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # ✅ FIX: Ownership check — outlet user can only see their own outlet
+    if user.is_outlet_user:
+        if user.outlet_id != outlet_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only view your own outlet's feedbacks.",
+            )
+    elif not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    feedbacks = (
+        db.query(Feedback)
+        .filter(
+            Feedback.outlet_id == outlet_id,
+            Feedback.outlet_rating.isnot(None),
+        )
+        .order_by(Feedback.created_at.desc())
+        .all()
+    )
+    return [_to_out(f) for f in feedbacks]
+
+
+@router.get("/outlet/{outlet_id}/analytics", response_model=FeedbackAnalytics)
+def get_outlet_analytics(
+    outlet_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    if user.is_outlet_user:
+        if user.outlet_id != outlet_id:
+            raise HTTPException(status_code=403, detail="Access denied.")
+    elif not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    feedbacks = db.query(Feedback).filter(
+        Feedback.outlet_id == outlet_id,
+        Feedback.outlet_rating.isnot(None),
+    ).all()
+    return _analytics(feedbacks)
+
+
+# ─── PROTECTED: All feedbacks (ETL manager only) ─────────────────────────────
+
+@router.get("/all", response_model=List[FeedbackOut])
+def get_all_feedbacks(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # ✅ FIX: Was completely open before — now JWT required
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    feedbacks = (
+        db.query(Feedback)
+        .order_by(Feedback.created_at.desc())
+        .all()
+    )
+    return [_to_out(f) for f in feedbacks]
+
+
+@router.get("/all/analytics", response_model=FeedbackAnalytics)
+def get_all_analytics(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    feedbacks = db.query(Feedback).all()
+    return _analytics(feedbacks)
+
+
+# ======== app/api/routes/attendance.py ========
+# app/api/routes/attendance.py
+
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from sqlalchemy.orm import Session
+from app.database import get_db
+
+from app.models.attendance import Attendance
+from app.models.staff import Staff  
+import httpx 
+import shutil
+import os
+import uuid
+
+router = APIRouter()
+
+# 🌍 Free Reverse Geocoding API
+async def get_address_from_coords(lat: float, lng: float) -> str:
+    url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
+    headers = {"User-Agent": "ETL_Manager_App/1.0"}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("display_name", f"Lat: {lat}, Lng: {lng}")
+    except Exception:
+        pass
+    return f"Lat: {lat}, Lng: {lng}"
+
+@router.post("/check-in")
+async def mark_attendance(
+    email: str = Form(...), # ✅ FIXED: Ab 'staff_id' nahi 'email' maang raha hai
+    lat: float = Form(...),
+    lng: float = Form(...),
+    photo: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    # 1. Staff ko Email se dhoondho
+    staff = db.query(Staff).filter(Staff.email == email).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    # 2. Photo Save karo (Temporary directory mein)
+    os.makedirs("uploads/attendance", exist_ok=True)
+    file_ext = photo.filename.split('.')[-1]
+    file_name = f"{uuid.uuid4()}.{file_ext}"
+    file_path = f"uploads/attendance/{file_name}"
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(photo.file, buffer)
+        
+    # 3. Address nikaalo
+    real_address = await get_address_from_coords(lat, lng)
+
+    # 4. Database Save 
+    new_record = Attendance(
+        staff_id=staff.id, # Staff id yahan lag jayegi
+        outlet_id=staff.outlet_id, 
+        court_id=staff.court_id,   
+        check_in_lat=lat,
+        check_in_lng=lng,
+        check_in_address=real_address,
+        check_in_photo_url=file_path
+    )
+    
+    db.add(new_record)
+    db.commit()
+    db.refresh(new_record)
+
+    return {
+        "status": "success", 
+        "message": "Attendance marked successfully!",
+        "address": real_address
+    }
+
+# ======== app/api/routes/__init__.py ========
+
+
+# ======== app/api/routes/music.py ========
+# backend_fastapi/app/api/routes/music.py
+
+from fastapi import APIRouter, HTTPException
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from pydantic import BaseModel
+from app.core.config import settings
+import sqlite3  # <-- Seedha DB se connect karne ke liye
+import os
+
+router = APIRouter()
+
+print(f"DEBUG: Client ID Loaded from settings: {settings.spotify_client_id}")
+
+# In-memory store (Court ID -> Device Details)
+device_mapping = {}
+
+# Spotify OAuth Configuration
+sp_oauth = SpotifyOAuth(
+    client_id=settings.spotify_client_id,
+    client_secret=settings.spotify_client_secret,
+    redirect_uri=settings.spotify_redirect_uri,
+    scope="user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private",
+    cache_path=".spotify_cache"
+)
+
+# Helper function to get active Spotify Client
+def get_spotify_client():
+    token_info = sp_oauth.get_cached_token()
+    if not token_info or sp_oauth.is_token_expired(token_info):
+        raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+    return spotipy.Spotify(auth=token_info['access_token'])
+
+# --- Helper Function: Strictly get linked device ---
+def get_linked_device_id(court_id: int):
+    if not court_id:
+        raise HTTPException(status_code=400, detail="Please select a specific court first.")
+    
+    linked_data = device_mapping.get(court_id)
+    if not linked_data or not linked_data.get('id'):
+        raise HTTPException(status_code=400, detail=f"No tablet linked to Court {court_id}. Please link a device first.")
+    
+    return linked_data['id']
+
+# --- 1. Auth Endpoints ---
+@router.get("/auth/status")
+def get_auth_status():
+    token_info = sp_oauth.get_cached_token()
+    is_auth = False
+    if token_info:
+        is_auth = not sp_oauth.is_token_expired(token_info)
+    return {"is_authenticated": is_auth}
+
+@router.get("/auth/url")
+def get_auth_url():
+    return {"auth_url": sp_oauth.get_authorize_url()}
+
+@router.get("/callback", include_in_schema=False)
+def spotify_callback(code: str):
+    sp_oauth.get_access_token(code)
+    return {"message": "Spotify successfully connected! You can close this window and return to the app."}
+
+# --- 2. Playback State ---
+@router.get("/playback")
+def get_playback_state(court_id: int = None):
+    try:
+        sp = get_spotify_client()
+        playback = sp.current_playback()
+        
+        if not playback or not playback.get('item'):
+            return {"is_playing": False, "track": None, "device": None, "shuffle": False, "repeat": "off"}
+            
+        item = playback['item']
+        device = playback['device']
+        
+        return {
+            "is_playing": playback['is_playing'],
+            "shuffle": playback.get('shuffle_state', False),
+            "repeat": playback.get('repeat_state', 'off'),
+            "device": {
+                "device_id": device['id'],
+                "name": device['name'],
+                "type": device['type'],
+                "is_active": device['is_active'],
+                "volume_percent": device['volume_percent']
+            } if device else None,
+            "track": {
+                "track_id": item['id'],
+                "title": item['name'],
+                "artist": ", ".join([a['name'] for a in item['artists']]),
+                "album": item['album']['name'],
+                "album_art_url": item['album']['images'][0]['url'] if item['album']['images'] else None,
+                "duration_ms": item['duration_ms'],
+                "progress_ms": playback['progress_ms'],
+                "is_playing": playback['is_playing']
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 3. Playback Controls ---
+class PlayRequest(BaseModel):
+    court_id: int = None
+    playlist_uri: str = None
+
+@router.post("/play")
+def play_music(req: PlayRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id) 
+    
+    if req.playlist_uri:
+        sp.start_playback(device_id=device_id, context_uri=req.playlist_uri)
+    else:
+        sp.start_playback(device_id=device_id)
+    return {"status": "playing"}
+
+class CourtRequest(BaseModel):
+    court_id: int = None
+
+@router.post("/pause")
+def pause_music(req: CourtRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id)
+    sp.pause_playback(device_id=device_id)
+    return {"status": "paused"}
+
+@router.post("/next")
+def skip_next(req: CourtRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id)
+    sp.next_track(device_id=device_id)
+    return {"status": "skipped next"}
+
+@router.post("/previous")
+def skip_previous(req: CourtRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id)
+    sp.previous_track(device_id=device_id)
+    return {"status": "skipped previous"}
+
+class VolumeRequest(BaseModel):
+    court_id: int = None
+    volume: int
+
+@router.post("/volume")
+def set_volume(req: VolumeRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id)
+    sp.volume(volume_percent=req.volume, device_id=device_id)
+    return {"status": "volume set"}
+
+class ShuffleRequest(BaseModel):
+    court_id: int = None
+    state: bool
+
+@router.post("/shuffle")
+def toggle_shuffle(req: ShuffleRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id)
+    sp.shuffle(state=req.state, device_id=device_id)
+    return {"status": "shuffle toggled"}
+
+class RepeatRequest(BaseModel):
+    court_id: int = None
+    state: str
+
+@router.post("/repeat")
+def toggle_repeat(req: RepeatRequest):
+    sp = get_spotify_client()
+    device_id = get_linked_device_id(req.court_id)
+    sp.repeat(state=req.state, device_id=device_id)
+    return {"status": "repeat toggled"}
+
+# --- 4. Devices & Playlists ---
+@router.get("/playlists")
+def get_playlists():
+    sp = get_spotify_client()
+    playlists = sp.current_user_playlists(limit=10)
+    result = []
+    for pl in playlists.get('items', []):
+        result.append({
+            "playlist_id": pl['id'],
+            "name": pl['name'],
+            "description": pl['description'],
+            "image_url": pl['images'][0]['url'] if pl['images'] else None,
+            "track_count": pl['tracks']['total']
+        })
+    return {"playlists": result}
+
+@router.get("/devices")
+def get_devices():
+    sp = get_spotify_client()
+    devices = sp.devices()
+    result = []
+    for d in devices.get('devices', []):
+        result.append({
+            "device_id": d['id'],
+            "name": d['name'],
+            "type": d['type'],
+            "is_active": d['is_active'],
+            "volume_percent": d['volume_percent']
+        })
+    return {"devices": result}
+
+class LinkDeviceRequest(BaseModel):
+    court_id: int
+    device_id: str
+    device_name: str
+
+@router.post("/link-device")
+def link_device(req: LinkDeviceRequest):
+    device_mapping[req.court_id] = {'id': req.device_id, 'name': req.device_name}
+    return {"status": "device linked", "court_id": req.court_id, "device_name": req.device_name}
+
+# --- YAHAN CHANGE KIYA HAI: Direct SQLite DB Integration ---
+@router.get("/court-devices")
+def get_court_devices():
+    result = []
+    db_path = "./app/etl.db"
+    
+    try:
+        # Aapke etl.db se seedha connect ho raha hai
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 'courts' table se id aur name utha raha hai
+        # NOTE: Agar aapki DB table ka naam sirf 'court' hai, toh 'courts' ko 'court' kar dena
+        cursor.execute("SELECT id, name FROM courts") 
+        courts_data = cursor.fetchall()
+        conn.close()
+
+        for c in courts_data:
+            c_id = c['id']
+            c_name = c['name']
+            linked_data = device_mapping.get(c_id)
+            
+            result.append({
+                "court_id": c_id,
+                "court_name": c_name,
+                "device_id": linked_data['id'] if linked_data else None,
+                "device_name": linked_data['name'] if linked_data else None,
+                "is_linked": linked_data is not None
+            })
+        return {"court_devices": result}
+        
+    except Exception as e:
+        print(f"DATABASE ERROR: {e}")
+        # Agar table ka naam match nahi hua, toh backend break nahi hoga
+        return {"court_devices": [
+            {"court_id": 1, "court_name": "Database Fetch Error", "device_id": None, "device_name": None, "is_linked": False}
+        ]}
+
+# ======== app/api/routes/dashboard.py ========
+from fastapi import APIRouter
+from ...schemas.dashboard import DashboardSummary
+from ...services.dashboard_service import get_dashboard_summary
+
+router = APIRouter()
+
+@router.get("/summary", response_model=DashboardSummary)
+def dashboard_summary():
+    return get_dashboard_summary()
+
+
+# ======== app/api/routes/housekeeping.py ========
+# app/api/routes/housekeeping.py
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import desc
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
+
+from ...database import get_db
+from ...models.housekeeping import HkTask, HkRecurring
+from .events import notify_clients
+
+try:
+    from ...core.security import get_current_user
+except ImportError:
+    try:
+        from ...api.deps import get_current_user
+    except ImportError:
+        def get_current_user():
+            return {"id": 0}
+
+router = APIRouter()
+
+_COURTS     = [1, 2, 3]
+_SHIFTS     = ["morning", "day", "night"]
+_WEEKLY_ID  = "flagswash"
+_MONTHLY_ID = "fireaudit"
+
+_DAILY_TASK_IDS = [
+    "floorclean",
+    "tablechairclean",
+    "binclean",
+    "trayclean",
+    "binempty",
+    "pestspray",
+]
+TASKS_PER_SHIFT = len(_DAILY_TASK_IDS)
+
+
+# ─── Pydantic schemas ─────────────────────────────────────────────────────────
+
+
+class TaskSubmitItem(BaseModel):
+    task_id:    str
+    task_title: str
+    is_done:    bool
+    photo_url:  Optional[str] = None
+    done_at:    Optional[str] = None
+
+
+class ShiftSubmitRequest(BaseModel):
+    court_id:     int
+    shift:        str
+    date:         str
+    tasks:        List[TaskSubmitItem]
+    submitted_by: Optional[int] = None
+
+
+class RecurringTaskRequest(BaseModel):
+    court_id:  int
+    photo_url: Optional[str] = None
+    done_by:   Optional[int] = None
+
+
+# ─── SSE helper ───────────────────────────────────────────────────────────────
+
+# Main event loop — main.py ke lifespan mein set hoga
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _fire_notify(event: dict) -> None:
+    """AnyIO worker thread se main event loop pe safely notify karo."""
+    global _main_loop
+    try:
+        if _main_loop is None or not _main_loop.is_running():
+            return
+        asyncio.run_coroutine_threadsafe(notify_clients(event), _main_loop)
+    except Exception as e:
+        print(f"[SSE] notify failed: {e}")
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
+    rows = (
+        db.query(HkTask)
+        .filter(
+            HkTask.court_id == court_id,
+            HkTask.shift    == shift,
+            HkTask.date     == date,
+        )
+        .order_by(HkTask.id)
+        .all()
+    )
+
+    tasks = [
+        {
+            "task_id":    r.task_id,
+            "task_title": r.task_title or r.task_id,
+            "is_done":    r.is_done,
+            "photo_url":  r.photo_url,
+            "done_at":    r.done_at,
+        }
+        for r in rows
+    ]
+
+    done      = sum(1 for t in tasks if t["is_done"])
+    total     = TASKS_PER_SHIFT
+    submitted = (done == total) and (total > 0)
+
+    return {
+        "shift":     shift,
+        "total":     total,
+        "done":      done,
+        "submitted": submitted,
+        "tasks":     tasks,
+    }
+
+
+def _get_latest_recurring(
+    db: Session, court_id: int, task_type: str, task_id: str
+) -> Optional[HkRecurring]:
+    return (
+        db.query(HkRecurring)
+        .filter(
+            HkRecurring.court_id  == court_id,
+            HkRecurring.task_type == task_type,
+            HkRecurring.task_id   == task_id,
+        )
+        .order_by(desc(HkRecurring.done_at))
+        .first()
+    )
+
+
+def _parse_done_at(row: Optional[HkRecurring]) -> Optional[datetime]:
+    if row is None or not row.done_at:
+        return None
+    try:
+        return datetime.fromisoformat(row.done_at)
+    except (ValueError, TypeError):
+        return None
+
+
+def _recurring_status(
+    db: Session,
+    court_id: int,
+    task_type: str,
+    task_id: str,
+    interval_days: int,
+) -> dict:
+    row       = _get_latest_recurring(db, court_id, task_type, task_id)
+    last_done = _parse_done_at(row)
+
+    next_due   = (last_done + timedelta(days=interval_days)) if last_done else None
+    now        = datetime.now()
+    is_overdue = (next_due < now) if next_due else True
+
+    return {
+        "court_id":     court_id,
+        "last_done_at": last_done.isoformat() if last_done else None,
+        "next_due_at":  next_due.isoformat()  if next_due  else None,
+        "photo_url":    row.photo_url if row else None,
+        "is_overdue":   is_overdue,
+    }
+
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.post("/submit", status_code=status.HTTP_200_OK)
+def submit_shift(
+    body: ShiftSubmitRequest,
+    db:   Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    if not body.tasks:
+        raise HTTPException(
+            status_code=422, detail="tasks list must not be empty"
+        )
+
+    for task in body.tasks:
+        stmt = (
+            sqlite_insert(HkTask)
+            .values(
+                court_id   = body.court_id,
+                shift      = body.shift,
+                date       = body.date,
+                task_id    = task.task_id,
+                task_title = task.task_title,
+                is_done    = task.is_done,
+                photo_url  = task.photo_url,
+                done_at    = task.done_at,
+            )
+            .on_conflict_do_update(
+                index_elements=["court_id", "shift", "date", "task_id"],
+                set_={
+                    "is_done":    task.is_done,
+                    "photo_url":  task.photo_url,
+                    "done_at":    task.done_at,
+                    "task_title": task.task_title,
+                },
+            )
+        )
+        db.execute(stmt)
+
+    db.commit()
+
+    # ✅ SSE notify
+    _fire_notify({
+        "type":     "housekeeping_update",
+        "court_id": body.court_id,
+        "shift":    body.shift,
+        "date":     body.date,
+    })
+
+    return {"status": "ok", "submitted": len(body.tasks)}
+
+
+@router.get("/status")
+def get_status(
+    date: Optional[str] = None,
+    db:   Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    target = date or datetime.now().strftime("%Y-%m-%d")
+
+    courts = [
+        {
+            "court_id": cid,
+            "date":     target,
+            "shifts":   [_shift_status(db, cid, s, target) for s in _SHIFTS],
+        }
+        for cid in _COURTS
+    ]
+
+    weekly_tasks  = [
+        _recurring_status(db, cid, "weekly",  _WEEKLY_ID,  7)
+        for cid in _COURTS
+    ]
+    monthly_tasks = [
+        _recurring_status(db, cid, "monthly", _MONTHLY_ID, 30)
+        for cid in _COURTS
+    ]
+
+    return {
+        "date":          target,
+        "courts":        courts,
+        "weekly_tasks":  weekly_tasks,
+        "monthly_tasks": monthly_tasks,
+    }
+
+
+@router.patch("/weekly", status_code=status.HTTP_200_OK)
+def mark_weekly_done(
+    body: RecurringTaskRequest,
+    db:   Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    row       = _get_latest_recurring(db, body.court_id, "weekly", _WEEKLY_ID)
+    last_done = _parse_done_at(row)
+    now       = datetime.now()
+
+    if last_done:
+        next_due = last_done + timedelta(days=7)
+        if now < next_due:
+            remaining = (next_due - now).days + (
+                1 if (next_due - now).seconds > 0 else 0
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code":           "COOLDOWN_ACTIVE",
+                    "message":        f"Weekly task available again in {remaining} days.",
+                    "remaining_days": remaining,
+                    "next_due_at":    next_due.isoformat(),
+                },
+            )
+
+    _add_recurring(db, body, "weekly", _WEEKLY_ID)
+
+    # ✅ SSE notify
+    _fire_notify({
+        "type":     "housekeeping_update",
+        "court_id": body.court_id,
+        "shift":    "all",
+        "date":     datetime.now().strftime("%Y-%m-%d"),
+    })
+
+    return {
+        "status":   "ok",
+        "task":     "flags_washing",
+        "court_id": body.court_id,
+    }
+
+
+@router.patch("/monthly", status_code=status.HTTP_200_OK)
+def mark_monthly_done(
+    body: RecurringTaskRequest,
+    db:   Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    row       = _get_latest_recurring(db, body.court_id, "monthly", _MONTHLY_ID)
+    last_done = _parse_done_at(row)
+    now       = datetime.now()
+
+    if last_done:
+        next_due = last_done + timedelta(days=30)
+        if now < next_due:
+            remaining = (next_due - now).days + (
+                1 if (next_due - now).seconds > 0 else 0
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code":           "COOLDOWN_ACTIVE",
+                    "message":        f"Monthly task available again in {remaining} days.",
+                    "remaining_days": remaining,
+                    "next_due_at":    next_due.isoformat(),
+                },
+            )
+
+    _add_recurring(db, body, "monthly", _MONTHLY_ID)
+
+    # ✅ SSE notify
+    _fire_notify({
+        "type":     "housekeeping_update",
+        "court_id": body.court_id,
+        "shift":    "all",
+        "date":     datetime.now().strftime("%Y-%m-%d"),
+    })
+
+    return {
+        "status":   "ok",
+        "task":     "fire_safety_audit",
+        "court_id": body.court_id,
+    }
+
+
+def _add_recurring(
+    db: Session,
+    body: RecurringTaskRequest,
+    task_type: str,
+    task_id: str,
+) -> None:
+    row = HkRecurring(
+        court_id  = body.court_id,
+        task_type = task_type,
+        task_id   = task_id,
+        done_at   = datetime.now().isoformat(),
+        photo_url = body.photo_url,
+        done_by   = body.done_by,
+    )
+    db.add(row)
+    db.commit()
+
+# ======== app/api/routes/roster.py ========
+# backend_fastapi/app/api/routes/roster.py
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+from datetime import date
+from typing import Optional
+
+from ...database import get_db
+from ...schemas.attendance import RosterResponse
+from ...services.roster_service import get_daily_roster
+
+router = APIRouter()
+
+@router.get("/", response_model=RosterResponse)
+def get_roster(
+    outlet_id: int = Query(...),
+    target_date: Optional[date] = Query(None, description="Format YYYY-MM-DD. Defaults to today."),
+    db: Session = Depends(get_db)
+):
+    if not target_date:
+        target_date = date.today()
+        
+    return get_daily_roster(db, outlet_id, target_date)
+
+# ======== app/main.py ========
+# app/main.py
+
+import asyncio
+import os
+import shutil
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, File, UploadFile, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
+from .core.config import settings
+from .database import get_db
+
+from .api.routes import auth, dashboard, sales, courts
+from .api.routes import housekeeping
+from .api.routes import housekeeping as _hk_routes
+from .api.routes import feedback
+from .api.routes import maintenance
+from .api.routes import staff
+from .api.routes import events
+from .api.routes import music
+from .api.routes import roster
+from .api.routes import attendance
+
+from .models import sale as _sale_models
+from .models import housekeeping as _hk_models
+from .models import feedback as _complaint_models
+from .models import maintenance as _maintenance_models
+from .models import manager as _manager_models
+from .models import staff as _staff_models
+from .models import attendance as _attendance_models
+
+from .services.scheduler_service import start_scheduler, stop_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from .database import Base, engine
+
+    Base.metadata.create_all(bind=engine)
+    print("[DB] All tables verified / created ✓")
+
+    _hk_routes._main_loop = asyncio.get_event_loop()
+    print("[SSE] Event loop captured ✓")
+
+    start_scheduler()
+    print("[AUTO SYNC] scheduler boot hook executed ✓")
+
+    yield
+
+    stop_scheduler()
+    print("[AUTO SYNC] scheduler stopped")
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    debug=settings.DEBUG,
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ─── SAFE RAW SQL ROUTE (outlets only — no sensitive data) ───────────────────
+
+@app.get("/outlets/")
+def get_all_outlets_safe(db: Session = Depends(get_db)):
+    """Fetch all outlets using RAW SQL"""
+    try:
+        result = db.execute(text("SELECT * FROM outlets")).mappings().all()
+        return [dict(row) for row in result]
+    except Exception as e1:
+        try:
+            result = db.execute(text("SELECT * FROM outlet")).mappings().all()
+            return [dict(row) for row in result]
+        except Exception as e2:
+            print(f"SQL Error fetching outlets: {e2}")
+            return []
+
+# ✅ NOTE: /feedback/all raw SQL route REMOVED — now handled securely
+# in app/api/routes/feedback.py with JWT auth (ETL manager only)
+
+
+# ─── Routers ─────────────────────────────────────────────────────────────────
+
+app.include_router(auth.router,         prefix="/auth",         tags=["Auth"])
+app.include_router(dashboard.router,    prefix="/dashboard",    tags=["Dashboard"])
+app.include_router(sales.router,        prefix="/sales",        tags=["Sales"])
+app.include_router(courts.router,       prefix="/courts",       tags=["Courts"])
+app.include_router(housekeeping.router, prefix="/housekeeping", tags=["Housekeeping"])
+app.include_router(maintenance.router,                          tags=["Maintenance"])
+app.include_router(staff.router,        prefix="/staff",        tags=["Staff"])
+app.include_router(events.router,       prefix="/events",       tags=["Events"])
+app.include_router(music.router,        prefix="/music",        tags=["Music"])
+app.include_router(roster.router,       prefix="/roster",       tags=["Roster"])
+app.include_router(attendance.router,   prefix="/attendance",   tags=["Attendance"])
+app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"])
+
+
+# ======== app/services/auth_service.py ========
+# backend_fastapi/app/services/auth_service.py
+
+from sqlalchemy.orm import Session
+from ..models.manager import Manager
+from ..models.staff import Staff
+from ..core.security import verify_password, create_access_token
+from ..schemas.auth import LoginRequest, TokenResponse
+
+def login_manager(request: LoginRequest, db: Session) -> TokenResponse | None:
+    print(f"[LOGIN] Trying email: '{request.email}'")
+
+    # 1. Pehle managers mein dhundo
+    user = db.query(Manager).filter(
+        Manager.email == request.email,
+        Manager.is_active == True
+    ).first()
+
+    # 2. Nahi mila toh staff mein dhundo
+    if not user:
+        user = db.query(Staff).filter(
+            Staff.email == request.email,
+            Staff.is_active == True
+        ).first()
+
+    print(f"[LOGIN] User found: {user}")
+
+    if not user:
+        return None
+
+    # 3. Password verify karo
+    result = verify_password(request.password, user.hashed_password)
+    print(f"[LOGIN] Password match: {result}")
+
+    if not result:
+        return None
+
+    # 4. Token banao
+    token = create_access_token({
+        "sub": user.email,
+        "name": user.name,
+        "role": user.role,
+    })
+
+    # 5. TokenResponse build karo (Yahan fix hai)
+    try:
+        # getattr ka use isliye kar rahe hain taaki agar object mein 
+        # field na ho toh code crash na ho, balki None mil jaye
+        response = TokenResponse(
+            access_token=token,
+            token_type="bearer",
+            manager_name=user.name,
+            manager_email=user.email,
+            role=user.role,
+            zone=getattr(user, "court_id", None), 
+            outlet_id=getattr(user, "outlet_id", None)  # ✅ FIX YAHAN HAI
+        )
+        print(f"[LOGIN] TokenResponse built: {response}")
+        return response
+    except Exception as e:
+        print(f"[LOGIN] TokenResponse FAILED: {e}")
+        return None
+
+# ======== app/services/sales_service.py ========
+from datetime import date, timedelta
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from ..models.sale import Outlet, DailySaleCache
+from ..schemas.sale import (
+    SalesSummaryResponse,
+    VendorSaleDetail,
+    VendorHistoryResponse,
+    DailySnapshot,
+)
+
+
+def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str]) -> tuple[date, date]:
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    clean_period = period.lower().replace("this_", "")
+
+    if clean_period == "yesterday":
+        return yesterday, yesterday
+
+    if clean_period == "week":
+        return today - timedelta(days=7), yesterday
+
+    if clean_period == "month":
+        return today - timedelta(days=30), yesterday
+
+    if clean_period == "year":
+        return today - timedelta(days=365), yesterday
+
+    # FIX: Custom select karne par range nahi, balki exact SINGLE DATE pick hogi
+    if clean_period == "custom" and date_from:
+        single_date = date.fromisoformat(date_from)
+        return single_date, single_date  # Dono ko same day kar diya taaki exact match ho
+
+    return yesterday, yesterday
+
+
+def _date_label(start: date, end: date) -> str:
+    if start == end:
+        return start.strftime("%b %d, %Y")
+    if start.year == end.year:
+        return f"{start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}"
+    return f"{start.strftime('%b %d, %Y')} - {end.strftime('%b %d, %Y')}"
+
+
+async def get_sales_summary(
+    db: Session,
+    court_id: Optional[int] = None,
+    outlet_id: Optional[int] = None, # ✅ Added outlet_id
+    period: str = "yesterday",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> SalesSummaryResponse:
+    start_date, end_date = _get_date_range(period, date_from, date_to)
+
+    # Base query on Outlet
+    query = db.query(Outlet).filter(Outlet.is_active == 1)
+
+    # ✅ Logic: Outlet_id priority par hai, agar wo nahi toh court_id
+    if outlet_id:
+        query = query.filter(Outlet.id == outlet_id)
+    elif court_id:
+        query = query.filter(Outlet.court_id == court_id)
+
+    outlets = query.all()
+    vendor_details = []
+
+    for outlet in outlets:
+        caches = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date >= start_date,
+            DailySaleCache.sale_date <= end_date,
+        ).all()
+
+        total_sales = sum(c.total_sales for c in caches)
+        bill_count = sum(c.bill_count for c in caches)
+        
+        last_synced = max((c.fetched_at for c in caches if c.fetched_at), default=None)
+
+        vendor_details.append(
+            VendorSaleDetail(
+                vendor_name=outlet.vendor_name,
+                source_system="Petpooja",
+                total_sales=round(total_sales, 2),
+                bill_count=bill_count,
+                avg_bill_value=round(total_sales / bill_count, 2) if bill_count else 0.0,
+                last_synced=str(last_synced) if last_synced else "",
+            )
+        )
+
+    grand_total_sales = sum(v.total_sales for v in vendor_details)
+    grand_total_bills = sum(v.bill_count for v in vendor_details)
+
+    return SalesSummaryResponse(
+        date=_date_label(start_date, end_date),
+        period=period,
+        total_sales=round(grand_total_sales, 2),
+        total_bills=grand_total_bills,
+        avg_bill_value=round(grand_total_sales / grand_total_bills, 2) if grand_total_bills else 0.0,
+        vendors=vendor_details,
+    )
+
+
+async def get_vendor_history(
+    db: Session,
+    vendor_name: Optional[str] = None, # ✅ Made Optional
+    court_id: Optional[int] = None,    # ✅ Made Optional
+    outlet_id: Optional[int] = None,   # ✅ Added outlet_id
+) -> VendorHistoryResponse:
+    
+    # ✅ Smart routing: Agar outlet_id h toh seedha fetch, warna purana method
+    if outlet_id:
+        outlet = db.query(Outlet).filter(
+            Outlet.id == outlet_id,
+            Outlet.is_active == 1,
+        ).first()
+    elif vendor_name and court_id is not None:
+        outlet = db.query(Outlet).filter(
+            Outlet.vendor_name == vendor_name,
+            Outlet.court_id == court_id,
+            Outlet.is_active == 1,
+        ).first()
+    else:
+        raise ValueError("Must provide either outlet_id, or both vendor_name and court_id")
+
+    if not outlet:
+        raise ValueError("Outlet not found")
+
+    today = date.today()
+    history = []
+
+    for i in range(7, 0, -1):
+        day = today - timedelta(days=i)
+
+        cache = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date == day,
+        ).first()
+
+        history.append(
+            DailySnapshot(
+                date=str(day),
+                total_sales=cache.total_sales if cache else 0.0,
+                total_bills=cache.bill_count if cache else 0,
+            )
+        )
+
+    week_total = round(sum(s.total_sales for s in history), 2)
+
+    previous_week_total = 0.0
+    for i in range(14, 7, -1):
+        day = today - timedelta(days=i)
+
+        cache = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date == day,
+        ).first()
+
+        if cache:
+            previous_week_total += cache.total_sales
+
+    previous_week_total = round(previous_week_total, 2)
+
+    best = max(history, key=lambda x: x.total_sales) if history else None
+
+    latest_cache = db.query(DailySaleCache).filter(
+        DailySaleCache.outlet_id == outlet.id,
+        DailySaleCache.sale_date == today - timedelta(days=1),
+    ).first()
+
+    return VendorHistoryResponse(
+        vendor_name=outlet.vendor_name,
+        source_system="Petpooja",
+        total_sales=latest_cache.total_sales if latest_cache else 0.0,
+        bill_count=latest_cache.bill_count if latest_cache else 0,
+        avg_bill_value=latest_cache.avg_bill if latest_cache else 0.0,
+        last_synced=str(latest_cache.fetched_at) if latest_cache else "",
+        week_total=week_total,
+        last_week_total=previous_week_total,
+        best_day=best.date if best else "",
+        daily_history=history,
+    )
+
+# ======== app/services/__init__.py ========
+
+
+# ======== app/services/court_service.py ========
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from ..schemas.court import CourtsResponse, Court
+
+def get_all_courts(db: Session) -> CourtsResponse:
+    # Fetching live data from SQLite DB instead of hardcoded list
+    result = db.execute(text("SELECT id, court_uid, name, is_active FROM courts")).fetchall()
+    
+    courts_list = []
+    for row in result:
+        courts_list.append(
+            Court(
+                id=row[0],
+                court_uid=row[1],
+                name=row[2],
+                location=row[2], # DB me location column nahi hai toh name use kar rahe hain
+                is_active=bool(row[3])
+            )
+        )
+    
+    return CourtsResponse(courts=courts_list)
+
+# ======== app/services/dashboard_service.py ========
+from datetime import date
+from ..schemas.dashboard import DashboardSummary, VendorSale
+from .sales_service import get_sales_summary
+
+def get_dashboard_summary() -> DashboardSummary:
+    sales = get_sales_summary(court_id=None)
+    vendor_breakdown = [
+        VendorSale(
+            vendor_name=v.vendor_name,
+            source_system=v.source_system,
+            total_sales=v.total_sales,
+            bill_count=v.bill_count,
+        )
+        for v in sales.vendors
+    ]
+    return DashboardSummary(
+        date=sales.date,
+        total_sales=sales.total_sales,
+        total_bills=sales.total_bills,
+        vendor_breakdown=vendor_breakdown,
+        last_synced=date.today().isoformat() + "T00:00:00",
+    )
+
+
+# ======== app/services/roster_service.py ========
+# backend_fastapi/app/services/roster_service.py
+
+from datetime import date, timedelta  # ✅ FIXED: timedelta import kiya time add karne ke liye
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from ..models.staff import Staff
+from ..models.attendance import Attendance
+from ..schemas.attendance import RosterResponse, StaffRosterItem
+
+def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterResponse:
+    # 1. Us outlet ke saare active staff nikalo
+    staff_members = db.query(Staff).filter(
+        Staff.outlet_id == outlet_id, 
+        Staff.is_active == True
+    ).all()
+
+    # 2. Aaj ki attendance nikalo us outlet ki
+    attendances = db.query(Attendance).filter(
+        Attendance.outlet_id == outlet_id,
+        func.date(Attendance.check_in_time) == target_date
+    ).all()
+
+    # Dictionary banalo taaki fast search ho sake {staff_id: attendance_record}
+    attendance_map = {a.staff_id: a for a in attendances}
+
+    roster_list = []
+    present_count = 0
+
+    # 3. Har staff ko check karo
+    for staff in staff_members:
+        record = attendance_map.get(staff.id)
+        
+        if record:
+            status = "present"
+            present_count += 1
+            
+            # ✅ FIXED: UTC time mein 5 ghante 30 minute add karke IST mein convert kiya
+            if record.check_in_time:
+                chk_time = record.check_in_time + timedelta(hours=5, minutes=30)
+            else:
+                chk_time = None
+                
+            selfie = record.check_in_photo_url
+        else:
+            status = "absent"
+            chk_time = None
+            selfie = None
+
+        roster_list.append(StaffRosterItem(
+            staff_id=staff.id,
+            name=staff.name,
+            status=status,
+            check_in_time=chk_time,
+            selfie_url=selfie
+        ))
+
+    return RosterResponse(
+        date=target_date,
+        total_staff=len(staff_members),
+        present_count=present_count,
+        staff_list=roster_list
+    )
+
+# ======== app/services/staff_service.py ========
+# backend_fastapi/app/services/staff_service.py
+from sqlalchemy.orm import Session
+from ..models.staff import Staff
+from ..core.security import hash_password
+from ..schemas.staff import StaffCreate
+
+def get_staff_by_court(court_id: int, db: Session) -> list[Staff]:
+    return db.query(Staff).filter(
+        Staff.court_id == court_id,
+        Staff.is_active == True
+    ).all()
+
+def get_all_staff(db: Session) -> list[Staff]:
+    return db.query(Staff).filter(Staff.is_active == True).all()
+
+def create_staff(data: StaffCreate, db: Session) -> Staff:
+    existing = db.query(Staff).filter(Staff.email == data.email).first()
+    if existing:
+        return None  # Already exists
+    staff = Staff(
+        name=data.name,
+        email=data.email,
+        hashed_password=hash_password(data.password),
+        role="staff",
+        court_id=data.court_id,
+        is_active=True,
+    )
+    db.add(staff)
+    db.commit()
+    db.refresh(staff)
+    return staff
+
+def deactivate_staff(staff_id: int, db: Session) -> bool:
+    staff = db.query(Staff).filter(Staff.id == staff_id).first()
+    if not staff:
+        return False
+    staff.is_active = False
+    db.commit()
+    return True
+
+def reassign_court(staff_id: int, court_id: int, db: Session) -> Staff | None:
+    staff = db.query(Staff).filter(Staff.id == staff_id).first()
+    if not staff:
+        return None
+    staff.court_id = court_id
+    db.commit()
+    db.refresh(staff)
+    return staff
+
+# ======== app/services/scheduler_service.py ========
+# app/services/scheduler_service.py
+from datetime import date, datetime, timedelta
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy.orm import Session
+from ..database import SessionLocal
+from .petpooja_service import sync_all_active_outlets_by_fetch_date
+
+scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
+
+VERIFICATION_WINDOW_HOURS = 24
+
+
+async def run_sync_job():
+    """Daily Petpooja deep sync."""
+    db: Session = SessionLocal()
+    try:
+        fetch_for_date = date.today()
+        print(f"[AUTO SYNC] Starting Deep Sync for: {fetch_for_date}")
+        result = await sync_all_active_outlets_by_fetch_date(
+            db=db, fetch_for_date=fetch_for_date, force_refresh=True
+        )
+        print(f"[AUTO SYNC] Completed | Outlets Synced={result['outlets_synced']}")
+    except Exception as e:
+        print(f"[AUTO SYNC] Failed | Error: {e}")
+    finally:
+        db.close()
+
+
+async def auto_close_expired_tickets():
+    """Close RESOLVED maintenance tickets older than the 24h verification window."""
+    from ..models.maintenance import MaintenanceIssue
+    from ..api.routes.events import notify_clients
+
+    db: Session = SessionLocal()
+    try:
+        threshold = datetime.utcnow() - timedelta(hours=VERIFICATION_WINDOW_HOURS)
+        expired = db.query(MaintenanceIssue).filter(
+            MaintenanceIssue.status == "RESOLVED",
+            MaintenanceIssue.resolved_at <= threshold,
+        ).all()
+
+        for ticket in expired:
+            ticket.status = "CLOSED"
+            ticket.closed_at = datetime.utcnow()
+            print(f"[AUTO_CLOSE] Ticket #{ticket.id} closed after {VERIFICATION_WINDOW_HOURS}h window.")
+
+        if expired:
+            db.commit()
+            for ticket in expired:
+                try:
+                    await notify_clients({
+                        "type": "maintenance_update",
+                        "court_id": ticket.court_id,
+                        "issue_id": ticket.id,
+                        "status": "CLOSED",
+                    })
+                except Exception:
+                    pass
+    except Exception as e:
+        db.rollback()
+        print(f"[AUTO_CLOSE] Error: {e}")
+    finally:
+        db.close()
+
+
+def start_scheduler():
+    if scheduler.running:
+        return
+
+    scheduler.add_job(
+        run_sync_job,
+        trigger="cron", hour=3, minute=0,
+        id="daily_deep_sync", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+
+    # ✅ Hourly maintenance auto-close sweep
+    scheduler.add_job(
+        auto_close_expired_tickets,
+        trigger="cron", minute=0,
+        id="maintenance_auto_close", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+
+    scheduler.start()
+    print("[SCHEDULER] Started | Deep Sync 3:00 AM | Auto-close hourly")
+
+
+def stop_scheduler():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        print("[SCHEDULER] Stopped")
+
+
+# ======== app/services/petpooja_service.py ========
+import json
+from datetime import date, timedelta, datetime
+
+import httpx
+from sqlalchemy.orm import Session
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import func
+
+from ..core.config import settings
+from ..models.sale import Outlet, DailySaleCache, Court, PetpoojaOrder
+
+PETPOOJA_URL = "https://api.petpooja.com/V1/thirdparty/generic_get_orders/"
+
+
+async def fetch_raw(rest_id: str, order_date: str) -> dict:
+    payload = {
+        "app_key": settings.PETPOOJA_APP_KEY,
+        "app_secret": settings.PETPOOJA_APP_SECRET,
+        "access_token": settings.PETPOOJA_ACCESS_TOKEN,
+        "restID": rest_id,
+        "order_date": order_date,
+        "refId": "",
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Cookie": f"PETPOOJA_API={settings.PETPOOJA_COOKIE}",
+    }
+
+    print(f"[PETPOOJA FETCH START] rest_id={rest_id} order_date={order_date}")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.request(
+            method="GET",
+            url=PETPOOJA_URL,
+            headers=headers,
+            json=payload,
+        )
+        print(f"[PETPOOJA FETCH HTTP] rest_id={rest_id} status_code={resp.status_code}")
+        resp.raise_for_status()
+        raw = resp.json()
+
+    orders = raw.get("order_json", []) or raw.get("orderjson", []) or []
+    print(
+        f"[PETPOOJA FETCH SUCCESS] rest_id={rest_id} "
+        f"success={raw.get('success')} code={raw.get('code')} orders={len(orders)}"
+    )
+    return raw
+
+
+def extract_orders(raw: dict) -> list:
+    return raw.get("order_json", []) or raw.get("orderjson", []) or []
+
+
+def is_success(raw: dict) -> bool:
+    return str(raw.get("success")) == "1" or str(raw.get("code")) == "200"
+
+
+async def sync_outlet_for_dates(
+    db: Session,
+    outlet: Outlet,
+    api_fetch_dates: list[date]
+):
+    affected_business_dates = set()
+    
+    # 1. T, T-1, T-2 ka data fetch karke aapas mein merge karna
+    for api_date in api_fetch_dates:
+        api_date_str = api_date.strftime("%Y-%m-%d")
+        print(f"[FETCHING] vendor={outlet.vendor_name} date={api_date_str}")
+        
+        try:
+            raw = await fetch_raw(outlet.rest_id, api_date_str)
+        except Exception as e:
+            print(f"[PETPOOJA ERROR] Exception while fetching {outlet.rest_id} on {api_date_str}: {e}")
+            continue
+
+        if not is_success(raw):
+            continue
+            
+        orders = extract_orders(raw)
+        
+        for item in orders:
+            order = item.get("Order", {})
+            created_on_str = order.get("created_on", "")
+            if not created_on_str:
+                continue
+                
+            created_on = datetime.strptime(created_on_str, "%Y-%m-%d %H:%M:%S")
+            
+            # --- 4 AM BUFFER BUSINESS DAY LOGIC ---
+            if created_on.hour < 4:
+                business_date = (created_on - timedelta(days=1)).date()
+            else:
+                business_date = created_on.date()
+                
+            affected_business_dates.add(business_date)
+            
+            order_id = int(order.get("orderID", 0))
+            total_amt = float(order.get("total", 0))
+            
+            # --- UPSERT: Individual Bill in PetpoojaOrder (Duplicate Blocking) ---
+            stmt = sqlite_insert(PetpoojaOrder).values(
+                order_id=order_id,
+                outlet_id=outlet.id,
+                business_date=business_date,
+                created_on=created_on,
+                total_amount=total_amt
+            ).on_conflict_do_update(
+                index_elements=['order_id'],
+                set_={'total_amount': total_amt}
+            )
+            db.execute(stmt)
+            
+    db.commit() # Individual bills safely database mein chale gaye
+
+    # 2. DailySaleCache ko Re-calculate aur Upsert karna
+    for b_date in affected_business_dates:
+        stats = db.query(
+            func.sum(PetpoojaOrder.total_amount).label("tot"),
+            func.count(PetpoojaOrder.order_id).label("cnt")
+        ).filter(
+            PetpoojaOrder.outlet_id == outlet.id,
+            PetpoojaOrder.business_date == b_date
+        ).first()
+        
+        tot = stats.tot or 0.0
+        cnt = stats.cnt or 0
+        avg = round(tot / cnt, 2) if cnt > 0 else 0.0
+        now = datetime.utcnow()
+        
+        cache_stmt = sqlite_insert(DailySaleCache).values(
+            outlet_id=outlet.id,
+            sale_date=b_date,
+            total_sales=tot,
+            bill_count=cnt,
+            avg_bill=avg,
+            fetched_at=now
+        ).on_conflict_do_update(
+            index_elements=['outlet_id', 'sale_date'],
+            set_={
+                'total_sales': tot,
+                'bill_count': cnt,
+                'avg_bill': avg,
+                'fetched_at': now
+            }
+        )
+        db.execute(cache_stmt)
+        
+    db.commit()
+    return list(affected_business_dates)
+
+
+# === ROUTE HANDLERS === 
+
+async def sync_court_by_fetch_date(
+    db: Session,
+    court_uid: str,
+    fetch_for_date: date,
+    force_refresh: bool = True,
+) -> dict:
+    court = db.query(Court).filter(Court.court_uid == court_uid, Court.is_active == 1).first()
+    if not court:
+        raise ValueError("Court not found")
+
+    # The 3-Day Deep Sync Window
+    dates_to_fetch = [fetch_for_date, fetch_for_date - timedelta(days=1), fetch_for_date - timedelta(days=2)]
+    outlets = db.query(Outlet).filter(Outlet.court_id == court.id, Outlet.is_active == 1).all()
+
+    results = []
+    for outlet in outlets:
+        affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
+        results.append({
+            "outlet_id": outlet.id,
+            "vendor_name": outlet.vendor_name,
+            "updated_business_dates": [str(d) for d in affected_dates]
+        })
+
+    return {
+        "court_uid": court.court_uid,
+        "court_name": court.name,
+        "sync_trigger_date": str(fetch_for_date),
+        "outlets_synced": len(outlets),
+        "details": results
+    }
+
+
+async def sync_all_active_outlets_by_fetch_date(
+    db: Session,
+    fetch_for_date: date,
+    force_refresh: bool = True,
+) -> dict:
+    # The 3-Day Deep Sync Window Automatically applied
+    dates_to_fetch = [fetch_for_date, fetch_for_date - timedelta(days=1), fetch_for_date - timedelta(days=2)]
+    
+    outlets = db.query(Outlet).filter(Outlet.is_active == 1).all()
+    results = []
+    
+    for outlet in outlets:
+        affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
+        results.append({
+            "outlet_id": outlet.id,
+            "vendor_name": outlet.vendor_name,
+            "updated_business_dates": [str(d) for d in affected_dates]
+        })
+
+    return {
+        "sync_trigger_date": str(fetch_for_date),
+        "petpooja_api_date": str(fetch_for_date), # Keeping for backwards compatibility with scheduler
+        "business_date": str(fetch_for_date - timedelta(days=1)), # Keeping for backwards compatibility 
+        "outlets_synced": len(outlets),
+        "details": results
+    }
+
+# ======== app/services/music_service.py ========
+
+
+# ======== app/services/housekeeping_service.py ========
+from datetime import datetime, timedelta
+from typing import List
+from sqlalchemy.orm import Session
+
+# NAYA IMPORT: Yahan actual Court table ko import kar rahe hain taaki ID's dynamic milein
+from ..models.court import Court 
+
+from ..models.housekeeping import (
+    HousekeepingRecord, WeeklyTaskRecord, MonthlyTaskRecord, ShiftEnum
+)
+from ..schemas.housekeeping import (
+    ShiftSubmitRequest, WeeklyTaskDoneRequest, MonthlyTaskDoneRequest,
+    CourtDayStatus, ShiftStatus, TaskStatusItem,
+    WeeklyTaskStatus, MonthlyTaskStatus, FullStatusResponse, SubmitResponse,
+)
+
+ALL_SHIFTS = ["morning", "day", "night"]
+
+DEFAULT_TASKS = [
+    {"task_id": "floor_clean",        "task_title": "Floor Cleaning"},
+    {"task_id": "table_chair_clean",  "task_title": "Table & Chair Clean"},
+    {"task_id": "bin_clean",          "task_title": "Bins Cleaning (outside)"},
+    {"task_id": "tray_clean",         "task_title": "Tray Cleaning"},
+    {"task_id": "bin_empty",          "task_title": "Garbage Bin Empty"},
+    {"task_id": "pest_spray",         "task_title": "Pest Spray"},
+]
+
+
+def _get_active_court_ids(db: Session) -> List[int]:
+    """Helper: Database se sirf active courts ki list nikalta hai."""
+    active_courts = db.query(Court.id).filter(Court.is_active == True).all()
+    # List comprehension se tuples [(1,), (2,)] ko normal list [1, 2] me convert kar diya
+    return [court[0] for court in active_courts]
+
+
+# ── Staff: submit shift ───────────────────────────────────────────────────────
+
+def submit_shift(db: Session, req: ShiftSubmitRequest) -> SubmitResponse:
+    db.query(HousekeepingRecord).filter(
+        HousekeepingRecord.court_id == req.court_id,
+        HousekeepingRecord.shift    == ShiftEnum(req.shift),
+        HousekeepingRecord.date     == req.date,
+    ).delete(synchronize_session=False)
+
+    now = datetime.utcnow()
+    for item in req.tasks:
+        db.add(HousekeepingRecord(
+            court_id     = req.court_id,
+            shift        = ShiftEnum(req.shift),
+            date         = req.date,
+            task_id      = item.task_id,
+            task_title   = item.task_title,
+            is_done      = item.is_done,
+            photo_url    = item.photo_url,
+            done_at      = now if item.is_done else None,
+            submitted_by = req.submitted_by,
+            created_at   = now,
+            updated_at   = now,
+        ))
+    db.commit()
+    return SubmitResponse(
+        success=True, message="Shift submitted successfully",
+        court_id=req.court_id, shift=ShiftEnum(req.shift), date=req.date,
+    )
+
+
+# ── Staff: weekly task ────────────────────────────────────────────────────────
+
+def mark_weekly_done(db: Session, req: WeeklyTaskDoneRequest) -> WeeklyTaskStatus:
+    row = db.query(WeeklyTaskRecord).filter(
+        WeeklyTaskRecord.court_id == req.court_id
+    ).first()
+    now = datetime.utcnow()
+    if row:
+        row.last_done_at = now
+        row.photo_url    = req.photo_url
+        row.done_by      = req.done_by
+        row.updated_at   = now
+    else:
+        row = WeeklyTaskRecord(
+            court_id=req.court_id, last_done_at=now,
+            photo_url=req.photo_url, done_by=req.done_by, updated_at=now,
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _build_weekly_status(row.court_id, row)
+
+
+# ── Staff: monthly task ───────────────────────────────────────────────────────
+
+def mark_monthly_done(db: Session, req: MonthlyTaskDoneRequest) -> MonthlyTaskStatus:
+    row = db.query(MonthlyTaskRecord).filter(
+        MonthlyTaskRecord.court_id == req.court_id
+    ).first()
+    now = datetime.utcnow()
+    if row:
+        row.last_done_at = now
+        row.photo_url    = req.photo_url
+        row.done_by      = req.done_by
+        row.updated_at   = now
+    else:
+        row = MonthlyTaskRecord(
+            court_id=req.court_id, last_done_at=now,
+            photo_url=req.photo_url, done_by=req.done_by, updated_at=now,
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _build_monthly_status(row.court_id, row)
+
+
+# ── Manager: full status ──────────────────────────────────────────────────────
+
+def get_full_status(db: Session, date: str) -> FullStatusResponse:
+    # NAYA LOGIC: Yahan ab dynamic IDs fetch ho rahi hain
+    dynamic_courts = _get_active_court_ids(db)
+    
+    courts_status = [_build_court_status(db, c, date) for c in dynamic_courts]
+    weekly_status = [
+        _build_weekly_status(c,
+            db.query(WeeklyTaskRecord).filter(WeeklyTaskRecord.court_id == c).first())
+        for c in dynamic_courts
+    ]
+    monthly_status = [
+        _build_monthly_status(c,
+            db.query(MonthlyTaskRecord).filter(MonthlyTaskRecord.court_id == c).first())
+        for c in dynamic_courts
+    ]
+    return FullStatusResponse(
+        date=date, courts=courts_status,
+        weekly_tasks=weekly_status, monthly_tasks=monthly_status,
+    )
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _build_court_status(db: Session, court_id: int, date: str) -> CourtDayStatus:
+    shifts = []
+    for shift in ALL_SHIFTS:
+        records: List[HousekeepingRecord] = db.query(HousekeepingRecord).filter(
+            HousekeepingRecord.court_id == court_id,
+            HousekeepingRecord.shift    == ShiftEnum(shift),
+            HousekeepingRecord.date     == date,
+        ).all()
+
+        if records:
+            task_items = [
+                TaskStatusItem(
+                    task_id=r.task_id, task_title=r.task_title,
+                    is_done=r.is_done, photo_url=r.photo_url, done_at=r.done_at,
+                )
+                for r in records
+            ]
+        else:
+            task_items = [
+                TaskStatusItem(task_id=t["task_id"], task_title=t["task_title"],
+                               is_done=False, photo_url=None, done_at=None)
+                for t in DEFAULT_TASKS
+            ]
+
+        done_count = sum(1 for t in task_items if t.is_done)
+        shifts.append(ShiftStatus(
+            shift=ShiftEnum(shift), total=len(task_items),
+            done=done_count, submitted=len(records) > 0, tasks=task_items,
+        ))
+    return CourtDayStatus(court_id=court_id, date=date, shifts=shifts)
+
+
+def _build_weekly_status(court_id: int, row) -> WeeklyTaskStatus:
+    if row and row.last_done_at:
+        nxt = row.last_done_at + timedelta(days=7)
+        return WeeklyTaskStatus(
+            court_id=court_id, last_done_at=row.last_done_at,
+            next_due_at=nxt, photo_url=row.photo_url,
+            is_overdue=datetime.utcnow() > nxt,
+        )
+    return WeeklyTaskStatus(court_id=court_id, last_done_at=None,
+                            next_due_at=None, photo_url=None, is_overdue=True)
+
+
+def _build_monthly_status(court_id: int, row) -> MonthlyTaskStatus:
+    if row and row.last_done_at:
+        nxt = row.last_done_at + timedelta(days=30)
+        return MonthlyTaskStatus(
+            court_id=court_id, last_done_at=row.last_done_at,
+            next_due_at=nxt, photo_url=row.photo_url,
+            is_overdue=datetime.utcnow() > nxt,
+        )
+    return MonthlyTaskStatus(court_id=court_id, last_done_at=None,
+                             next_due_at=None, photo_url=None, is_overdue=True)
