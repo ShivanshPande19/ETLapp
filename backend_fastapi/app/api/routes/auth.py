@@ -1,4 +1,6 @@
 # backend_fastapi/app/api/routes/auth.py
+import logging
+
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from ...schemas.auth import LoginRequest, TokenResponse
@@ -9,21 +11,26 @@ from ...models.staff import Staff
 from ...core.security import hash_password
 from pydantic import BaseModel
 
+logger = logging.getLogger("auth")
+
 router = APIRouter()
 
 @router.post("/login", response_model=TokenResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     try:
         result = login_manager(request, db)
-        print(f"[ROUTE] Result: {result}")
         if not result:
             raise HTTPException(status_code=401, detail="Invalid email or password")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ROUTE] EXCEPTION: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # ✅ Log the real error server-side; never leak internals to the client.
+        logger.exception("Login failed unexpectedly: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Something went wrong. Please try again.",
+        )
 
 class SeedRequest(BaseModel):
     name: str

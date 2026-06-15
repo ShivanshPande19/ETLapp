@@ -70,6 +70,9 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
   late final AnimationController _listCtrl;
   late final Animation<double> _fadeAnim;
 
+  // ✅ Drives infinite scroll for the (now paginated) ETL list.
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -89,13 +92,25 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
     Future.delayed(const Duration(milliseconds: 150), () {
       if (mounted) _listCtrl.forward();
     });
+
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _fadeCtrl.dispose();
     _listCtrl.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 400) {
+      ref.read(etlFeedbackNotifierProvider.notifier).loadMore();
+    }
   }
 
   Animation<double> _itemAnim(int i) => CurvedAnimation(
@@ -487,6 +502,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
 
   Widget _buildContent(EtlFeedbackData data) {
     return ListView(
+      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 100),
       children: [
@@ -516,7 +532,9 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                '${data.displayedFeedbacks.length}',
+                data.hasMore
+                    ? '${data.feedbacks.length}+'
+                    : '${data.feedbacks.length}',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
@@ -529,7 +547,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
         const SizedBox(height: 16),
 
         // ─── Feedback list ───
-        if (data.displayedFeedbacks.isEmpty)
+        if (data.feedbacks.isEmpty)
           _EmptyState(
             hasFilters:
                 data.selectedCourtId != null ||
@@ -537,7 +555,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                 data.selectedDate != null,
           )
         else
-          ...data.displayedFeedbacks.asMap().entries.map((e) {
+          ...data.feedbacks.asMap().entries.map((e) {
             final anim = _itemAnim(e.key);
             return FadeTransition(
               opacity: anim,
@@ -554,8 +572,62 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
               ),
             );
           }),
+
+        // ─── Pagination footer ───
+        _PaginationFooter(
+          isLoadingMore: data.isLoadingMore,
+          hasMore: data.hasMore,
+          hasItems: data.feedbacks.isNotEmpty,
+        ),
       ],
     );
+  }
+}
+
+// ─── Pagination Footer ───────────────────────────────────────────────────────
+
+class _PaginationFooter extends StatelessWidget {
+  final bool isLoadingMore;
+  final bool hasMore;
+  final bool hasItems;
+  const _PaginationFooter({
+    required this.isLoadingMore,
+    required this.hasMore,
+    required this.hasItems,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (!hasMore && hasItems) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text(
+            "You're all caught up",
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _grey,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return const SizedBox(height: 8);
   }
 }
 
