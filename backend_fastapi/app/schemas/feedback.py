@@ -4,20 +4,24 @@ from pydantic import BaseModel, model_validator, field_validator, Field
 from typing import Optional
 from datetime import datetime
 
+# ✅ FIX #8: allowed sources whitelist
+_ALLOWED_SOURCES = {"qr", "app", "web", "manual"}
+
 
 class FeedbackCreate(BaseModel):
     court_id: int = Field(..., ge=1)
     outlet_id: Optional[int] = Field(None, ge=1)
     customer_name: str = Field(..., min_length=2, max_length=100)
     customer_phone: str = Field(..., min_length=7, max_length=15)
-    
-    # ✅ FIX: Strict 1-5 range validation
+
+    # ✅ Strict 1-5 range validation
     court_rating: Optional[int] = Field(None, ge=1, le=5)
     court_comments: Optional[str] = Field(None, max_length=1000)
     outlet_rating: Optional[int] = Field(None, ge=1, le=5)
     outlet_comments: Optional[str] = Field(None, max_length=1000)
-    
-    source: str = Field(default="qr")
+
+    # ✅ FIX #8: source length-limited
+    source: str = Field(default="qr", max_length=20)
 
     @field_validator("customer_phone")
     @classmethod
@@ -45,14 +49,21 @@ class FeedbackCreate(BaseModel):
         v = str(v).strip()
         return v if v else None
 
-    # ✅ FIX: Double Optional removed, proper check
+    # ✅ FIX #8: normalize + validate source
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str) -> str:
+        v = (v or "qr").strip().lower()
+        if v not in _ALLOWED_SOURCES:
+            return "qr"
+        return v
+
     @model_validator(mode="after")
     def check_at_least_one_feedback(self):
         if self.court_rating is None and self.outlet_rating is None:
             raise ValueError(
                 "At least one rating (Court or Outlet) is required."
             )
-        # Outlet rating requires outlet_id
         if self.outlet_rating is not None and self.outlet_id is None:
             raise ValueError(
                 "outlet_id is required when providing outlet_rating."

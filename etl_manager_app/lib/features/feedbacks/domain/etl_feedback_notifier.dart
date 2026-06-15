@@ -3,7 +3,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
-// ✅ FIX: JWT wala dio
+// ✅ JWT wala dio
 import '../../../core/network/api_client.dart';
 import '../../auth/domain/auth_notifier.dart';
 
@@ -70,14 +70,13 @@ class EtlFeedbackModel {
       courtId: json['court_id'] ?? 0,
       outletId: json['outlet_id'],
       customerName: json['customer_name'] ?? 'Unknown',
-      // ✅ FIX: New masked field
       customerPhoneMasked: json['customer_phone_masked'] ?? '***',
       courtRating: json['court_rating'],
       courtComments: json['court_comments'],
       outletRating: json['outlet_rating'],
       outletComments: json['outlet_comments'],
       source: json['source'] ?? 'qr',
-      // ✅ FIX: 'Z' suffix se toLocal() sahi kaam karega
+      // ✅ 'Z' suffix se toLocal() sahi kaam karega
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'].toString()).toLocal()
           : DateTime.now(),
@@ -120,6 +119,49 @@ class EtlFeedbackAnalytics {
       oneStarCount: json['one_star_count'] ?? 0,
       thisWeekCount: json['this_week_count'] ?? 0,
       lastWeekCount: json['last_week_count'] ?? 0,
+    );
+  }
+
+  // ✅ FIX #2: compute analytics locally from a feedback list,
+  // so the card reflects the active filters.
+  factory EtlFeedbackAnalytics.fromFeedbacks(List<EtlFeedbackModel> list) {
+    final courtRatings = <int>[];
+    final outletRatings = <int>[];
+    for (final f in list) {
+      if (f.courtRating != null) courtRatings.add(f.courtRating!);
+      if (f.outletRating != null) outletRatings.add(f.outletRating!);
+    }
+    final allRatings = [...courtRatings, ...outletRatings];
+
+    final now = DateTime.now();
+    final weekStart = now.subtract(const Duration(days: 7));
+    final lastWeekStart = now.subtract(const Duration(days: 14));
+
+    int thisWeek = 0;
+    int lastWeek = 0;
+    for (final f in list) {
+      if (f.createdAt.isAfter(weekStart)) {
+        thisWeek++;
+      } else if (f.createdAt.isAfter(lastWeekStart) &&
+          !f.createdAt.isAfter(weekStart)) {
+        lastWeek++;
+      }
+    }
+
+    double? avg(List<int> r) {
+      if (r.isEmpty) return null;
+      final a = r.reduce((x, y) => x + y) / r.length;
+      return (a * 10).round() / 10; // half-up to 1 decimal
+    }
+
+    return EtlFeedbackAnalytics(
+      totalCount: list.length,
+      avgCourtRating: avg(courtRatings),
+      avgOutletRating: avg(outletRatings),
+      fiveStarCount: allRatings.where((r) => r == 5).length,
+      oneStarCount: allRatings.where((r) => r == 1).length,
+      thisWeekCount: thisWeek,
+      lastWeekCount: lastWeek,
     );
   }
 
@@ -224,11 +266,6 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
           .toList();
       feedbacksList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      // Analytics
-      final analytics = EtlFeedbackAnalytics.fromJson(
-        results[1].data as Map<String, dynamic>,
-      );
-
       // Courts
       List<SimpleCourt> courtsList = [];
       final courtsRaw = results[2].data;
@@ -260,7 +297,8 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
       final newData = EtlFeedbackData(
         allFeedbacks: feedbacksList,
         displayedFeedbacks: feedbacksList,
-        analytics: analytics,
+        // analytics gets recomputed in _applyFilters()
+        analytics: EtlFeedbackAnalytics.fromFeedbacks(feedbacksList),
         courts: courtsList,
         outlets: outletsList,
         selectedCourtId: prev?.selectedCourtId,
@@ -320,34 +358,43 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
     if (current == null) return;
 
     final filtered = current.allFeedbacks.where((f) {
-      // Court filter
       if (current.selectedCourtId != null &&
-          f.courtId != current.selectedCourtId)
+          f.courtId != current.selectedCourtId) {
         return false;
-      // Outlet filter
+      }
       if (current.selectedOutletId != null &&
-          f.outletId != current.selectedOutletId)
+          f.outletId != current.selectedOutletId) {
         return false;
-      // Date filter
+      }
       if (current.selectedDate != null) {
         final d = current.selectedDate!;
+        // ✅ FIX #1: compare on local calendar day (createdAt already toLocal())
         if (f.createdAt.year != d.year ||
             f.createdAt.month != d.month ||
-            f.createdAt.day != d.day)
+            f.createdAt.day != d.day) {
           return false;
+        }
       }
       return true;
     }).toList();
 
-    state = AsyncValue.data(current.copyWith(displayedFeedbacks: filtered));
+    state = AsyncValue.data(
+      current.copyWith(
+        displayedFeedbacks: filtered,
+        // ✅ FIX #2: analytics now reflects the active filters
+        analytics: EtlFeedbackAnalytics.fromFeedbacks(filtered),
+      ),
+    );
   }
 
   String _friendlyError(DioException e) {
-    if (e.response?.statusCode == 401)
+    if (e.response?.statusCode == 401) {
       return 'Session expired. Please log in again.';
+    }
     if (e.response?.statusCode == 403) return 'ETL manager access required.';
-    if (e.type == DioExceptionType.connectionError)
+    if (e.type == DioExceptionType.connectionError) {
       return 'Cannot reach server. Check your internet.';
+    }
     return 'Failed to load feedbacks. Pull to refresh.';
   }
 }

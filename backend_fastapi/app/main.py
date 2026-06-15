@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .core.config import settings
 from .database import get_db
@@ -62,10 +65,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ✅ FIX #5/#6: register the SAME limiter the feedback router uses
+app.state.limiter = feedback.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ✅ CORS: '*' + allow_credentials=True is invalid/insecure.
+# Use explicit origins from settings (add ALLOWED_ORIGINS in config).
+_allowed = getattr(settings, "ALLOWED_ORIGINS", None) or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed,
+    allow_credentials=_allowed != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -79,24 +89,25 @@ def health():
     return {"status": "ok"}
 
 
-# ─── SAFE RAW SQL ROUTE (outlets only — no sensitive data) ───────────────────
+# ─── SAFE OUTLETS ROUTE (explicit columns only — no phone/PII leak) ──────────
 
 @app.get("/outlets/")
 def get_all_outlets_safe(db: Session = Depends(get_db)):
-    """Fetch all outlets using RAW SQL"""
+    """Fetch outlets with only the fields the client needs."""
     try:
-        result = db.execute(text("SELECT * FROM outlets")).mappings().all()
+        result = db.execute(
+            text("SELECT id, vendor_name, court_id FROM outlets")
+        ).mappings().all()
         return [dict(row) for row in result]
     except Exception as e1:
         try:
-            result = db.execute(text("SELECT * FROM outlet")).mappings().all()
+            result = db.execute(
+                text("SELECT id, vendor_name, court_id FROM outlet")
+            ).mappings().all()
             return [dict(row) for row in result]
         except Exception as e2:
             print(f"SQL Error fetching outlets: {e2}")
             return []
-
-# ✅ NOTE: /feedback/all raw SQL route REMOVED — now handled securely
-# in app/api/routes/feedback.py with JWT auth (ETL manager only)
 
 
 # ─── Routers ─────────────────────────────────────────────────────────────────

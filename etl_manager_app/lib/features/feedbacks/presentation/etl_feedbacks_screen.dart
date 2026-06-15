@@ -209,7 +209,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                         isSelected: data.selectedOutletId == null,
                         onTap: () {
                           notifier.setOutletFilter(null);
-                          Navigator.pop(context);
+                          Navigator.of(context, rootNavigator: true).pop();
                           _restartListAnim();
                         },
                       ),
@@ -220,7 +220,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                           isSelected: data.selectedOutletId == o.id,
                           onTap: () {
                             notifier.setOutletFilter(o.id);
-                            Navigator.pop(context);
+                            Navigator.of(context, rootNavigator: true).pop();
                             _restartListAnim();
                           },
                         ),

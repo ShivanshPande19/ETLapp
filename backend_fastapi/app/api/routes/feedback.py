@@ -1,14 +1,16 @@
 # app/api/routes/feedback.py
 
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ...database import get_db
 from ...models.feedback import Feedback
@@ -16,7 +18,12 @@ from ...models.sale import Court, Outlet
 from ...schemas.feedback import FeedbackCreate, FeedbackOut, FeedbackAnalytics
 from ..deps import get_current_user, CurrentUser
 
+logger = logging.getLogger("feedback")
+
 router = APIRouter()
+
+# ✅ FIX #5: limiter (shared instance also wired in main.py)
+limiter = Limiter(key_func=get_remote_address)
 
 templates_dir = os.path.join(os.getcwd(), "app", "templates")
 templates = Jinja2Templates(directory=templates_dir)
@@ -26,6 +33,14 @@ templates = Jinja2Templates(directory=templates_dir)
 
 def _to_out(f: Feedback) -> FeedbackOut:
     return FeedbackOut.from_orm_masked(f)
+
+
+def _avg(values: List[int]) -> Optional[float]:
+    # ✅ FIX #3: explicit half-up rounding (avoid banker's rounding surprises)
+    if not values:
+        return None
+    raw = sum(values) / len(values)
+    return float(int(raw * 10 + 0.5)) / 10
 
 
 def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
@@ -50,10 +65,8 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
 
     return FeedbackAnalytics(
         total_count=total,
-        avg_court_rating=round(sum(court_ratings) / len(court_ratings), 1)
-        if court_ratings else None,
-        avg_outlet_rating=round(sum(outlet_ratings) / len(outlet_ratings), 1)
-        if outlet_ratings else None,
+        avg_court_rating=_avg(court_ratings),
+        avg_outlet_rating=_avg(outlet_ratings),
         five_star_count=sum(1 for r in all_ratings if r == 5),
         one_star_count=sum(1 for r in all_ratings if r == 1),
         this_week_count=this_week,
@@ -64,12 +77,12 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
 # ─── PUBLIC: QR Portal ───────────────────────────────────────────────────────
 
 @router.get("/portal", response_class=HTMLResponse)
+@limiter.limit("30/minute")  # ✅ FIX #6: limit portal enumeration
 def serve_feedback_portal(
     request: Request,
     court_id: int = Query(1, ge=1),
     db: Session = Depends(get_db),
 ):
-    # ✅ FIX: Validate court exists
     court = db.query(Court).filter(
         Court.id == court_id, Court.is_active == 1
     ).first()
@@ -101,15 +114,18 @@ def serve_feedback_portal(
     response_model=FeedbackOut,
     status_code=status.HTTP_201_CREATED,
 )
-def submit_feedback(payload: FeedbackCreate, db: Session = Depends(get_db)):
-    # ✅ Validate court exists
+@limiter.limit("5/minute")  # ✅ FIX #5: anti-spam on public submit
+def submit_feedback(
+    request: Request,
+    payload: FeedbackCreate,
+    db: Session = Depends(get_db),
+):
     court = db.query(Court).filter(
         Court.id == payload.court_id, Court.is_active == 1
     ).first()
     if not court:
         raise HTTPException(status_code=404, detail="Court not found.")
 
-    # ✅ Validate outlet belongs to court
     if payload.outlet_id:
         outlet = db.query(Outlet).filter(
             Outlet.id == payload.outlet_id,
@@ -140,6 +156,8 @@ def submit_feedback(payload: FeedbackCreate, db: Session = Depends(get_db)):
         return _to_out(new_feedback)
     except Exception as e:
         db.rollback()
+        # ✅ FIX #9: log real error server-side, generic msg to client
+        logger.exception("Failed to save feedback: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save feedback.",
@@ -154,7 +172,6 @@ def get_court_feedbacks(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    # ✅ FIX: Auth required + ETL manager only
     if not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="ETL manager access required.")
 
@@ -190,7 +207,6 @@ def get_outlet_feedbacks(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    # ✅ FIX: Ownership check — outlet user can only see their own outlet
     if user.is_outlet_user:
         if user.outlet_id != outlet_id:
             raise HTTPException(
@@ -238,7 +254,6 @@ def get_all_feedbacks(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    # ✅ FIX: Was completely open before — now JWT required
     if not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="ETL manager access required.")
 
