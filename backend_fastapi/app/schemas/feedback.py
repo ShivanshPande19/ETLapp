@@ -1,7 +1,7 @@
 # app/schemas/feedback.py
 
 from pydantic import BaseModel, model_validator, field_validator, Field
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 # ✅ FIX #8: allowed sources whitelist
@@ -115,3 +115,7 @@ class FeedbackAnalytics(BaseModel):
     one_star_count: int
     this_week_count: int
     last_week_count: int
+    # ✅ Per-star distribution of OUTLET ratings: index 0 => 1★ ... index 4 => 5★.
+    # Lets the home screen render the distribution bars without loading every
+    # feedback (important once pagination only fetches a single page).
+    rating_distribution: List[int] = Field(default_factory=lambda: [0, 0, 0, 0, 0])

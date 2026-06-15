@@ -2,7 +2,7 @@
 
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -49,6 +49,12 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
     outlet_ratings = [f.outlet_rating for f in feedbacks if f.outlet_rating]
     all_ratings = court_ratings + outlet_ratings
 
+    # ✅ Per-star distribution of outlet ratings (index 0 => 1★ ... index 4 => 5★)
+    distribution = [0, 0, 0, 0, 0]
+    for r in outlet_ratings:
+        if 1 <= r <= 5:
+            distribution[r - 1] += 1
+
     now = datetime.utcnow()
     week_start = now - timedelta(days=7)
     last_week_start = now - timedelta(days=14)
@@ -71,6 +77,7 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
         one_star_count=sum(1 for r in all_ratings if r == 1),
         this_week_count=this_week,
         last_week_count=last_week,
+        rating_distribution=distribution,
     )
 
 
@@ -206,6 +213,13 @@ def get_outlet_feedbacks(
     outlet_id: int,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
+    # ✅ Pagination: page through reviews instead of loading every row at once.
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    # ✅ Optional day filter. Client sends the local-day boundaries already
+    # converted to UTC, so filtering stays correct across timezones.
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
 ):
     if user.is_outlet_user:
         if user.outlet_id != outlet_id:
@@ -216,13 +230,26 @@ def get_outlet_feedbacks(
     elif not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="Access denied.")
 
+    query = db.query(Feedback).filter(
+        Feedback.outlet_id == outlet_id,
+        Feedback.outlet_rating.isnot(None),
+    )
+
+    # created_at is stored as naive UTC (datetime.utcnow). Normalise incoming
+    # bounds to naive UTC so comparisons line up regardless of client tz info.
+    if start is not None:
+        if start.tzinfo is not None:
+            start = start.astimezone(timezone.utc).replace(tzinfo=None)
+        query = query.filter(Feedback.created_at >= start)
+    if end is not None:
+        if end.tzinfo is not None:
+            end = end.astimezone(timezone.utc).replace(tzinfo=None)
+        query = query.filter(Feedback.created_at < end)
+
     feedbacks = (
-        db.query(Feedback)
-        .filter(
-            Feedback.outlet_id == outlet_id,
-            Feedback.outlet_rating.isnot(None),
-        )
-        .order_by(Feedback.created_at.desc())
+        query.order_by(Feedback.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return [_to_out(f) for f in feedbacks]

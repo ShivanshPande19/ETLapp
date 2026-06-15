@@ -71,6 +71,10 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
   late final AnimationController _listCtrl;
   late final Animation<double> _fadeAnim;
 
+  // ✅ Drives infinite scroll — when the user nears the bottom we ask the
+  // notifier for the next page.
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -90,13 +94,27 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
     Future.delayed(const Duration(milliseconds: 150), () {
       if (mounted) _listCtrl.forward();
     });
+
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _fadeCtrl.dispose();
     _listCtrl.dispose();
     super.dispose();
+  }
+
+  // Trigger the next page a little before hitting the very bottom for a
+  // seamless feel. The notifier itself guards against duplicate/empty loads.
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 400) {
+      ref.read(feedbackNotifierProvider.notifier).loadMore();
+    }
   }
 
   Animation<double> _itemAnim(int i) => CurvedAnimation(
@@ -341,6 +359,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
 
   Widget _buildContent(FeedbackData data, FeedbackNotifier notifier) {
     return ListView(
+      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 100),
       children: [
@@ -372,7 +391,11 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                '${data.displayedFeedbacks.length}',
+                // When more pages exist show a "20+" style hint, else the
+                // exact loaded count.
+                data.hasMore
+                    ? '${data.feedbacks.length}+'
+                    : '${data.feedbacks.length}',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
@@ -385,10 +408,10 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
         const SizedBox(height: 16),
 
         // ─── Feedback list ───
-        if (data.displayedFeedbacks.isEmpty)
+        if (data.feedbacks.isEmpty)
           _EmptyState(hasDateFilter: data.selectedDate != null)
         else
-          ...data.displayedFeedbacks.asMap().entries.map((e) {
+          ...data.feedbacks.asMap().entries.map((e) {
             final anim = _itemAnim(e.key);
             return FadeTransition(
               opacity: anim,
@@ -401,8 +424,65 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
               ),
             );
           }),
+
+        // ─── Pagination footer ───
+        _PaginationFooter(
+          isLoadingMore: data.isLoadingMore,
+          hasMore: data.hasMore,
+          hasItems: data.feedbacks.isNotEmpty,
+        ),
       ],
     );
+  }
+}
+
+// ─── Pagination Footer ───────────────────────────────────────────────────────
+// Shows a spinner while the next page loads, or a subtle "all caught up" note
+// once every review has been fetched.
+
+class _PaginationFooter extends StatelessWidget {
+  final bool isLoadingMore;
+  final bool hasMore;
+  final bool hasItems;
+  const _PaginationFooter({
+    required this.isLoadingMore,
+    required this.hasMore,
+    required this.hasItems,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    // Only show the end-of-list note when there is something to be at the end of.
+    if (!hasMore && hasItems) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text(
+            "You're all caught up",
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _grey,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return const SizedBox(height: 8);
   }
 }
 

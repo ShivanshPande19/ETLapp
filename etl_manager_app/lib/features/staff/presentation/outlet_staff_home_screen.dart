@@ -367,7 +367,12 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                                   ),
                                 ),
                                 data: (data) {
-                                  if (data.allFeedbacks.isEmpty) {
+                                  final analytics = data.analytics;
+                                  // Use overall analytics for the "empty"
+                                  // decision so a paginated first page never
+                                  // hides a real review count.
+                                  if (analytics == null ||
+                                      analytics.totalCount == 0) {
                                     return Container(
                                       height: 130,
                                       decoration: BoxDecoration(
@@ -397,7 +402,8 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                                       context.go('/feedbacks');
                                     },
                                     child: _CustomerVoicePanel(
-                                      feedbacks: data.allFeedbacks,
+                                      analytics: analytics,
+                                      recentFeedbacks: data.feedbacks,
                                     ),
                                   );
                                 },
@@ -780,34 +786,37 @@ class _ProfileButton extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _CustomerVoicePanel extends StatelessWidget {
-  final List<FeedbackModel> feedbacks;
-  const _CustomerVoicePanel({required this.feedbacks});
+  // Aggregate numbers (avg, distribution, counts) come from the analytics
+  // endpoint which is computed over ALL feedbacks server-side — so these stay
+  // accurate even though only the most recent page of reviews is loaded.
+  final FeedbackAnalytics analytics;
+  // Recent page of feedbacks — used purely for the rotating "what customers
+  // said" carousel.
+  final List<FeedbackModel> recentFeedbacks;
+
+  const _CustomerVoicePanel({
+    required this.analytics,
+    required this.recentFeedbacks,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final rated = feedbacks.where((f) => f.outletRating != null).toList();
+    final avg = analytics.avgOutletRating ?? 0.0;
 
-    final avg = rated.isEmpty
-        ? 0.0
-        : rated.map((f) => f.outletRating!).reduce((a, b) => a + b) /
-              rated.length;
+    // Star distribution: index 0 => 1★ ... index 4 => 5★ (overall)
+    final dist = analytics.ratingDistribution;
+    final ratedCount = analytics.ratedCount;
 
-    // Star distribution: index 0 => 1★ ... index 4 => 5★
-    final dist = List<int>.filled(5, 0);
-    for (final f in rated) {
-      final r = f.outletRating!;
-      if (r >= 1 && r <= 5) dist[r - 1]++;
-    }
-
-    final withComments = feedbacks
+    // Recent reviews that actually have a written comment, for the carousel.
+    final withComments = recentFeedbacks
         .where(
           (f) =>
               f.outletComments != null && f.outletComments!.trim().isNotEmpty,
         )
         .toList();
 
-    final needsAttention = rated.where((f) => f.outletRating! <= 2).length;
-    final happy = rated.where((f) => f.outletRating! >= 4).length;
+    final needsAttention = analytics.needsAttentionCount;
+    final happy = analytics.happyCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,7 +840,7 @@ class _CustomerVoicePanel extends StatelessWidget {
               _MoodRing(avg: avg),
               const SizedBox(width: 22),
               Expanded(
-                child: _StarDistribution(dist: dist, total: rated.length),
+                child: _StarDistribution(dist: dist, total: ratedCount),
               ),
             ],
           ),
