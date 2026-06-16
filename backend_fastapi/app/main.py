@@ -41,10 +41,14 @@ from .services.scheduler_service import start_scheduler, stop_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine
+    from .database import Base, engine, ensure_attendance_columns
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
+
+    # ✅ Add any newly-introduced columns to existing tables (check-out fields)
+    ensure_attendance_columns()
+    print("[DB] Attendance schema ensured ✓")
 
     _hk_routes._main_loop = asyncio.get_event_loop()
     print("[SSE] Event loop captured ✓")

@@ -35,11 +35,6 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
 
-  // Local state for UI immediate update
-  bool _isCheckedIn = false;
-  String _checkInTime = "09:30 AM";
-  String _address = "Checking location...";
-
   @override
   void initState() {
     super.initState();
@@ -52,6 +47,12 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
+
+    // ✅ Fetch today's attendance status so the card reflects reality across
+    // app restarts (no more local-only / hardcoded state).
+    Future.microtask(
+      () => ref.read(attendanceNotifierProvider.notifier).loadToday(),
+    );
   }
 
   @override
@@ -67,23 +68,21 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
         .split(' ')
         .first;
 
-    // Listen to Attendance API responses
+    // Listen to Attendance API responses (snackbars only — the card itself is
+    // driven by the notifier's `today` snapshot).
     ref.listen<AttendanceState>(attendanceNotifierProvider, (previous, next) {
+      if (previous?.status == next.status) return;
       if (next.status == AttendanceStatus.success) {
-        setState(() {
-          _isCheckedIn = true;
-          _address = next.address ?? "Location saved";
-        });
+        final msg = next.isCheckedOut
+            ? 'Shift ended. Great work today!'
+            : 'Checked in successfully!';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Attendance Synced with Server!'),
-            backgroundColor: Colors.green,
-          ),
+          SnackBar(content: Text(msg), backgroundColor: Colors.green),
         );
       } else if (next.status == AttendanceStatus.error) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(next.errorMessage ?? 'Failed to check-in'),
+            content: Text(next.errorMessage ?? 'Something went wrong.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -199,15 +198,10 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
 
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 400),
-                            child: _isCheckedIn
-                                ? _ActiveShiftCard(
-                                    checkInTime: _checkInTime,
-                                    address: _address,
-                                    onViewTap: () =>
-                                        _showAttendanceDetails(context),
-                                  )
-                                : attendanceState.status ==
-                                      AttendanceStatus.loading
+                            child:
+                                (attendanceState.loadingToday ||
+                                    attendanceState.status ==
+                                        AttendanceStatus.loading)
                                 ? const Center(
                                     child: Padding(
                                       padding: EdgeInsets.all(24.0),
@@ -216,73 +210,35 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                                       ),
                                     ),
                                   )
+                                : attendanceState.isCheckedIn
+                                ? _ActiveShiftCard(
+                                    checkInTime: _fmtTime(
+                                      context,
+                                      attendanceState.today.checkInTime,
+                                    ),
+                                    address:
+                                        attendanceState.today.checkInAddress ??
+                                        'Location saved',
+                                    checkedOut: attendanceState.isCheckedOut,
+                                    checkOutTime: _fmtTime(
+                                      context,
+                                      attendanceState.today.checkOutTime,
+                                    ),
+                                    durationLabel: _durationLabel(
+                                      attendanceState
+                                          .today
+                                          .workDurationMinutes,
+                                    ),
+                                    onViewTap: () => _showAttendanceDetails(
+                                      context,
+                                      attendanceState.today,
+                                    ),
+                                    onEndShift: attendanceState.isShiftActive
+                                        ? () => _startCheckOut(context)
+                                        : null,
+                                  )
                                 : _MarkAttendanceCard(
-                                    onTap: () async {
-                                      HapticFeedback.selectionClick();
-                                      final result = await context.push(
-                                        '/staff/mark-attendance',
-                                      );
-
-                                      if (!mounted) return;
-
-                                      if (result != null && result is Map) {
-                                        final email = authState.managerEmail;
-
-                                        if (email == null) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Error: User Email not found.',
-                                              ),
-                                            ),
-                                          );
-                                          return;
-                                        }
-
-                                        // 🟢 FIX: don't accept invalid (0,0) location
-                                        final lat =
-                                            (result['latitude'] as num?)
-                                                ?.toDouble() ??
-                                            0.0;
-                                        final lng =
-                                            (result['longitude'] as num?)
-                                                ?.toDouble() ??
-                                            0.0;
-                                        if (lat == 0.0 && lng == 0.0) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Could not capture location. Try again.',
-                                              ),
-                                              backgroundColor: Colors.red,
-                                            ),
-                                          );
-                                          return;
-                                        }
-
-                                        setState(() {
-                                          _checkInTime = TimeOfDay.now().format(
-                                            context,
-                                          );
-                                        });
-
-                                        await ref
-                                            .read(
-                                              attendanceNotifierProvider
-                                                  .notifier,
-                                            )
-                                            .markAttendance(
-                                              email: email,
-                                              lat: lat,
-                                              lng: lng,
-                                              imagePath: result['image_path'],
-                                            );
-                                      }
-                                    },
+                                    onTap: () => _startCheckIn(context),
                                   ),
                           ),
 
@@ -417,7 +373,76 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
     );
   }
 
-  void _showAttendanceDetails(BuildContext context) {
+  // ─── Check-in flow ───────────────────────────────────────────────────────
+  Future<void> _startCheckIn(BuildContext context) async {
+    HapticFeedback.selectionClick();
+    final result = await context.push('/staff/mark-attendance');
+    if (!mounted || result is! Map) return;
+
+    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
+    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
+    final imagePath = result['image_path'] as String?;
+    if ((lat == 0.0 && lng == 0.0) || imagePath == null) {
+      _toast('Could not capture location/photo. Try again.', isError: true);
+      return;
+    }
+
+    await ref
+        .read(attendanceNotifierProvider.notifier)
+        .markAttendance(lat: lat, lng: lng, imagePath: imagePath);
+  }
+
+  // ─── Check-out (End Shift) flow — reuses the same camera screen ───────────
+  Future<void> _startCheckOut(BuildContext context) async {
+    HapticFeedback.selectionClick();
+    final result = await context.push('/staff/mark-attendance');
+    if (!mounted || result is! Map) return;
+
+    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
+    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
+    final imagePath = result['image_path'] as String?;
+    if (lat == 0.0 && lng == 0.0) {
+      _toast('Could not capture location. Try again.', isError: true);
+      return;
+    }
+
+    await ref
+        .read(attendanceNotifierProvider.notifier)
+        .checkOut(lat: lat, lng: lng, imagePath: imagePath);
+  }
+
+  void _toast(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
+  }
+
+  String _fmtTime(BuildContext context, DateTime? dt) {
+    if (dt == null) return '--:--';
+    return TimeOfDay.fromDateTime(dt).format(context);
+  }
+
+  String? _durationLabel(int? minutes) {
+    if (minutes == null) return null;
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
+  void _showAttendanceDetails(BuildContext context, AttendanceToday today) {
+    final checkInStr = _fmtTime(context, today.checkInTime);
+    final address = today.checkInAddress ?? 'Location saved';
+    final checkedOut = today.checkedOut;
+    final checkOutStr = _fmtTime(context, today.checkOutTime);
+    final duration = _durationLabel(today.workDurationMinutes);
+
+    final detailText = checkedOut
+        ? 'Checked in at $checkInStr and out at $checkOutStr'
+              '${duration != null ? ' · worked $duration' : ''}.\nLocation: $address'
+        : 'You securely checked in at $checkInStr.\nLocation: $address';
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -443,7 +468,7 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
               const Icon(Icons.check_circle_rounded, color: _ok, size: 64),
               const SizedBox(height: 16),
               Text(
-                'Attendance Verified',
+                checkedOut ? 'Shift Completed' : 'Attendance Verified',
                 style: GoogleFonts.inter(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
@@ -452,7 +477,7 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                'You securely checked in at $_checkInTime.\nLocation: $_address',
+                detailText,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   fontSize: 14,
@@ -605,16 +630,25 @@ class _MarkAttendanceCardState extends State<_MarkAttendanceCard>
 class _ActiveShiftCard extends StatelessWidget {
   final String checkInTime;
   final String address;
+  final bool checkedOut;
+  final String checkOutTime;
+  final String? durationLabel;
   final VoidCallback onViewTap;
+  final VoidCallback? onEndShift;
 
   const _ActiveShiftCard({
     required this.checkInTime,
     required this.address,
     required this.onViewTap,
+    this.checkedOut = false,
+    this.checkOutTime = '--:--',
+    this.durationLabel,
+    this.onEndShift,
   });
 
   @override
   Widget build(BuildContext context) {
+    final Color accent = checkedOut ? _blue : _ok;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -635,7 +669,7 @@ class _ActiveShiftCard extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: _ok.withOpacity(0.15),
+                  color: accent.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -644,18 +678,18 @@ class _ActiveShiftCard extends StatelessWidget {
                     Container(
                       width: 6,
                       height: 6,
-                      decoration: const BoxDecoration(
-                        color: _ok,
+                      decoration: BoxDecoration(
+                        color: accent,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'SHIFT ACTIVE',
+                      checkedOut ? 'SHIFT COMPLETED' : 'SHIFT ACTIVE',
                       style: GoogleFonts.inter(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
-                        color: _ok,
+                        color: accent,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -712,8 +746,78 @@ class _ActiveShiftCard extends StatelessWidget {
                   ],
                 ),
               ),
+              // Duration chip (shown once the shift is complete)
+              if (checkedOut && durationLabel != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    durationLabel!,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: _blue,
+                    ),
+                  ),
+                ),
             ],
           ),
+
+          // ── Checked-out time row ──
+          if (checkedOut) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _white,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: const Icon(
+                    Icons.logout_rounded,
+                    color: _black,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Checked Out At',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: _grey,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        checkOutTime,
+                        style: GoogleFonts.antonSc(
+                          fontSize: 32,
+                          color: _black,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+
           const SizedBox(height: 16),
           const Divider(height: 1),
           const SizedBox(height: 16),
@@ -735,6 +839,37 @@ class _ActiveShiftCard extends StatelessWidget {
               ),
             ],
           ),
+
+          // ── End Shift button (only while the shift is active) ──
+          if (!checkedOut && onEndShift != null) ...[
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: onEndShift,
+                icon: const Icon(
+                  Icons.logout_rounded,
+                  size: 18,
+                  color: _white,
+                ),
+                label: Text(
+                  'End Shift',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: _white,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
