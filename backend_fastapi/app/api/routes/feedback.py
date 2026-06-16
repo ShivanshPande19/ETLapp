@@ -35,6 +35,27 @@ def _to_out(f: Feedback) -> FeedbackOut:
     return FeedbackOut.from_orm_masked(f)
 
 
+def _normalize_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Convert an incoming (possibly tz-aware) datetime to naive UTC so it
+    compares correctly against created_at (stored as naive UTC)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _apply_date_range(query, start: Optional[datetime], end: Optional[datetime]):
+    """Apply optional [start, end) created_at bounds to a feedback query."""
+    start = _normalize_utc(start)
+    end = _normalize_utc(end)
+    if start is not None:
+        query = query.filter(Feedback.created_at >= start)
+    if end is not None:
+        query = query.filter(Feedback.created_at < end)
+    return query
+
+
 def _avg(values: List[int]) -> Optional[float]:
     # ✅ FIX #3: explicit half-up rounding (avoid banker's rounding surprises)
     if not values:
@@ -235,16 +256,9 @@ def get_outlet_feedbacks(
         Feedback.outlet_rating.isnot(None),
     )
 
-    # created_at is stored as naive UTC (datetime.utcnow). Normalise incoming
-    # bounds to naive UTC so comparisons line up regardless of client tz info.
-    if start is not None:
-        if start.tzinfo is not None:
-            start = start.astimezone(timezone.utc).replace(tzinfo=None)
-        query = query.filter(Feedback.created_at >= start)
-    if end is not None:
-        if end.tzinfo is not None:
-            end = end.astimezone(timezone.utc).replace(tzinfo=None)
-        query = query.filter(Feedback.created_at < end)
+    # created_at is stored as naive UTC. Client sends local-day bounds already
+    # converted to UTC, so filtering stays correct across timezones.
+    query = _apply_date_range(query, start, end)
 
     feedbacks = (
         query.order_by(Feedback.created_at.desc())
@@ -280,13 +294,29 @@ def get_outlet_analytics(
 def get_all_feedbacks(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
+    # ✅ Server-side filters (ETL manager view).
+    court_id: Optional[int] = Query(None, ge=1),
+    outlet_id: Optional[int] = Query(None, ge=1),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    # ✅ Pagination.
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     if not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="ETL manager access required.")
 
+    query = db.query(Feedback)
+    if court_id is not None:
+        query = query.filter(Feedback.court_id == court_id)
+    if outlet_id is not None:
+        query = query.filter(Feedback.outlet_id == outlet_id)
+    query = _apply_date_range(query, start, end)
+
     feedbacks = (
-        db.query(Feedback)
-        .order_by(Feedback.created_at.desc())
+        query.order_by(Feedback.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return [_to_out(f) for f in feedbacks]
@@ -296,9 +326,20 @@ def get_all_feedbacks(
 def get_all_analytics(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
+    # ✅ Same filters as /all so the analytics card matches the visible list.
+    court_id: Optional[int] = Query(None, ge=1),
+    outlet_id: Optional[int] = Query(None, ge=1),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
 ):
     if not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="ETL manager access required.")
 
-    feedbacks = db.query(Feedback).all()
-    return _analytics(feedbacks)
+    query = db.query(Feedback)
+    if court_id is not None:
+        query = query.filter(Feedback.court_id == court_id)
+    if outlet_id is not None:
+        query = query.filter(Feedback.outlet_id == outlet_id)
+    query = _apply_date_range(query, start, end)
+
+    return _analytics(query.all())

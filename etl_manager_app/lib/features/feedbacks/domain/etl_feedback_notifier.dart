@@ -76,7 +76,7 @@ class EtlFeedbackModel {
       outletRating: json['outlet_rating'],
       outletComments: json['outlet_comments'],
       source: json['source'] ?? 'qr',
-      // ✅ 'Z' suffix se toLocal() sahi kaam karega
+      // ✅ Backend ab 'Z' suffix bhejta hai — toLocal() sahi kaam karega
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'].toString()).toLocal()
           : DateTime.now(),
@@ -122,49 +122,6 @@ class EtlFeedbackAnalytics {
     );
   }
 
-  // ✅ FIX #2: compute analytics locally from a feedback list,
-  // so the card reflects the active filters.
-  factory EtlFeedbackAnalytics.fromFeedbacks(List<EtlFeedbackModel> list) {
-    final courtRatings = <int>[];
-    final outletRatings = <int>[];
-    for (final f in list) {
-      if (f.courtRating != null) courtRatings.add(f.courtRating!);
-      if (f.outletRating != null) outletRatings.add(f.outletRating!);
-    }
-    final allRatings = [...courtRatings, ...outletRatings];
-
-    final now = DateTime.now();
-    final weekStart = now.subtract(const Duration(days: 7));
-    final lastWeekStart = now.subtract(const Duration(days: 14));
-
-    int thisWeek = 0;
-    int lastWeek = 0;
-    for (final f in list) {
-      if (f.createdAt.isAfter(weekStart)) {
-        thisWeek++;
-      } else if (f.createdAt.isAfter(lastWeekStart) &&
-          !f.createdAt.isAfter(weekStart)) {
-        lastWeek++;
-      }
-    }
-
-    double? avg(List<int> r) {
-      if (r.isEmpty) return null;
-      final a = r.reduce((x, y) => x + y) / r.length;
-      return (a * 10).round() / 10; // half-up to 1 decimal
-    }
-
-    return EtlFeedbackAnalytics(
-      totalCount: list.length,
-      avgCourtRating: avg(courtRatings),
-      avgOutletRating: avg(outletRatings),
-      fiveStarCount: allRatings.where((r) => r == 5).length,
-      oneStarCount: allRatings.where((r) => r == 1).length,
-      thisWeekCount: thisWeek,
-      lastWeekCount: lastWeek,
-    );
-  }
-
   double get wowGrowth {
     if (lastWeekCount == 0) return thisWeekCount > 0 ? 100.0 : 0.0;
     return ((thisWeekCount - lastWeekCount) / lastWeekCount) * 100;
@@ -176,8 +133,10 @@ class EtlFeedbackAnalytics {
 // ─── State ───────────────────────────────────────────────────────────────────
 
 class EtlFeedbackData {
-  final List<EtlFeedbackModel> allFeedbacks;
-  final List<EtlFeedbackModel> displayedFeedbacks;
+  // Accumulated, paginated list of feedbacks currently loaded.
+  final List<EtlFeedbackModel> feedbacks;
+  // Analytics now comes straight from the server, computed over the SAME
+  // filters as the list (no more local recompute over a partial page).
   final EtlFeedbackAnalytics? analytics;
   final List<SimpleCourt> courts;
   final List<SimpleOutlet> outlets;
@@ -185,20 +144,24 @@ class EtlFeedbackData {
   final int? selectedOutletId;
   final DateTime? selectedDate;
 
+  // Pagination flags.
+  final bool hasMore;
+  final bool isLoadingMore;
+
   EtlFeedbackData({
-    required this.allFeedbacks,
-    required this.displayedFeedbacks,
+    required this.feedbacks,
     this.analytics,
     required this.courts,
     required this.outlets,
     this.selectedCourtId,
     this.selectedOutletId,
     this.selectedDate,
+    this.hasMore = false,
+    this.isLoadingMore = false,
   });
 
   EtlFeedbackData copyWith({
-    List<EtlFeedbackModel>? allFeedbacks,
-    List<EtlFeedbackModel>? displayedFeedbacks,
+    List<EtlFeedbackModel>? feedbacks,
     EtlFeedbackAnalytics? analytics,
     List<SimpleCourt>? courts,
     List<SimpleOutlet>? outlets,
@@ -208,10 +171,11 @@ class EtlFeedbackData {
     bool clearOutlet = false,
     DateTime? selectedDate,
     bool clearDate = false,
+    bool? hasMore,
+    bool? isLoadingMore,
   }) {
     return EtlFeedbackData(
-      allFeedbacks: allFeedbacks ?? this.allFeedbacks,
-      displayedFeedbacks: displayedFeedbacks ?? this.displayedFeedbacks,
+      feedbacks: feedbacks ?? this.feedbacks,
       analytics: analytics ?? this.analytics,
       courts: courts ?? this.courts,
       outlets: outlets ?? this.outlets,
@@ -222,6 +186,8 @@ class EtlFeedbackData {
           ? null
           : (selectedOutletId ?? this.selectedOutletId),
       selectedDate: clearDate ? null : (selectedDate ?? this.selectedDate),
+      hasMore: hasMore ?? this.hasMore,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
     );
   }
 }
@@ -229,22 +195,100 @@ class EtlFeedbackData {
 // ─── Notifier ────────────────────────────────────────────────────────────────
 
 class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
+  // Page size — keep in sync with backend default `limit`.
+  static const int _pageSize = 20;
+
   @override
   AsyncValue<EtlFeedbackData> build() {
     Future.microtask(() => fetchEtlData());
     return const AsyncValue.loading();
   }
 
+  bool get _isEtl => ref.read(authNotifierProvider).isEtlManager;
+
+  // Builds the server-side filter params from the given selections.
+  Map<String, dynamic> _filterParams({
+    int? courtId,
+    int? outletId,
+    DateTime? date,
+  }) {
+    final params = <String, dynamic>{};
+    if (courtId != null) params['court_id'] = courtId;
+    if (outletId != null) params['outlet_id'] = outletId;
+    if (date != null) {
+      final localStart = DateTime(date.year, date.month, date.day);
+      final localEnd = localStart.add(const Duration(days: 1));
+      params['start'] = localStart.toUtc().toIso8601String();
+      params['end'] = localEnd.toUtc().toIso8601String();
+    }
+    return params;
+  }
+
+  // Fetches a single page of feedbacks honouring the active filters.
+  Future<List<EtlFeedbackModel>> _fetchPage({
+    required int offset,
+    int? courtId,
+    int? outletId,
+    DateTime? date,
+  }) async {
+    final dio = ref.read(dioProvider);
+    final query = <String, dynamic>{
+      'limit': _pageSize,
+      'offset': offset,
+      ..._filterParams(courtId: courtId, outletId: outletId, date: date),
+    };
+    final res = await dio.get('/feedback/all', queryParameters: query);
+    return (res.data as List? ?? [])
+        .map((e) => EtlFeedbackModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  // Fetches analytics for the active filters.
+  Future<EtlFeedbackAnalytics> _fetchAnalytics({
+    int? courtId,
+    int? outletId,
+    DateTime? date,
+  }) async {
+    final dio = ref.read(dioProvider);
+    final res = await dio.get(
+      '/feedback/all/analytics',
+      queryParameters: _filterParams(
+        courtId: courtId,
+        outletId: outletId,
+        date: date,
+      ),
+    );
+    return EtlFeedbackAnalytics.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  List<T> _parseList<T>(
+    dynamic raw,
+    List<String> mapKeys,
+    T Function(Map<String, dynamic>) fromJson,
+  ) {
+    List list = [];
+    if (raw is List) {
+      list = raw;
+    } else if (raw is Map) {
+      for (final k in mapKeys) {
+        if (raw[k] is List) {
+          list = raw[k];
+          break;
+        }
+      }
+    }
+    return list.map((e) => fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  // Full load: courts + outlets + first page + analytics (current filters).
   Future<void> fetchEtlData({bool isRefresh = false}) async {
     if (!isRefresh || !state.hasValue) {
       state = const AsyncValue.loading();
     }
 
     try {
-      final dio = ref.read(dioProvider); // ✅ JWT wala dio
-      final authState = ref.read(authNotifierProvider);
-
-      if (!authState.isEtlManager) {
+      if (!_isEtl) {
+        if (state.hasValue) return;
         state = AsyncValue.error(
           "ETL manager access required.",
           StackTrace.current,
@@ -252,62 +296,47 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
         return;
       }
 
-      // ✅ Parallel fetch: feedbacks + analytics + courts + outlets
+      // Preserve any active filters across a refresh.
+      final prev = state.value;
+      final courtId = prev?.selectedCourtId;
+      final outletId = prev?.selectedOutletId;
+      final date = prev?.selectedDate;
+
+      final dio = ref.read(dioProvider);
+
       final results = await Future.wait([
-        dio.get('/feedback/all'),
-        dio.get('/feedback/all/analytics'),
+        _fetchPage(offset: 0, courtId: courtId, outletId: outletId, date: date),
+        _fetchAnalytics(courtId: courtId, outletId: outletId, date: date),
         dio.get('/courts/'),
         dio.get('/outlets/'),
       ]);
 
-      // Feedbacks
-      final feedbacksList = (results[0].data as List? ?? [])
-          .map((e) => EtlFeedbackModel.fromJson(e as Map<String, dynamic>))
-          .toList();
-      feedbacksList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      // Courts
-      List<SimpleCourt> courtsList = [];
-      final courtsRaw = results[2].data;
-      List cList = [];
-      if (courtsRaw is List) {
-        cList = courtsRaw;
-      } else if (courtsRaw is Map) {
-        cList = courtsRaw['courts'] ?? courtsRaw['data'] ?? [];
-      }
-      courtsList = cList
-          .map((e) => SimpleCourt.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      // Outlets
-      List<SimpleOutlet> outletsList = [];
-      final outletsRaw = results[3].data;
-      List oList = [];
-      if (outletsRaw is List) {
-        oList = outletsRaw;
-      } else if (outletsRaw is Map) {
-        oList = outletsRaw['outlets'] ?? outletsRaw['data'] ?? [];
-      }
-      outletsList = oList
-          .map((e) => SimpleOutlet.fromJson(e as Map<String, dynamic>))
-          .toList();
-
-      // Preserve existing filters
-      final prev = state.value;
-      final newData = EtlFeedbackData(
-        allFeedbacks: feedbacksList,
-        displayedFeedbacks: feedbacksList,
-        // analytics gets recomputed in _applyFilters()
-        analytics: EtlFeedbackAnalytics.fromFeedbacks(feedbacksList),
-        courts: courtsList,
-        outlets: outletsList,
-        selectedCourtId: prev?.selectedCourtId,
-        selectedOutletId: prev?.selectedOutletId,
-        selectedDate: prev?.selectedDate,
+      final firstPage = results[0] as List<EtlFeedbackModel>;
+      final analytics = results[1] as EtlFeedbackAnalytics;
+      final courts = _parseList(
+        (results[2] as Response).data,
+        ['courts', 'data'],
+        SimpleCourt.fromJson,
+      );
+      final outlets = _parseList(
+        (results[3] as Response).data,
+        ['outlets', 'data'],
+        SimpleOutlet.fromJson,
       );
 
-      state = AsyncValue.data(newData);
-      _applyFilters();
+      state = AsyncValue.data(
+        EtlFeedbackData(
+          feedbacks: firstPage,
+          analytics: analytics,
+          courts: courts,
+          outlets: outlets,
+          selectedCourtId: courtId,
+          selectedOutletId: outletId,
+          selectedDate: date,
+          hasMore: firstPage.length == _pageSize,
+          isLoadingMore: false,
+        ),
+      );
     } on DioException catch (e) {
       final msg = _friendlyError(e);
       if (state.hasValue) return;
@@ -318,7 +347,87 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
     }
   }
 
-  // ─── Filters ─────────────────────────────────────────────────────────────
+  // Reloads the first page + analytics for the current filters (after a filter
+  // change). Reuses the already-loaded courts/outlets lists.
+  Future<void> _reloadForFilters() async {
+    final current = state.value;
+    if (current == null || !_isEtl) return;
+
+    state = AsyncValue.data(current.copyWith(isLoadingMore: true));
+
+    try {
+      final results = await Future.wait([
+        _fetchPage(
+          offset: 0,
+          courtId: current.selectedCourtId,
+          outletId: current.selectedOutletId,
+          date: current.selectedDate,
+        ),
+        _fetchAnalytics(
+          courtId: current.selectedCourtId,
+          outletId: current.selectedOutletId,
+          date: current.selectedDate,
+        ),
+      ]);
+
+      final firstPage = results[0] as List<EtlFeedbackModel>;
+      final analytics = results[1] as EtlFeedbackAnalytics;
+
+      final latest = state.value;
+      if (latest == null) return;
+
+      state = AsyncValue.data(
+        latest.copyWith(
+          feedbacks: firstPage,
+          analytics: analytics,
+          hasMore: firstPage.length == _pageSize,
+          isLoadingMore: false,
+        ),
+      );
+    } catch (_) {
+      final latest = state.value;
+      if (latest != null) {
+        state = AsyncValue.data(latest.copyWith(isLoadingMore: false));
+      }
+    }
+  }
+
+  // Loads the next page and appends it (infinite scroll).
+  Future<void> loadMore() async {
+    final current = state.value;
+    if (current == null) return;
+    if (!current.hasMore || current.isLoadingMore) return;
+    if (!_isEtl) return;
+
+    state = AsyncValue.data(current.copyWith(isLoadingMore: true));
+
+    try {
+      final nextPage = await _fetchPage(
+        offset: current.feedbacks.length,
+        courtId: current.selectedCourtId,
+        outletId: current.selectedOutletId,
+        date: current.selectedDate,
+      );
+
+      final latest = state.value;
+      if (latest == null) return;
+
+      state = AsyncValue.data(
+        latest.copyWith(
+          feedbacks: [...latest.feedbacks, ...nextPage],
+          hasMore: nextPage.length == _pageSize,
+          isLoadingMore: false,
+        ),
+      );
+    } catch (_) {
+      final latest = state.value;
+      if (latest != null) {
+        state = AsyncValue.data(latest.copyWith(isLoadingMore: false));
+      }
+    }
+  }
+
+  // ─── Filters (all reload from the server) ──────────────────────────────────
 
   void setCourtFilter(int? courtId) {
     if (state.value == null) return;
@@ -326,12 +435,12 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
       state.value!.copyWith(
         selectedCourtId: courtId,
         clearCourt: courtId == null,
-        // ✅ Court change hone pe outlet filter reset
+        // Court change hone pe outlet filter reset.
         selectedOutletId: null,
         clearOutlet: true,
       ),
     );
-    _applyFilters();
+    _reloadForFilters();
   }
 
   void setOutletFilter(int? outletId) {
@@ -342,7 +451,7 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
         clearOutlet: outletId == null,
       ),
     );
-    _applyFilters();
+    _reloadForFilters();
   }
 
   void setDateFilter(DateTime? date) {
@@ -350,41 +459,7 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
     state = AsyncValue.data(
       state.value!.copyWith(selectedDate: date, clearDate: date == null),
     );
-    _applyFilters();
-  }
-
-  void _applyFilters() {
-    final current = state.value;
-    if (current == null) return;
-
-    final filtered = current.allFeedbacks.where((f) {
-      if (current.selectedCourtId != null &&
-          f.courtId != current.selectedCourtId) {
-        return false;
-      }
-      if (current.selectedOutletId != null &&
-          f.outletId != current.selectedOutletId) {
-        return false;
-      }
-      if (current.selectedDate != null) {
-        final d = current.selectedDate!;
-        // ✅ FIX #1: compare on local calendar day (createdAt already toLocal())
-        if (f.createdAt.year != d.year ||
-            f.createdAt.month != d.month ||
-            f.createdAt.day != d.day) {
-          return false;
-        }
-      }
-      return true;
-    }).toList();
-
-    state = AsyncValue.data(
-      current.copyWith(
-        displayedFeedbacks: filtered,
-        // ✅ FIX #2: analytics now reflects the active filters
-        analytics: EtlFeedbackAnalytics.fromFeedbacks(filtered),
-      ),
-    );
+    _reloadForFilters();
   }
 
   String _friendlyError(DioException e) {

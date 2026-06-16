@@ -1,8 +1,14 @@
 # app/schemas/feedback.py
 
-from pydantic import BaseModel, model_validator, field_validator, Field
+from pydantic import (
+    BaseModel,
+    model_validator,
+    field_validator,
+    field_serializer,
+    Field,
+)
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ✅ FIX #8: allowed sources whitelist
 _ALLOWED_SOURCES = {"qr", "app", "web", "manual"}
@@ -87,6 +93,15 @@ class FeedbackOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+    # ✅ created_at is stored as naive UTC (func.now / datetime.utcnow). Emit it
+    # as ISO 8601 with a trailing 'Z' so clients (Flutter DateTime.parse +
+    # toLocal()) interpret it as UTC instead of local time.
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: datetime, _info) -> str:
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.isoformat() + "Z"
 
     @classmethod
     def from_orm_masked(cls, obj) -> "FeedbackOut":
