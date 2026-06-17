@@ -216,6 +216,8 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                                       context,
                                       attendanceState.today.checkInTime,
                                     ),
+                                    checkInAt:
+                                        attendanceState.today.checkInTime,
                                     address:
                                         attendanceState.today.checkInAddress ??
                                         'Location saved',
@@ -629,6 +631,7 @@ class _MarkAttendanceCardState extends State<_MarkAttendanceCard>
 
 class _ActiveShiftCard extends StatelessWidget {
   final String checkInTime;
+  final DateTime? checkInAt;
   final String address;
   final bool checkedOut;
   final String checkOutTime;
@@ -640,6 +643,7 @@ class _ActiveShiftCard extends StatelessWidget {
     required this.checkInTime,
     required this.address,
     required this.onViewTap,
+    this.checkInAt,
     this.checkedOut = false,
     this.checkOutTime = '--:--',
     this.durationLabel,
@@ -660,6 +664,7 @@ class _ActiveShiftCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Top badge + View Details ──
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -709,118 +714,71 @@ class _ActiveShiftCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: _white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.grey.shade200),
-                ),
-                child: const Icon(Icons.login_rounded, color: _black, size: 24),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Checked In At',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: _grey,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      checkInTime,
-                      style: GoogleFonts.antonSc(
-                        fontSize: 32,
-                        color: _black,
-                        height: 1.0,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Duration chip (shown once the shift is complete)
-              if (checkedOut && durationLabel != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _blue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    durationLabel!,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: _blue,
-                    ),
-                  ),
-                ),
-            ],
-          ),
 
-          // ── Checked-out time row ──
-          if (checkedOut) ...[
-            const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
-            Row(
+          const SizedBox(height: 24),
+
+          // ── Hero: live timer (active) OR total duration (completed) ──
+          Center(
+            child: Column(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: _white,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.grey.shade200),
+                if (!checkedOut)
+                  _LiveShiftTimer(since: checkInAt)
+                else
+                  Text(
+                    durationLabel ?? '--',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 48,
+                      color: _black,
+                      height: 1.0,
+                    ),
                   ),
-                  child: const Icon(
-                    Icons.logout_rounded,
-                    color: _black,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Checked Out At',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: _grey,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        checkOutTime,
-                        style: GoogleFonts.antonSc(
-                          fontSize: 32,
-                          color: _black,
-                          height: 1.0,
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 6),
+                Text(
+                  checkedOut
+                      ? 'Total time on shift'
+                      : 'On shift since $checkInTime',
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    color: _grey,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
             ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── In / Out time blocks (shown when completed) ──
+          if (checkedOut) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: _ShiftTimeBlock(
+                    icon: Icons.login_rounded,
+                    label: 'Checked In',
+                    value: checkInTime,
+                    color: _ok,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _ShiftTimeBlock(
+                    icon: Icons.logout_rounded,
+                    label: 'Checked Out',
+                    value: checkOutTime,
+                    color: _blue,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
           ],
 
-          const SizedBox(height: 16),
           const Divider(height: 1),
           const SizedBox(height: 16),
+
+          // ── Location ──
           Row(
             children: [
               const Icon(Icons.location_on_rounded, size: 14, color: _grey),
@@ -840,7 +798,7 @@ class _ActiveShiftCard extends StatelessWidget {
             ],
           ),
 
-          // ── End Shift button (only while the shift is active) ──
+          // ── End Shift button (only while active) ──
           if (!checkedOut && onEndShift != null) ...[
             const SizedBox(height: 20),
             SizedBox(
@@ -870,6 +828,108 @@ class _ActiveShiftCard extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Live ticking shift timer (HH:MM:SS since check-in) ──────────────────────
+
+class _LiveShiftTimer extends StatefulWidget {
+  final DateTime? since;
+  const _LiveShiftTimer({required this.since});
+
+  @override
+  State<_LiveShiftTimer> createState() => _LiveShiftTimerState();
+}
+
+class _LiveShiftTimerState extends State<_LiveShiftTimer> {
+  Timer? _timer;
+  Duration _elapsed = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  void _tick() {
+    final since = widget.since;
+    if (since == null) return;
+    final diff = DateTime.now().difference(since);
+    if (mounted) {
+      setState(() => _elapsed = diff.isNegative ? Duration.zero : diff);
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) {
+    final h = _elapsed.inHours;
+    final m = _elapsed.inMinutes % 60;
+    final s = _elapsed.inSeconds % 60;
+    return Text(
+      '${_two(h)}:${_two(m)}:${_two(s)}',
+      style: GoogleFonts.antonSc(
+        fontSize: 48,
+        color: _black,
+        height: 1.0,
+        letterSpacing: 1.0,
+      ),
+    );
+  }
+}
+
+// ─── Small In/Out time block (completed shift) ───────────────────────────────
+
+class _ShiftTimeBlock extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  const _ShiftTimeBlock({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: GoogleFonts.antonSc(fontSize: 22, color: _black, height: 1.0),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: _grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );

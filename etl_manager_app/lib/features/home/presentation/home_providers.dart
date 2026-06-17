@@ -253,6 +253,14 @@ final weeklyInsightsProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
 
 // ─── ROSTER PROVIDER (REAL DB DATA) ─────────────────────────────────────────
 
+// Selected roster day for the manager view. null => today.
+final selectedRosterDateProvider = StateProvider<DateTime?>((ref) => null);
+
+String _ymd(DateTime d) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${d.year}-${two(d.month)}-${two(d.day)}';
+}
+
 final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
   ref,
 ) async {
@@ -261,13 +269,16 @@ final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
 
   if (outletId == null) throw Exception("No outlet assigned");
 
+  // Refetches automatically whenever the selected date changes.
+  final selectedDate = ref.watch(selectedRosterDateProvider);
+
   try {
     final dio = ref.read(dioProvider);
-    // Aaj ki date ka roster automatically fetch karega backend (kyunki date optional banayi thi humne)
-    final response = await dio.get(
-      '/roster',
-      queryParameters: {'outlet_id': outletId},
-    );
+    final query = <String, dynamic>{'outlet_id': outletId};
+    if (selectedDate != null) {
+      query['target_date'] = _ymd(selectedDate);
+    }
+    final response = await dio.get('/roster', queryParameters: query);
 
     return response.data;
   } catch (e) {
