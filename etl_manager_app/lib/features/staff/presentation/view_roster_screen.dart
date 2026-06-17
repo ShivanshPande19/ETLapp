@@ -82,7 +82,7 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
     final today = DateTime.now();
     // Never allow the future.
     final clamped = d.isAfter(today) ? today : d;
-    ref.read(selectedRosterDateProvider.notifier).state = clamped;
+    ref.read(selectedRosterDateProvider.notifier).setDate(clamped);
     _animCtrl
       ..reset()
       ..forward();
