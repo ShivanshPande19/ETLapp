@@ -147,7 +147,6 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
 
                     // Parse Best Day
                     String bestDayStr = "N/A";
-                    String bestDayFull = "N/A";
                     if (data['best_day'] != null &&
                         data['best_day'].toString().isNotEmpty) {
                       try {
@@ -161,21 +160,23 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                           'Sat',
                           'Sun',
                         ][parsed.weekday - 1];
-                        bestDayFull = [
-                          'Monday',
-                          'Tuesday',
-                          'Wednesday',
-                          'Thursday',
-                          'Friday',
-                          'Saturday',
-                          'Sunday',
-                        ][parsed.weekday - 1];
                       } catch (_) {}
                     }
 
-                    // Process Daily History for Chart & List
-                    List history = (data['daily_history'] as List).reversed
-                        .toList(); // Reverse to show oldest to newest left to right
+                    // Process Daily History for Chart & List.
+                    // Sort chronologically (oldest → newest) so the bar chart
+                    // shows the LATEST day on the RIGHT. The breakdown list
+                    // below iterates this reversed (newest first → latest on top).
+                    List history = List.from(data['daily_history'] as List);
+                    history.sort((a, b) {
+                      try {
+                        return DateTime.parse(
+                          a['date'].toString(),
+                        ).compareTo(DateTime.parse(b['date'].toString()));
+                      } catch (_) {
+                        return 0;
+                      }
+                    });
                     double maxSales = 1.0; // Avoid Div/0
                     for (var h in history) {
                       if ((h['total_sales'] as num).toDouble() > maxSales) {
@@ -277,7 +278,6 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                             _PremiumDynamicBarChart(
                               history: history,
                               maxSales: maxSales,
-                              bestDayFull: bestDayFull,
                             ),
 
                             const SizedBox(height: 36),
@@ -409,22 +409,54 @@ class _MiniMetricCard extends StatelessWidget {
   }
 }
 
-// ─── Custom Dynamic Bar Chart ───
-class _PremiumDynamicBarChart extends StatelessWidget {
-  final List history;
+// ─── Custom Dynamic Bar Chart (interactive: tap a bar) ───
+class _PremiumDynamicBarChart extends StatefulWidget {
+  final List history; // chronological: oldest -> newest (latest on right)
   final double maxSales;
-  final String bestDayFull;
 
   const _PremiumDynamicBarChart({
     required this.history,
     required this.maxSales,
-    required this.bestDayFull,
   });
 
   @override
+  State<_PremiumDynamicBarChart> createState() =>
+      _PremiumDynamicBarChartState();
+}
+
+class _PremiumDynamicBarChartState extends State<_PremiumDynamicBarChart> {
+  int? _selectedIndex;
+
+  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _mons = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  @override
   Widget build(BuildContext context) {
+    final history = widget.history;
+    final maxSales = widget.maxSales;
+    if (history.isEmpty) return const SizedBox.shrink();
+
+    // Default selection = latest day (rightmost).
+    final activeIndex = (_selectedIndex != null &&
+            _selectedIndex! >= 0 &&
+            _selectedIndex! < history.length)
+        ? _selectedIndex!
+        : history.length - 1;
+
+    final activeData = history[activeIndex];
+    final activeSales = (activeData['total_sales'] as num).toDouble();
+    final activeBills = activeData['total_bills'];
+    DateTime activeDt;
+    try {
+      activeDt = DateTime.parse(activeData['date'].toString());
+    } catch (_) {
+      activeDt = DateTime.now();
+    }
+
     return Container(
-      height: 200,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: _black,
@@ -437,71 +469,124 @@ class _PremiumDynamicBarChart extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: history.map((e) {
-          DateTime dt = DateTime.parse(e['date']);
-          String dayLetter = [
-            'M',
-            'T',
-            'W',
-            'T',
-            'F',
-            'S',
-            'S',
-          ][dt.weekday - 1];
-          double val = (e['total_sales'] as num) / maxSales;
-          if (val == 0)
-            val = 0.05; // Make sure bar doesn't completely disappear
-
-          final isPeak = (e['total_sales'] as num) == maxSales && maxSales > 1;
-
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.end,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Dynamic info header for the selected day ──
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (isPeak)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  '${_days[activeDt.weekday - 1]}, ${_mons[activeDt.month - 1]} ${activeDt.day}',
+                  key: ValueKey('d$activeIndex'),
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _grey,
                   ),
-                  decoration: BoxDecoration(
-                    color: _ok.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    'PEAK',
-                    style: GoogleFonts.inter(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
-                      color: _ok,
-                    ),
-                  ),
-                ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 800),
-                curve: Curves.easeOutCubic,
-                width: 28,
-                height: 100 * val,
-                decoration: BoxDecoration(
-                  color: isPeak ? _ok : _white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(6),
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                dayLetter,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: isPeak ? FontWeight.w800 : FontWeight.w600,
-                  color: isPeak ? _white : _grey,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: Column(
+                  key: ValueKey('v$activeIndex'),
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '₹${activeSales.toStringAsFixed(0)}',
+                      style: GoogleFonts.antonSc(
+                        fontSize: 22,
+                        color: _white,
+                        height: 1.0,
+                      ),
+                    ),
+                    Text(
+                      '$activeBills bills',
+                      style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                    ),
+                  ],
                 ),
               ),
             ],
-          );
-        }).toList(),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Interactive bars ──
+          SizedBox(
+            height: 120,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: history.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final e = entry.value;
+                DateTime dt;
+                try {
+                  dt = DateTime.parse(e['date'].toString());
+                } catch (_) {
+                  dt = DateTime.now();
+                }
+                final dayLetter = ['M', 'T', 'W', 'T', 'F', 'S', 'S'][dt.weekday - 1];
+                double val = (e['total_sales'] as num) / maxSales;
+                if (val == 0) val = 0.05;
+
+                final isPeak =
+                    (e['total_sales'] as num) == maxSales && maxSales > 1;
+                final isSelected = idx == activeIndex;
+
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _selectedIndex = idx);
+                  },
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 350),
+                        curve: Curves.easeOutCubic,
+                        width: isSelected ? 26 : 20,
+                        height: 90 * val,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? _ok
+                              : (isPeak
+                                    ? _ok.withOpacity(0.5)
+                                    : _white.withOpacity(0.15)),
+                          borderRadius: BorderRadius.circular(6),
+                          boxShadow: isSelected
+                              ? [
+                                  BoxShadow(
+                                    color: _ok.withOpacity(0.4),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ]
+                              : [],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        dayLetter,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: isSelected
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: isSelected ? _white : _grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
