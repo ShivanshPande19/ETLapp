@@ -42,12 +42,8 @@ class OutletSalesScreen extends ConsumerStatefulWidget {
 
 class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     with TickerProviderStateMixin {
-  double _animTotal = 0;
-  double _prevTotal = 0;
-
   late final AnimationController _fadeCtrl;
   late final AnimationController _switchCtrl;
-  late final AnimationController _numCtrl;
 
   late final Animation<double> _fadeAnim;
   late final Animation<double> _switchFade;
@@ -80,38 +76,18 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _switchCtrl, curve: Curves.easeOutCubic));
     _switchCtrl.value = 1.0;
-
-    _numCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
   }
 
   @override
   void dispose() {
     _fadeCtrl.dispose();
     _switchCtrl.dispose();
-    _numCtrl.dispose();
     super.dispose();
   }
 
-  void _onNewData(double newTotal) {
-    if (_animTotal == newTotal) return;
-    _prevTotal = _animTotal;
-
-    _switchCtrl.reverse().then((_) {
-      if (mounted) _switchCtrl.forward();
-    });
-
-    _numCtrl.reset();
-    _numCtrl.addListener(() {
-      if (mounted) {
-        setState(() {
-          _animTotal = _prevTotal + (_numCtrl.value * (newTotal - _prevTotal));
-        });
-      }
-    });
-    _numCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
+  // Fade the analytics section in once when fresh data arrives.
+  void _triggerFade() {
+    _switchCtrl.forward(from: 0);
   }
 
   void _onPeriodTap(SalesPeriod period) async {
@@ -136,7 +112,6 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
 
       if (pickedDate == null || !mounted) return;
       HapticFeedback.selectionClick();
-      _triggerSwitchAnim();
 
       final dateStr = pickedDate.toIso8601String().split('T').first;
       ref
@@ -148,15 +123,8 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
           );
     } else {
       HapticFeedback.selectionClick();
-      _triggerSwitchAnim();
       ref.read(salesNotifierProvider.notifier).fetchSummary(period: period);
     }
-  }
-
-  void _triggerSwitchAnim() {
-    _switchCtrl.reverse().then((_) {
-      if (mounted) _switchCtrl.forward();
-    });
   }
 
   String _fmtFull(double v) {
@@ -186,11 +154,16 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     final summary = salesState.summary;
     final isLoading = salesState.status == SalesLoadStatus.loading;
 
-    if (summary != null && salesState.status == SalesLoadStatus.loaded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _onNewData(summary.totalSales);
-      });
-    }
+    // ✅ Fade the analytics section in ONCE per real data change (via
+    // ref.listen), NOT on every build. The old approach used
+    // addPostFrameCallback in build + a self-resetting number animation, which
+    // re-fired on each setState frame → infinite loop → cards faded out on
+    // rapid chip switching.
+    ref.listen<SalesState>(salesNotifierProvider, (prev, next) {
+      if (next.status == SalesLoadStatus.loaded && next.summary != null) {
+        _triggerFade();
+      }
+    });
 
     return Scaffold(
       backgroundColor: _bg,
