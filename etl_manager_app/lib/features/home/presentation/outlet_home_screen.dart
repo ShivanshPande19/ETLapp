@@ -145,16 +145,17 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                         // ─── 2. STAFF ROSTER (Now WIRED to DB) ────────────────
                         _sectionTitle('Staff & Attendance'),
                         const SizedBox(height: 12),
-                        _StaffRosterCard(
+                        _PressableScale(
                           onTap: () {
                             HapticFeedback.selectionClick();
                             Navigator.push(
                               context,
-                              MaterialPageRoute(
-                                builder: (context) => const ViewRosterScreen(),
-                              ),
+                              _fadeSlideRoute(const ViewRosterScreen()),
                             );
                           },
+                          child: AbsorbPointer(
+                            child: _StaffRosterCard(onTap: () {}),
+                          ),
                         ),
 
                         const SizedBox(height: 32),
@@ -162,17 +163,17 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                         // ─── 3. BUSINESS INSIGHTS (Now WIRED to DB) ───────────
                         _sectionTitle('Weekly Highlights'),
                         const SizedBox(height: 12),
-                        _ReportsCard(
+                        _PressableScale(
                           onTap: () {
                             HapticFeedback.selectionClick();
                             Navigator.push(
                               context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const WeeklyInsightsScreen(),
-                              ),
+                              _fadeSlideRoute(const WeeklyInsightsScreen()),
                             );
                           },
+                          child: AbsorbPointer(
+                            child: _ReportsCard(onTap: () {}),
+                          ),
                         ),
                       ],
                     ),
@@ -284,6 +285,63 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
       ],
     ),
   );
+}
+
+// ─── Smooth fade + slide route (for pushed screens) ─────────────────────────
+Route _fadeSlideRoute(Widget page) {
+  return PageRouteBuilder(
+    transitionDuration: const Duration(milliseconds: 350),
+    reverseTransitionDuration: const Duration(milliseconds: 280),
+    pageBuilder: (_, __, ___) => page,
+    transitionsBuilder: (_, animation, __, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+      );
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.04),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+// ─── Reusable press-scale wrapper (tactile tap feedback) ────────────────────
+class _PressableScale extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  const _PressableScale({required this.child, required this.onTap});
+
+  @override
+  State<_PressableScale> createState() => _PressableScaleState();
+}
+
+class _PressableScaleState extends State<_PressableScale> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
 }
 
 // ─── Profile Button (Animated) ──────────────────────────────────────────────
