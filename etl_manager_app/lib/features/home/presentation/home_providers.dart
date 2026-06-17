@@ -254,7 +254,17 @@ final weeklyInsightsProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
 // ─── ROSTER PROVIDER (REAL DB DATA) ─────────────────────────────────────────
 
 // Selected roster day for the manager view. null => today.
-final selectedRosterDateProvider = StateProvider<DateTime?>((ref) => null);
+class SelectedRosterDateNotifier extends Notifier<DateTime?> {
+  @override
+  DateTime? build() => null;
+
+  void setDate(DateTime? date) => state = date;
+}
+
+final selectedRosterDateProvider =
+    NotifierProvider<SelectedRosterDateNotifier, DateTime?>(
+      SelectedRosterDateNotifier.new,
+    );
 
 String _ymd(DateTime d) {
   String two(int n) => n.toString().padLeft(2, '0');
