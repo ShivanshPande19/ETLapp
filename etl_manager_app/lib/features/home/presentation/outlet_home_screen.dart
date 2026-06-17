@@ -32,9 +32,10 @@ class OutletHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
+  late final AnimationController _listCtrl;
 
   @override
   void initState() {
@@ -48,11 +49,29 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _fadeCtrl.forward();
+
+    // Staggered entrance for the content sections (replays on every tab switch).
+    _listCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _listCtrl.forward();
   }
+
+  // Per-section staggered fade+slide animation.
+  Animation<double> _itemAnim(int i) => CurvedAnimation(
+    parent: _listCtrl,
+    curve: Interval(
+      (i * 0.15).clamp(0.0, 0.6),
+      ((i * 0.15) + 0.5).clamp(0.0, 1.0),
+      curve: Curves.easeOutCubic,
+    ),
+  );
 
   @override
   void dispose() {
     _fadeCtrl.dispose();
+    _listCtrl.dispose();
     super.dispose();
   }
 
@@ -111,68 +130,96 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                       ),
                       children: [
                         // ─── 1. REAL SALES DATA ─────────────────────────────
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            _sectionTitle("Yesterday's Performance"),
-                            const Icon(
-                              Icons.show_chart_rounded,
-                              size: 16,
-                              color: _grey,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        dashboardState.when(
-                          loading: () => _skeletonCard(120),
-                          error: (_, __) =>
-                              _errorCard('Sales data unavailable'),
-                          data: (data) {
-                            final rev = (data['revenue'] as num).toDouble();
-                            final bills = (data['orders'] as num).toInt();
-                            final avg = bills > 0 ? rev / bills : 0.0;
-                            return _SalesCard(
-                              rev: rev,
-                              bills: bills,
-                              avg: avg,
-                              fmt: _fmt,
-                            );
-                          },
+                        _Stagger(
+                          anim: _itemAnim(0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  _sectionTitle("Yesterday's Performance"),
+                                  const Icon(
+                                    Icons.show_chart_rounded,
+                                    size: 16,
+                                    color: _grey,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              dashboardState.when(
+                                loading: () => _skeletonCard(120),
+                                error: (_, __) =>
+                                    _errorCard('Sales data unavailable'),
+                                data: (data) {
+                                  final rev = (data['revenue'] as num)
+                                      .toDouble();
+                                  final bills = (data['orders'] as num).toInt();
+                                  final avg = bills > 0 ? rev / bills : 0.0;
+                                  return _SalesCard(
+                                    rev: rev,
+                                    bills: bills,
+                                    avg: avg,
+                                    fmt: _fmt,
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
                         ),
 
                         const SizedBox(height: 32),
 
                         // ─── 2. STAFF ROSTER (Now WIRED to DB) ────────────────
-                        _sectionTitle('Staff & Attendance'),
-                        const SizedBox(height: 12),
-                        _PressableScale(
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            Navigator.push(
-                              context,
-                              _fadeSlideRoute(const ViewRosterScreen()),
-                            );
-                          },
-                          child: AbsorbPointer(
-                            child: _StaffRosterCard(onTap: () {}),
+                        _Stagger(
+                          anim: _itemAnim(1),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _sectionTitle('Staff & Attendance'),
+                              const SizedBox(height: 12),
+                              _PressableScale(
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.push(
+                                    context,
+                                    _fadeSlideRoute(const ViewRosterScreen()),
+                                  );
+                                },
+                                child: AbsorbPointer(
+                                  child: _StaffRosterCard(onTap: () {}),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
 
                         const SizedBox(height: 32),
 
                         // ─── 3. BUSINESS INSIGHTS (Now WIRED to DB) ───────────
-                        _sectionTitle('Weekly Highlights'),
-                        const SizedBox(height: 12),
-                        _PressableScale(
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            Navigator.push(
-                              context,
-                              _fadeSlideRoute(const WeeklyInsightsScreen()),
-                            );
-                          },
-                          child: AbsorbPointer(
-                            child: _ReportsCard(onTap: () {}),
+                        _Stagger(
+                          anim: _itemAnim(2),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _sectionTitle('Weekly Highlights'),
+                              const SizedBox(height: 12),
+                              _PressableScale(
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.push(
+                                    context,
+                                    _fadeSlideRoute(
+                                      const WeeklyInsightsScreen(),
+                                    ),
+                                  );
+                                },
+                                child: AbsorbPointer(
+                                  child: _ReportsCard(onTap: () {}),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -285,6 +332,27 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
       ],
     ),
   );
+}
+
+// ─── Staggered entrance wrapper (fade + slide-up) ───────────────────────────
+class _Stagger extends StatelessWidget {
+  final Animation<double> anim;
+  final Widget child;
+  const _Stagger({required this.anim, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: anim,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.08),
+          end: Offset.zero,
+        ).animate(anim),
+        child: child,
+      ),
+    );
+  }
 }
 
 // ─── Smooth fade + slide route (for pushed screens) ─────────────────────────

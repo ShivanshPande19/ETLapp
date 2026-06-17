@@ -46,8 +46,8 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
   late final AnimationController _switchCtrl;
 
   late final Animation<double> _fadeAnim;
-  late final Animation<double> _switchFade;
-  late final Animation<Offset> _switchSlide;
+  late final Animation<double> _ringsIn;
+  late final Animation<double> _graphIn;
 
   @override
   void initState() {
@@ -65,16 +65,18 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
 
     _switchCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 700),
     );
-    _switchFade = CurvedAnimation(
+    // Staggered entrance: rings come in first, the trend graph slightly after.
+    // Replays on mount AND on every chip switch (via _triggerFade).
+    _ringsIn = CurvedAnimation(
       parent: _switchCtrl,
-      curve: Curves.easeOutCubic,
+      curve: const Interval(0.0, 0.7, curve: Curves.easeOutCubic),
     );
-    _switchSlide = Tween<Offset>(
-      begin: const Offset(0, 0.05),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _switchCtrl, curve: Curves.easeOutCubic));
+    _graphIn = CurvedAnimation(
+      parent: _switchCtrl,
+      curve: const Interval(0.3, 1.0, curve: Curves.easeOutCubic),
+    );
     _switchCtrl.value = 1.0;
   }
 
@@ -331,49 +333,50 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                           const SizedBox(height: 40),
 
                           // Core Analytics
-                          FadeTransition(
-                            opacity: _switchFade,
-                            child: SlideTransition(
-                              position: _switchSlide,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Performance Matrices',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w900,
-                                        color: _black,
-                                        letterSpacing: -0.4,
-                                      ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _AnimIn(
+                                  anim: _ringsIn,
+                                  child: Text(
+                                    'Performance Matrices',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: _black,
+                                      letterSpacing: -0.4,
                                     ),
-                                    const SizedBox(height: 20),
-
-                                    isLoading
-                                        ? _PremiumSkeleton()
-                                        : salesState.status ==
-                                              SalesLoadStatus.error
-                                        ? const _ErrorRow(
-                                            message: 'Data Sync Failed',
-                                          )
-                                        : summary != null
-                                        ? _VisualDataRings(
-                                            bills: summary.totalBills,
-                                            avgBill: summary.avgBillValue,
-                                          )
-                                        : const SizedBox.shrink(),
-
-                                    const SizedBox(height: 24),
-
-                                    // INTERACTIVE DYNAMIC GRAPH
-                                    const _InteractiveTrendGraph(),
-                                  ],
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 20),
+
+                                _AnimIn(
+                                  anim: _ringsIn,
+                                  child: isLoading
+                                      ? _PremiumSkeleton()
+                                      : salesState.status ==
+                                            SalesLoadStatus.error
+                                      ? const _ErrorRow(
+                                          message: 'Data Sync Failed',
+                                        )
+                                      : summary != null
+                                      ? _VisualDataRings(
+                                          bills: summary.totalBills,
+                                          avgBill: summary.avgBillValue,
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+
+                                const SizedBox(height: 24),
+
+                                // INTERACTIVE DYNAMIC GRAPH
+                                _AnimIn(
+                                  anim: _graphIn,
+                                  child: const _InteractiveTrendGraph(),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -385,6 +388,27 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Staggered entrance wrapper (fade + slide-up) ───────────────────────────
+class _AnimIn extends StatelessWidget {
+  final Animation<double> anim;
+  final Widget child;
+  const _AnimIn({required this.anim, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: anim,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.10),
+          end: Offset.zero,
+        ).animate(anim),
+        child: child,
       ),
     );
   }
