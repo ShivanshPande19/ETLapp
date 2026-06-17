@@ -214,9 +214,6 @@ final outletDashboardProvider =
         return {
           'revenue': data['total_sales'] ?? 0,
           'orders': data['total_bills'] ?? 0,
-          'rating': '4.2', // Tech-Debt
-          'attendance': '4/5 Present', // Tech-Debt
-          'top_item': 'Paneer Tikka', // Tech-Debt
         };
       } catch (e) {
         debugPrint('🔴 [OUTLET_DASHBOARD] Exception: $e');
