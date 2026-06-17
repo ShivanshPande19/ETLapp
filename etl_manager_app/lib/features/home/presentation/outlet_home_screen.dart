@@ -80,7 +80,7 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ─── Header (Dark Area) ──────────────────────────────────────
-              _buildHeader(firstName),
+              _buildHeader(firstName, ref.watch(currentOutletNameProvider).value),
 
               // ─── White Card Area ─────────────────────────────────────────
               Expanded(
@@ -187,7 +187,7 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
   }
 
   // ─── Header UI ─────────────────────────────────────────────────────────────
-  Widget _buildHeader(String firstName) {
+  Widget _buildHeader(String firstName, String? outletName) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       child: Row(
@@ -208,7 +208,10 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'I.M.M. MOMO',
+                  // ✅ Real outlet name; neutral fallback while loading (no fake).
+                  (outletName != null && outletName.isNotEmpty)
+                      ? outletName
+                      : 'My Outlet',
                   style: GoogleFonts.antonSc(
                     fontSize: 38,
                     color: _white,
@@ -219,17 +222,6 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Icon(
-                      Icons.location_on_rounded,
-                      size: 12,
-                      color: _grey,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Court Central 50',
-                      style: GoogleFonts.inter(fontSize: 12, color: _grey),
-                    ),
-                    const SizedBox(width: 12),
                     Container(
                       width: 6,
                       height: 6,

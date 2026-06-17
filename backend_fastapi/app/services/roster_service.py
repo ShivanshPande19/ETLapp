@@ -1,6 +1,6 @@
 # backend_fastapi/app/services/roster_service.py
 
-from datetime import date, timedelta  # ✅ FIXED: timedelta import kiya time add karne ke liye
+from datetime import date
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..models.staff import Staff
@@ -33,24 +33,23 @@ def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterRe
         if record:
             status = "present"
             present_count += 1
-            
-            # ✅ FIXED: UTC time mein 5 ghante 30 minute add karke IST mein convert kiya
-            if record.check_in_time:
-                chk_time = record.check_in_time + timedelta(hours=5, minutes=30)
-            else:
-                chk_time = None
-                
+            # ✅ Raw UTC times — schema serializes with 'Z' aur client toLocal()
+            # karke sahi local time dikhata hai (manual +5:30 hack hata diya).
+            chk_in = record.check_in_time
+            chk_out = record.check_out_time
             selfie = record.check_in_photo_url
         else:
             status = "absent"
-            chk_time = None
+            chk_in = None
+            chk_out = None
             selfie = None
 
         roster_list.append(StaffRosterItem(
             staff_id=staff.id,
             name=staff.name,
             status=status,
-            check_in_time=chk_time,
+            check_in_time=chk_in,
+            check_out_time=chk_out,
             selfie_url=selfie
         ))
 

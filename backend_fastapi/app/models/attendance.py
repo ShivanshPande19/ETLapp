@@ -26,3 +26,11 @@ class Attendance(Base):
     
     # Photo proof ka server link 
     check_in_photo_url = Column(String, nullable=False)
+
+    # --- Check-out Details (Phase 2) ---
+    # Nullable: jab tak staff shift end nahi karta, ye khaali rehte hain.
+    check_out_time = Column(DateTime(timezone=True), nullable=True)
+    check_out_lat = Column(Float, nullable=True)
+    check_out_lng = Column(Float, nullable=True)
+    check_out_address = Column(String, nullable=True)
+    check_out_photo_url = Column(String, nullable=True)
