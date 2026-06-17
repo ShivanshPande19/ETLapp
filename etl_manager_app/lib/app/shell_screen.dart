@@ -34,9 +34,9 @@ class ShellScreen extends ConsumerWidget {
           route: '/feedbacks',
         ),
         NavItem(
-          icon: Icons.feedback_rounded,
-          label: 'Issues',
-          route: '/complaints',
+          icon: Icons.handyman_rounded,
+          label: 'Repairs',
+          route: '/maintenance',
         ),
       ];
     } else if (authState.isOutletManager) {

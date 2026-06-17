@@ -856,22 +856,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                           const SizedBox(height: 24),
-
-                          // ── Now Playing — stagger 5 ───────────────────
-                          _StaggerRow(
-                            anim: _stagger(5),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _SectionHeader(
-                                  title: 'Now Playing',
-                                  onViewAll: null,
-                                ),
-                                const SizedBox(height: 12),
-                                const _NowPlayingCard(),
-                              ],
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -1113,14 +1097,27 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
-      Text(
-        title,
-        style: GoogleFonts.inter(
-          fontSize: 16,
-          fontWeight: FontWeight.w800,
-          color: _black,
-          letterSpacing: -0.3,
-        ),
+      Row(
+        children: [
+          Container(
+            width: 4,
+            height: 18,
+            decoration: BoxDecoration(
+              color: _red,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _black,
+              letterSpacing: -0.3,
+            ),
+          ),
+        ],
       ),
       if (onViewAll != null)
         GestureDetector(
@@ -1149,11 +1146,18 @@ class _OutlineCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     height: height,
     width: double.infinity,
-    padding: const EdgeInsets.all(14),
+    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
       color: _white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: _border, width: 1.5),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFECECEC), width: 1.5),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.04),
+          blurRadius: 16,
+          offset: const Offset(0, 6),
+        ),
+      ],
     ),
     child: child,
   );
@@ -1170,10 +1174,21 @@ class _FilledCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     height: height,
     width: double.infinity,
-    padding: const EdgeInsets.all(14),
+    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
-      color: _black,
-      borderRadius: BorderRadius.circular(16),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF161616), _black],
+      ),
+      borderRadius: BorderRadius.circular(20),
+      boxShadow: [
+        BoxShadow(
+          color: _black.withOpacity(0.22),
+          blurRadius: 18,
+          offset: const Offset(0, 8),
+        ),
+      ],
     ),
     child: child,
   );
@@ -1317,68 +1332,6 @@ class _CourtRowState extends State<_CourtRow>
           ),
         ),
       ),
-    ),
-  );
-}
-
-// ─── Now Playing Card ─────────────────────────────────────────────────────────
-
-class _NowPlayingCard extends StatelessWidget {
-  const _NowPlayingCard();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-    decoration: BoxDecoration(
-      color: _black,
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Row(
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(Icons.music_note_rounded, color: _white, size: 22),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Background Playlist',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: _white,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Now Playing',
-                style: GoogleFonts.inter(fontSize: 12, color: Colors.white54),
-              ),
-            ],
-          ),
-        ),
-        Icon(
-          Icons.skip_previous_rounded,
-          color: Colors.white.withOpacity(0.5),
-          size: 24,
-        ),
-        const SizedBox(width: 8),
-        const Icon(Icons.pause_circle_filled_rounded, color: _white, size: 32),
-        const SizedBox(width: 8),
-        Icon(
-          Icons.skip_next_rounded,
-          color: Colors.white.withOpacity(0.5),
-          size: 24,
-        ),
-      ],
     ),
   );
 }
