@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../auth/domain/auth_notifier.dart';
+import '../../home/presentation/home_providers.dart';
 
 const _black = Color(0xFF0A0A0A);
 const _white = Color(0xFFFFFFFF);
@@ -179,6 +180,8 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
 
     final authState = ref.watch(authNotifierProvider);
     final staffName = authState.staffName ?? authState.managerName ?? 'Staff';
+    // ✅ Real outlet name (no hardcoding). Null while loading / unknown.
+    final outletName = ref.watch(currentOutletNameProvider).value;
     final now = DateTime.now();
     final timeString = DateFormat('dd MMM yyyy, hh:mm a').format(now);
 
@@ -260,15 +263,18 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
                       letterSpacing: 1.0,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'I.M.M. MOMO - Central',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w600,
+                  // ✅ Only show outlet name when we actually have it (no fake).
+                  if (outletName != null && outletName.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      outletName,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
+                  ],
                   const SizedBox(height: 12),
                   const Divider(color: Colors.white24, height: 1),
                   const SizedBox(height: 12),

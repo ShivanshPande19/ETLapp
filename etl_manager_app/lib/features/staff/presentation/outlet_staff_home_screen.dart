@@ -11,6 +11,7 @@ import '../../auth/domain/auth_notifier.dart';
 import '../domain/attendance_notifier.dart';
 // ✅ IMPORT FOR REAL DATABASE FEEDBACKS
 import '../../feedbacks/domain/feedback_notifier.dart';
+import '../../home/presentation/home_providers.dart';
 
 // ─── Premium Palette ─────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -67,6 +68,8 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
     final firstName = (authState.staffName ?? authState.managerName ?? 'Staff')
         .split(' ')
         .first;
+    // ✅ Real outlet name (no hardcoding); falls back to generic label.
+    final outletName = ref.watch(currentOutletNameProvider).value;
 
     // Listen to Attendance API responses (snackbars only — the card itself is
     // driven by the notifier's `today` snapshot).
@@ -139,7 +142,9 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              'Your Outlet',
+                              (outletName != null && outletName.isNotEmpty)
+                                  ? outletName
+                                  : 'Your Outlet',
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: _white.withOpacity(0.8),

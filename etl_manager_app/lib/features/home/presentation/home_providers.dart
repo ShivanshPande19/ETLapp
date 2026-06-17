@@ -286,3 +286,34 @@ final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
     throw e;
   }
 });
+
+
+// ─── CURRENT OUTLET NAME (real data, no hardcoding) ─────────────────────────
+
+final currentOutletNameProvider = FutureProvider.autoDispose<String?>((
+  ref,
+) async {
+  final authState = ref.watch(authNotifierProvider);
+  final outletId = authState.outletId;
+  if (outletId == null) return null;
+
+  try {
+    final dio = ref.read(dioProvider);
+    final res = await dio.get('/outlets/');
+    final data = res.data;
+    final List list = data is List
+        ? data
+        : (data is Map ? (data['outlets'] ?? data['data'] ?? []) : []);
+
+    for (final o in list) {
+      if (o is Map && o['id'] == outletId) {
+        final name = (o['vendor_name'] ?? o['name'])?.toString();
+        return (name != null && name.isNotEmpty) ? name : null;
+      }
+    }
+    return null;
+  } catch (e) {
+    debugPrint('🏪 [OUTLET_NAME] Exception: $e');
+    return null;
+  }
+});
