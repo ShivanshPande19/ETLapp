@@ -26,7 +26,6 @@ import '../features/courts/data/courts_repository.dart';
 import '../features/staff/presentation/staff_shell_screen.dart';
 import '../features/staff/presentation/staff_home_screen.dart';
 import '../features/staff/presentation/staff_checklist_screen.dart';
-import '../features/staff/presentation/staff_report_screen.dart';
 
 import '../features/staff/presentation/outlet_staff_home_screen.dart';
 import '../features/staff/presentation/mark_attendance_screen.dart';
@@ -311,14 +310,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const StaffChecklistScreen(),
-            ),
-          ),
-          GoRoute(
-            path: '/staff/report',
-            pageBuilder: (context, state) => _buildPage(
-              context: context,
-              state: state,
-              child: const StaffReportScreen(),
             ),
           ),
         ],

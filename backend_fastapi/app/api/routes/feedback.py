@@ -235,6 +235,69 @@ def get_court_analytics(
     return _analytics(feedbacks)
 
 
+# ─── PROTECTED: ETL Staff — own assigned court (COURT feedback only) ─────────
+
+@router.get("/my-court", response_model=List[FeedbackOut])
+def get_my_court_feedbacks(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    # ✅ Pagination so the staff list never loads every row at once.
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    # ✅ Optional day filter (client sends local-day boundaries already in UTC).
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+):
+    """ETL staff (and ETL managers) view the COURT-level feedback for the
+    court assigned to them. Only feedbacks that actually carry a court rating
+    are returned — outlet-only reviews are intentionally hidden so staff see
+    just the venue/court voice."""
+    if not (user.is_etl_staff or user.is_etl_manager):
+        raise HTTPException(status_code=403, detail="Court staff access required.")
+
+    if user.court_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="No court assigned to your account.",
+        )
+
+    query = db.query(Feedback).filter(
+        Feedback.court_id == user.court_id,
+        Feedback.court_rating.isnot(None),
+    )
+    query = _apply_date_range(query, start, end)
+
+    feedbacks = (
+        query.order_by(Feedback.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [_to_out(f) for f in feedbacks]
+
+
+@router.get("/my-court/analytics", response_model=FeedbackAnalytics)
+def get_my_court_analytics(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Overall court-feedback analytics for the staff's assigned court."""
+    if not (user.is_etl_staff or user.is_etl_manager):
+        raise HTTPException(status_code=403, detail="Court staff access required.")
+
+    if user.court_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="No court assigned to your account.",
+        )
+
+    feedbacks = db.query(Feedback).filter(
+        Feedback.court_id == user.court_id,
+        Feedback.court_rating.isnot(None),
+    ).all()
+    return _analytics(feedbacks)
+
+
 # ─── PROTECTED: Outlet Manager/Staff — own outlet only ───────────────────────
 
 @router.get("/outlet/{outlet_id}", response_model=List[FeedbackOut])

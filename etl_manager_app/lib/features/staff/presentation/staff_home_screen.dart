@@ -1,19 +1,23 @@
 // lib/features/staff/presentation/staff_home_screen.dart
+//
+// Premium ETL staff home — hero header, attendance hub (check-in/out),
+// housekeeping progress and a court-feedback card (court voice only).
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../staff/domain/housekeeping_models.dart' as hk;
 import '../../staff/data/housekeeping_repository.dart';
-import '../../complaints/domain/complaint_model.dart';
-import '../../complaints/data/complaints_repository.dart';
-import 'staff_complaints_screen.dart';
+import '../domain/attendance_notifier.dart';
+import '../../feedbacks/domain/court_feedback_notifier.dart';
+import '../../feedbacks/presentation/staff_court_feedback_screen.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
 
-// ✅ NEW IMPORT: DB se real court name laane ke liye
+// ✅ Real court name from DB
 import '../../courts/domain/courts_notifier.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -26,26 +30,11 @@ const _warn = Color(0xFFE5A000);
 const _danger = Color(0xFFFF4444);
 const _blue = Color(0xFF60A5FA);
 const _red = Color(0xFFD02128);
-const _border = Color(0xFF1A1A1A);
-
-// ─── Shift ranges ─────────────────────────────────────────────────────────────
-const _shiftRanges = {
-  hk.Shift.morning: (start: 6, end: 12),
-  hk.Shift.day: (start: 12, end: 16),
-  hk.Shift.night: (start: 16, end: 24),
-};
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 final _staffHkProvider = FutureProvider.autoDispose
     .family<hk.FullStatusResponse?, String>((ref, date) async {
       return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
-    });
-
-final _staffComplaintsProvider = FutureProvider.autoDispose
-    .family<List<ComplaintModel>, int>((ref, courtId) async {
-      return ref
-          .read(complaintsRepoProvider)
-          .getComplaints(courtId: courtId, status: 'open');
     });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -115,6 +104,11 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
+
+    // ✅ Load today's attendance so the hub survives restarts.
+    Future.microtask(
+      () => ref.read(attendanceNotifierProvider.notifier).loadToday(),
+    );
   }
 
   @override
@@ -150,33 +144,24 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
       ..reset()
       ..forward();
 
-    // ✅ NEW: Refresh court names as well
     ref.invalidate(courtsNotifierProvider);
     ref.invalidate(_staffHkProvider(_dateStr));
-    ref.invalidate(_staffComplaintsProvider(widget.assignedCourt));
 
     await Future.wait([
       ref.read(_staffHkProvider(_dateStr).future).catchError((_) => null),
-      ref
-          .read(_staffComplaintsProvider(widget.assignedCourt).future)
-          .catchError((_) => <ComplaintModel>[]),
+      ref.read(attendanceNotifierProvider.notifier).loadToday(),
+      ref.read(courtFeedbackNotifierProvider.notifier).fetch(isRefresh: true),
     ]);
   }
 
-  // ✅ FIX: real court name accept karne ke liye update kiya
-  void _openComplaints(String courtName) {
+  void _openFeedback(String courtName) {
     HapticFeedback.selectionClick();
     Navigator.of(context).push(
       PageRouteBuilder(
-        pageBuilder: (_, anim, __) => StaffComplaintsScreen(
-          courtId: widget.assignedCourt,
-          courtName: courtName,
-        ),
+        pageBuilder: (_, anim, __) =>
+            StaffCourtFeedbackScreen(courtName: courtName),
         transitionsBuilder: (_, anim, __, child) {
-          final curved = CurvedAnimation(
-            parent: anim,
-            curve: Curves.easeOutCubic,
-          );
+          final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
           return FadeTransition(
             opacity: curved,
             child: SlideTransition(
@@ -199,10 +184,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
       PageRouteBuilder(
         pageBuilder: (_, anim, __) => const StaffSettingsScreen(),
         transitionsBuilder: (_, anim, __, child) {
-          final curved = CurvedAnimation(
-            parent: anim,
-            curve: Curves.easeOutCubic,
-          );
+          final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
           return FadeTransition(
             opacity: curved,
             child: SlideTransition(
@@ -219,6 +201,65 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
     );
   }
 
+  // ─── Attendance flows ───────────────────────────────────────────────────────
+
+  Future<void> _startCheckIn() async {
+    HapticFeedback.selectionClick();
+    final result = await context.push('/staff/mark-attendance');
+    if (!mounted || result is! Map) return;
+
+    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
+    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
+    final imagePath = result['image_path'] as String?;
+    if ((lat == 0.0 && lng == 0.0) || imagePath == null) {
+      _toast('Could not capture location/photo. Try again.', isError: true);
+      return;
+    }
+    await ref
+        .read(attendanceNotifierProvider.notifier)
+        .markAttendance(lat: lat, lng: lng, imagePath: imagePath);
+  }
+
+  Future<void> _startCheckOut() async {
+    HapticFeedback.selectionClick();
+    final result = await context.push('/staff/mark-attendance');
+    if (!mounted || result is! Map) return;
+
+    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
+    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
+    final imagePath = result['image_path'] as String?;
+    if (lat == 0.0 && lng == 0.0) {
+      _toast('Could not capture location. Try again.', isError: true);
+      return;
+    }
+    await ref
+        .read(attendanceNotifierProvider.notifier)
+        .checkOut(lat: lat, lng: lng, imagePath: imagePath);
+  }
+
+  void _toast(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isError ? _danger : _ok,
+        content: Text(msg),
+      ),
+    );
+  }
+
+  String _fmtTime(DateTime? dt) {
+    if (dt == null) return '--:--';
+    return TimeOfDay.fromDateTime(dt).format(context);
+  }
+
+  String? _durationLabel(int? minutes) {
+    if (minutes == null) return null;
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
   Animation<double> _stagger(int index) => CurvedAnimation(
     parent: _cardsCtrl,
     curve: Interval(
@@ -230,18 +271,29 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Attendance snackbars
+    ref.listen<AttendanceState>(attendanceNotifierProvider, (prev, next) {
+      if (prev?.status == next.status) return;
+      if (next.status == AttendanceStatus.success) {
+        _toast(
+          next.isCheckedOut
+              ? 'Shift ended. Great work today!'
+              : 'Checked in successfully!',
+        );
+      } else if (next.status == AttendanceStatus.error) {
+        _toast(next.errorMessage ?? 'Something went wrong.', isError: true);
+      }
+    });
+
     final hkAsync = ref.watch(_staffHkProvider(_dateStr));
-    final cmpAsync = ref.watch(_staffComplaintsProvider(widget.assignedCourt));
+    final attendance = ref.watch(attendanceNotifierProvider);
+    final feedbackAsync = ref.watch(courtFeedbackNotifierProvider);
 
-    // ✅ NEW: Fetch real court names from DB
     final courtsAsync = ref.watch(courtsNotifierProvider);
-    String realCourtName = 'Court ${widget.assignedCourt}'; // Fallback
-
+    String realCourtName = 'Court ${widget.assignedCourt}';
     courtsAsync.whenData((courts) {
       final match = courts.where((c) => c.id == widget.assignedCourt);
-      if (match.isNotEmpty) {
-        realCourtName = match.first.name;
-      }
+      if (match.isNotEmpty) realCourtName = match.first.name;
     });
 
     final navClearance = MediaQuery.of(context).padding.bottom + 92.0;
@@ -266,15 +318,12 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                       children: [
                         FadeTransition(
                           opacity: _heroFade,
-                          child: SlideTransition(
-                            position: _heroSlide,
-                            child: Text(
-                              'Hi, ${widget.staffName}',
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: _white.withOpacity(0.55),
-                                fontWeight: FontWeight.w500,
-                              ),
+                          child: Text(
+                            'Hi, ${widget.staffName}',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: _white.withOpacity(0.55),
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -321,46 +370,28 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                             RichText(
                               text: TextSpan(
                                 style: GoogleFonts.antonSc(
-                                  fontSize: 54,
+                                  fontSize: 50,
                                   height: 0.95,
                                   letterSpacing: -1,
                                 ),
                                 children: const [
-                                  TextSpan(
-                                    text: 'E',
-                                    style: TextStyle(color: _red),
-                                  ),
-                                  TextSpan(
-                                    text: 'TL ',
-                                    style: TextStyle(color: _white),
-                                  ),
-                                  TextSpan(
-                                    text: 'F',
-                                    style: TextStyle(color: _red),
-                                  ),
-                                  TextSpan(
-                                    text: 'OOD',
-                                    style: TextStyle(color: _white),
-                                  ),
+                                  TextSpan(text: 'E', style: TextStyle(color: _red)),
+                                  TextSpan(text: 'TL ', style: TextStyle(color: _white)),
+                                  TextSpan(text: 'F', style: TextStyle(color: _red)),
+                                  TextSpan(text: 'OOD', style: TextStyle(color: _white)),
                                 ],
                               ),
                             ),
                             RichText(
                               text: TextSpan(
                                 style: GoogleFonts.antonSc(
-                                  fontSize: 54,
+                                  fontSize: 50,
                                   height: 0.95,
                                   letterSpacing: -1,
                                 ),
                                 children: const [
-                                  TextSpan(
-                                    text: 'C',
-                                    style: TextStyle(color: _red),
-                                  ),
-                                  TextSpan(
-                                    text: 'OURT',
-                                    style: TextStyle(color: _white),
-                                  ),
+                                  TextSpan(text: 'C', style: TextStyle(color: _red)),
+                                  TextSpan(text: 'OURT', style: TextStyle(color: _white)),
                                 ],
                               ),
                             ),
@@ -368,18 +399,36 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                         ),
                       ),
                     ),
+                    const SizedBox(height: 14),
+                    FadeTransition(
+                      opacity: _heroFade,
+                      child: Row(
+                        children: [
+                          _HeaderTag(
+                            icon: Icons.stadium_rounded,
+                            label: realCourtName,
+                            color: _blue,
+                          ),
+                          const SizedBox(width: 8),
+                          _HeaderTag(
+                            icon: Icons.calendar_today_rounded,
+                            label: _prettyDate(_now),
+                            color: _white,
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
 
-              // ── WHITE CARDS AREA ─────────────────────────────────────
+              // ── WHITE CANVAS ─────────────────────────────────────────
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
                     color: _white,
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(28),
-                    ),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(28)),
                   ),
                   child: RefreshIndicator(
                     color: _black,
@@ -387,108 +436,77 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                     strokeWidth: 2,
                     displacement: 40,
                     onRefresh: _refreshAll,
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: (n) {
-                        if (n is ScrollEndNotification &&
-                            _scrollCtrl.hasClients &&
-                            _scrollCtrl.offset < 0) {
-                          _scrollCtrl.animateTo(
-                            0,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOutCubic,
-                          );
-                        }
-                        return false;
-                      },
-                      child: ListView(
-                        controller: _scrollCtrl,
-                        physics: const BouncingScrollPhysics(
-                          parent: AlwaysScrollableScrollPhysics(),
-                        ),
-                        padding: EdgeInsets.fromLTRB(20, 24, 20, navClearance),
-                        children: [
-                          _StaggerRow(
-                            anim: _stagger(0),
-                            child: _ShiftCard(shift: _currentShift, now: _now),
-                          ),
-                          const SizedBox(height: 10),
-
-                          _StaggerRow(
-                            anim: _stagger(1),
-                            child: hkAsync.when(
-                              loading: () => const _SkeletonCard(height: 120),
-                              error: (_, __) => _ErrorCard(
-                                label: 'Housekeeping',
-                                onRetry: () =>
-                                    ref.invalidate(_staffHkProvider(_dateStr)),
-                              ),
-                              data: (data) {
-                                if (data == null) {
-                                  return _ErrorCard(
-                                    label: 'Housekeeping',
-                                    onRetry: () => ref.invalidate(
-                                      _staffHkProvider(_dateStr),
-                                    ),
-                                  );
-                                }
-                                final courtData = data.courts.firstWhere(
-                                  (c) => c.courtId == widget.assignedCourt,
-                                  orElse: () => hk.CourtDayStatus(
-                                    courtId: widget.assignedCourt,
-                                    date: _dateStr,
-                                    shifts: [],
-                                  ),
-                                );
-                                final shiftData = courtData.shifts.firstWhere(
-                                  (s) => s.shift == _currentShift,
-                                  orElse: () => hk.ShiftStatus(
-                                    shift: _currentShift,
-                                    total: hk.kTasksPerShift,
-                                    done: 0,
-                                    submitted: false,
-                                    tasks: [],
-                                  ),
-                                );
-                                return _HousekeepingCard(
-                                  shift: _currentShift,
-                                  courtName:
-                                      realCourtName, // ✅ FIX: Send real name
-                                  done: shiftData.done,
-                                  total: shiftData.total == 0
-                                      ? hk.kTasksPerShift
-                                      : shiftData.total,
-                                  onTap: () {},
-                                );
-                              },
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-
-                          _StaggerRow(
-                            anim: _stagger(2),
-                            child: cmpAsync.when(
-                              loading: () => const _SkeletonCard(height: 80),
-                              error: (_, __) => _ErrorCard(
-                                label: 'Complaints',
-                                onRetry: () => ref.invalidate(
-                                  _staffComplaintsProvider(
-                                    widget.assignedCourt,
-                                  ),
-                                ),
-                              ),
-                              data: (complaints) => _ComplaintsCard(
-                                openCount: complaints.length,
-                                courtId: widget.assignedCourt,
-                                courtName:
-                                    realCourtName, // ✅ FIX: Send real name
-                                onViewTap: () => _openComplaints(
-                                  realCourtName,
-                                ), // Pass name to next screen
-                              ),
-                            ),
-                          ),
-                        ],
+                    child: ListView(
+                      controller: _scrollCtrl,
+                      physics: const BouncingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
                       ),
+                      padding: EdgeInsets.fromLTRB(20, 24, 20, navClearance),
+                      children: [
+                        // 1) Attendance hub
+                        _SectionLabel(
+                          title: "Today's Shift",
+                          trailing: _ShiftClock(shift: _currentShift, now: _now),
+                        ),
+                        const SizedBox(height: 12),
+                        _StaggerRow(
+                          anim: _stagger(0),
+                          child: _buildAttendance(attendance),
+                        ),
+                        const SizedBox(height: 26),
+
+                        // 2) Housekeeping progress
+                        _SectionLabel(title: 'Housekeeping'),
+                        const SizedBox(height: 12),
+                        _StaggerRow(
+                          anim: _stagger(1),
+                          child: hkAsync.when(
+                            loading: () => const _SkeletonCard(height: 130),
+                            error: (_, __) => _ErrorCard(
+                              label: 'Housekeeping',
+                              onRetry: () =>
+                                  ref.invalidate(_staffHkProvider(_dateStr)),
+                            ),
+                            data: (data) {
+                              final shiftData = _resolveShift(data);
+                              return _HousekeepingCard(
+                                shift: _currentShift,
+                                courtName: realCourtName,
+                                done: shiftData.done,
+                                total: shiftData.total == 0
+                                    ? hk.kTasksPerShift
+                                    : shiftData.total,
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  context.go('/staff/checklist');
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 26),
+
+                        // 3) Court feedback (replaces complaints)
+                        _SectionLabel(title: 'Court Voice'),
+                        const SizedBox(height: 12),
+                        _StaggerRow(
+                          anim: _stagger(2),
+                          child: feedbackAsync.when(
+                            loading: () => const _SkeletonCard(height: 120),
+                            error: (_, __) => _ErrorCard(
+                              label: 'Feedback',
+                              onRetry: () => ref
+                                  .read(courtFeedbackNotifierProvider.notifier)
+                                  .fetch(isRefresh: true),
+                            ),
+                            data: (data) => _FeedbackCard(
+                              analytics: data.analytics,
+                              courtName: realCourtName,
+                              onTap: () => _openFeedback(realCourtName),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -499,9 +517,131 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
       ),
     );
   }
+
+  hk.ShiftStatus _resolveShift(hk.FullStatusResponse? data) {
+    if (data == null) {
+      return hk.ShiftStatus(
+        shift: _currentShift,
+        total: hk.kTasksPerShift,
+        done: 0,
+        submitted: false,
+        tasks: const [],
+      );
+    }
+    final courtData = data.courts.firstWhere(
+      (c) => c.courtId == widget.assignedCourt,
+      orElse: () => hk.CourtDayStatus(
+        courtId: widget.assignedCourt,
+        date: _dateStr,
+        shifts: const [],
+      ),
+    );
+    return courtData.shifts.firstWhere(
+      (s) => s.shift == _currentShift,
+      orElse: () => hk.ShiftStatus(
+        shift: _currentShift,
+        total: hk.kTasksPerShift,
+        done: 0,
+        submitted: false,
+        tasks: const [],
+      ),
+    );
+  }
+
+  Widget _buildAttendance(AttendanceState attendance) {
+    if (attendance.loadingToday ||
+        attendance.status == AttendanceStatus.loading) {
+      return const _SkeletonCard(height: 150);
+    }
+    if (attendance.isCheckedIn) {
+      return _ActiveShiftCard(
+        checkInTime: _fmtTime(attendance.today.checkInTime),
+        checkInAt: attendance.today.checkInTime,
+        address: attendance.today.checkInAddress ?? 'Location saved',
+        checkedOut: attendance.isCheckedOut,
+        checkOutTime: _fmtTime(attendance.today.checkOutTime),
+        durationLabel: _durationLabel(attendance.today.workDurationMinutes),
+        onEndShift:
+            attendance.isShiftActive ? () => _startCheckOut() : null,
+      );
+    }
+    return _MarkAttendanceCard(onTap: _startCheckIn);
+  }
 }
 
-// ─── _StaggerRow ──────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _monthsShort = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+String _prettyDate(DateTime d) =>
+    '${_weekdays[d.weekday - 1]}, ${d.day} ${_monthsShort[d.month - 1]}';
+
+// ─── Header tag chip ───────────────────────────────────────────────────────────
+class _HeaderTag extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _HeaderTag({required this.icon, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color == _white ? _white.withOpacity(0.85) : color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Section Label ─────────────────────────────────────────────────────────────
+class _SectionLabel extends StatelessWidget {
+  final String title;
+  final Widget? trailing;
+  const _SectionLabel({required this.title, this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+            color: _black,
+            letterSpacing: -0.3,
+          ),
+        ),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
+}
+
+// ─── Stagger wrapper ───────────────────────────────────────────────────────────
 class _StaggerRow extends StatelessWidget {
   final Animation<double> anim;
   final Widget child;
@@ -520,108 +660,37 @@ class _StaggerRow extends StatelessWidget {
   );
 }
 
-// ─── Shift Card ───────────────────────────────────────────────────────────────
-class _ShiftCard extends StatelessWidget {
+// ─── Shift clock pill (header trailing) ─────────────────────────────────────────
+class _ShiftClock extends StatelessWidget {
   final hk.Shift shift;
   final DateTime now;
-  const _ShiftCard({required this.shift, required this.now});
+  const _ShiftClock({required this.shift, required this.now});
 
   @override
   Widget build(BuildContext context) {
-    final range = _shiftRanges[shift]!;
-
-    final DateTime endTime = switch (shift) {
-      hk.Shift.night =>
-        now.hour >= 16
-            ? DateTime(now.year, now.month, now.day + 1, 0, 0)
-            : DateTime(now.year, now.month, now.day, 0, 0),
-      _ => DateTime(now.year, now.month, now.day, range.end, 0),
+    final (label, icon) = switch (shift) {
+      hk.Shift.morning => ('Morning', Icons.wb_sunny_rounded),
+      hk.Shift.day => ('Day', Icons.light_mode_rounded),
+      hk.Shift.night => ('Night', Icons.nights_stay_rounded),
     };
-
-    final remaining = endTime.difference(now);
-    final isOver = remaining.isNegative;
-
-    final String timeLeft = isOver
-        ? 'Shift ended'
-        : remaining.inHours > 0
-        ? '${remaining.inHours}h ${remaining.inMinutes.remainder(60)}m left'
-        : '${remaining.inMinutes}m left';
-
-    final IconData shiftIcon = switch (shift) {
-      hk.Shift.morning => Icons.wb_sunny_rounded,
-      hk.Shift.day => Icons.light_mode_rounded,
-      hk.Shift.night => Icons.nights_stay_rounded,
-    };
-    final String shiftLabel = switch (shift) {
-      hk.Shift.morning => 'MORNING SHIFT',
-      hk.Shift.day => 'DAY SHIFT',
-      hk.Shift.night => 'NIGHT SHIFT',
-    };
-    final String shiftTime = switch (shift) {
-      hk.Shift.morning => '06:00 – 12:00',
-      hk.Shift.day => '12:00 – 16:00',
-      hk.Shift.night => '16:00 – 00:00',
-    };
-
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: _black,
-        borderRadius: BorderRadius.circular(16),
+        color: _warn.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _warn.withOpacity(0.25)),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: _white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(shiftIcon, size: 20, color: _warn),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  shiftLabel,
-                  style: GoogleFonts.antonSc(
-                    fontSize: 15,
-                    color: _white,
-                    letterSpacing: 0.5,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  shiftTime,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: _grey,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: isOver ? _grey.withOpacity(0.12) : _ok.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isOver ? _grey.withOpacity(0.2) : _ok.withOpacity(0.3),
-              ),
-            ),
-            child: Text(
-              timeLeft,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: isOver ? _grey : _ok,
-              ),
+          Icon(icon, size: 13, color: _warn),
+          const SizedBox(width: 5),
+          Text(
+            '$label Shift',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: _warn,
             ),
           ),
         ],
@@ -630,10 +699,405 @@ class _ShiftCard extends StatelessWidget {
   }
 }
 
+// ─── Mark Attendance Card ────────────────────────────────────────────────────
+class _MarkAttendanceCard extends StatefulWidget {
+  final VoidCallback onTap;
+  const _MarkAttendanceCard({required this.onTap});
+
+  @override
+  State<_MarkAttendanceCard> createState() => _MarkAttendanceCardState();
+}
+
+class _MarkAttendanceCardState extends State<_MarkAttendanceCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseCtrl;
+  bool _pressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.98 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: _black,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: _black.withOpacity(0.18),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              AnimatedBuilder(
+                animation: _pulseCtrl,
+                builder: (context, child) => Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: _blue.withOpacity(0.10 + (_pulseCtrl.value * 0.10)),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.fingerprint_rounded,
+                    color: _blue,
+                    size: 44,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'MARK ATTENDANCE',
+                style: GoogleFonts.antonSc(
+                  fontSize: 26,
+                  color: _white,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Secure check-in via live selfie & location',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: Colors.white54,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 22),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _white,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.camera_alt_rounded, size: 16, color: _black),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Start Check-in',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: _black,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Active / Completed Shift Card ────────────────────────────────────────────
+class _ActiveShiftCard extends StatelessWidget {
+  final String checkInTime;
+  final DateTime? checkInAt;
+  final String address;
+  final bool checkedOut;
+  final String checkOutTime;
+  final String? durationLabel;
+  final VoidCallback? onEndShift;
+
+  const _ActiveShiftCard({
+    required this.checkInTime,
+    required this.address,
+    this.checkInAt,
+    this.checkedOut = false,
+    this.checkOutTime = '--:--',
+    this.durationLabel,
+    this.onEndShift,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accent = checkedOut ? _blue : _ok;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAFAFA),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFEDEDED), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration:
+                          BoxDecoration(color: accent, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      checkedOut ? 'SHIFT COMPLETED' : 'SHIFT ACTIVE',
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Center(
+            child: Column(
+              children: [
+                if (!checkedOut)
+                  _LiveShiftTimer(since: checkInAt)
+                else
+                  Text(
+                    durationLabel ?? '--',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 46,
+                      color: _black,
+                      height: 1.0,
+                    ),
+                  ),
+                const SizedBox(height: 6),
+                Text(
+                  checkedOut
+                      ? 'Total time on shift'
+                      : 'On shift since $checkInTime',
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    color: _grey,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (checkedOut) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: _TimeBlock(
+                    icon: Icons.login_rounded,
+                    label: 'Checked In',
+                    value: checkInTime,
+                    color: _ok,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TimeBlock(
+                    icon: Icons.logout_rounded,
+                    label: 'Checked Out',
+                    value: checkOutTime,
+                    color: _blue,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+          const Divider(height: 1, color: Color(0xFFEDEDED)),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Icon(Icons.location_on_rounded, size: 15, color: _grey),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  address,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: _grey,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (onEndShift != null) ...[
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: onEndShift,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: _black,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.logout_rounded, size: 16, color: _white),
+                      const SizedBox(width: 8),
+                      Text(
+                        'End Shift',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TimeBlock extends StatelessWidget {
+  final IconData icon;
+  final String label, value;
+  final Color color;
+  const _TimeBlock({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: _white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFFEDEDED)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                color: _grey,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: _black,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─── Live ticking timer ───────────────────────────────────────────────────────
+class _LiveShiftTimer extends StatefulWidget {
+  final DateTime? since;
+  const _LiveShiftTimer({this.since});
+
+  @override
+  State<_LiveShiftTimer> createState() => _LiveShiftTimerState();
+}
+
+class _LiveShiftTimerState extends State<_LiveShiftTimer> {
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final since = widget.since;
+    String txt = '00:00:00';
+    if (since != null) {
+      final d = DateTime.now().difference(since);
+      final h = d.inHours.toString().padLeft(2, '0');
+      final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+      final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+      txt = '$h:$m:$s';
+    }
+    return Text(
+      txt,
+      style: GoogleFonts.antonSc(fontSize: 46, color: _black, height: 1.0),
+    );
+  }
+}
+
 // ─── Housekeeping Card ────────────────────────────────────────────────────────
 class _HousekeepingCard extends StatefulWidget {
   final hk.Shift shift;
-  final String courtName; // ✅ FIX: int court -> String courtName
+  final String courtName;
   final int done, total;
   final VoidCallback onTap;
 
@@ -651,6 +1115,12 @@ class _HousekeepingCard extends StatefulWidget {
 
 class _HousekeepingCardState extends State<_HousekeepingCard> {
   bool _pressed = false;
+
+  String _shiftLbl(hk.Shift s) => switch (s) {
+    hk.Shift.morning => 'Morning',
+    hk.Shift.day => 'Day',
+    hk.Shift.night => 'Night',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -677,7 +1147,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
             color: _white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: allDone ? _ok.withOpacity(0.4) : _border,
+              color: allDone ? _ok.withOpacity(0.4) : const Color(0xFFEDEDED),
               width: 1.5,
             ),
           ),
@@ -707,7 +1177,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Housekeeping',
+                          'Shift Tasks',
                           style: GoogleFonts.inter(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
@@ -715,7 +1185,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                           ),
                         ),
                         Text(
-                          '${widget.courtName} · ${_shiftLbl(widget.shift)} Shift', // ✅ FIX: courtName apply
+                          '${widget.courtName} · ${_shiftLbl(widget.shift)} Shift',
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             color: _grey,
@@ -770,7 +1240,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                   Row(
                     children: [
                       Text(
-                        allDone ? 'Completed' : 'Open Tasks',
+                        allDone ? 'Completed' : 'Open Checklist',
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -795,187 +1265,189 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
   }
 }
 
-// ─── Complaints Card ──────────────────────────────────────────────────────────
-class _ComplaintsCard extends StatefulWidget {
-  final int openCount, courtId;
-  final String courtName; // ✅ FIX: Added courtName
-  final VoidCallback onViewTap;
+// ─── Court Feedback Card (replaces complaints) ──────────────────────────────────
+class _FeedbackCard extends StatefulWidget {
+  final CourtFeedbackAnalytics? analytics;
+  final String courtName;
+  final VoidCallback onTap;
 
-  const _ComplaintsCard({
-    required this.openCount,
-    required this.courtId,
+  const _FeedbackCard({
+    required this.analytics,
     required this.courtName,
-    required this.onViewTap,
+    required this.onTap,
   });
 
   @override
-  State<_ComplaintsCard> createState() => _ComplaintsCardState();
+  State<_FeedbackCard> createState() => _FeedbackCardState();
 }
 
-class _ComplaintsCardState extends State<_ComplaintsCard> {
+class _FeedbackCardState extends State<_FeedbackCard> {
   bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
-    final hasOpen = widget.openCount > 0;
+    final a = widget.analytics;
+    final avg = a?.avgCourtRating;
+    final total = a?.totalCount ?? 0;
+    final hasData = total > 0;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: hasOpen ? _danger.withOpacity(0.3) : _border,
-          width: 1.5,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: (hasOpen ? _danger : _ok).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(
-                  Icons.report_problem_rounded,
-                  size: 18,
-                  color: hasOpen ? _danger : _ok,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Complaints',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: _black,
-                      ),
-                    ),
-                    Text(
-                      widget.courtName, // ✅ FIX: Real court name showing here
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        color: _grey,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                transitionBuilder: (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.3),
-                      end: Offset.zero,
-                    ).animate(anim),
-                    child: child,
-                  ),
-                ),
-                child: Container(
-                  key: ValueKey(
-                    'complaints_badge_${widget.courtId}_${widget.openCount}',
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: (hasOpen ? _danger : _ok).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: (hasOpen ? _danger : _ok).withOpacity(0.3),
-                    ),
-                  ),
-                  child: Text(
-                    hasOpen ? '${widget.openCount} open' : 'All clear',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: hasOpen ? _danger : _ok,
-                    ),
-                  ),
-                ),
+    return GestureDetector(
+      onTapDown: (_) {
+        HapticFeedback.selectionClick();
+        setState(() => _pressed = true);
+      },
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: _black,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: _black.withOpacity(0.15),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          GestureDetector(
-            onTapDown: (_) {
-              HapticFeedback.selectionClick();
-              setState(() => _pressed = true);
-            },
-            onTapUp: (_) {
-              setState(() => _pressed = false);
-              widget.onViewTap();
-            },
-            onTapCancel: () => setState(() => _pressed = false),
-            child: AnimatedScale(
-              scale: _pressed ? 0.96 : 1.0,
-              duration: const Duration(milliseconds: 120),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                decoration: BoxDecoration(
-                  color: _black,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.list_rounded, size: 15, color: _white),
-                    const SizedBox(width: 6),
-                    Text(
-                      'View Complaints',
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: _white,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _blue.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: const Icon(
+                      Icons.rate_review_rounded,
+                      size: 18,
+                      color: _blue,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Guest Feedback',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: _white,
+                          ),
+                        ),
+                        Text(
+                          hasData
+                              ? '$total ${total == 1 ? 'review' : 'reviews'} for your court'
+                              : 'No reviews yet',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: Colors.white54,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 14,
+                    color: Colors.white38,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    avg != null ? avg.toStringAsFixed(1) : '—',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 40,
+                      color: _white,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: List.generate(5, (i) {
+                        final filled = avg != null && i < avg.round();
+                        return Icon(
+                          filled
+                              ? Icons.star_rounded
+                              : Icons.star_outline_rounded,
+                          size: 15,
+                          color: filled ? _warn : Colors.white24,
+                        );
+                      }),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (a != null && hasData)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (a.isGrowing ? _ok : _danger).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        a.isGrowing
+                            ? '+${a.wowGrowth.toStringAsFixed(0)}%'
+                            : '${a.wowGrowth.toStringAsFixed(0)}%',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: a.isGrowing ? _ok : _danger,
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-// ─── Skeleton Card ────────────────────────────────────────────────────────────
+// ─── Skeleton + Error ──────────────────────────────────────────────────────────
 class _SkeletonCard extends StatefulWidget {
   final double height;
   const _SkeletonCard({required this.height});
+
   @override
   State<_SkeletonCard> createState() => _SkeletonCardState();
 }
 
 class _SkeletonCardState extends State<_SkeletonCard>
     with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _anim;
+  late final AnimationController _ctrl;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
   }
 
   @override
@@ -985,65 +1457,65 @@ class _SkeletonCardState extends State<_SkeletonCard>
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _anim,
-    builder: (_, __) => Container(
-      height: widget.height,
-      decoration: BoxDecoration(
-        color: Color.lerp(
-          const Color(0xFFF0F0F0),
-          const Color(0xFFE0E0E0),
-          _anim.value,
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Container(
+        height: widget.height,
+        decoration: BoxDecoration(
+          color: Color.lerp(
+            const Color(0xFFF0F0F0),
+            const Color(0xFFE3E3E3),
+            _ctrl.value,
+          ),
+          borderRadius: BorderRadius.circular(18),
         ),
-        borderRadius: BorderRadius.circular(16),
       ),
-    ),
-  );
+    );
+  }
 }
 
-// ─── Error Card ───────────────────────────────────────────────────────────────
 class _ErrorCard extends StatelessWidget {
   final String label;
   final VoidCallback onRetry;
   const _ErrorCard({required this.label, required this.onRetry});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: _danger.withOpacity(0.05),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: _danger.withOpacity(0.2)),
-    ),
-    child: Row(
-      children: [
-        Icon(Icons.wifi_off_rounded, color: _danger.withOpacity(0.6), size: 20),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            'Could not load $label',
-            style: GoogleFonts.inter(fontSize: 13, color: _danger),
-          ),
-        ),
-        GestureDetector(
-          onTap: onRetry,
-          child: Text(
-            'Retry',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: _danger,
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _danger.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _danger.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, size: 18, color: _danger),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Couldn't load $label",
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: _danger,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+          GestureDetector(
+            onTap: onRetry,
+            child: Text(
+              'Retry',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: _danger,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-String _shiftLbl(hk.Shift s) => const {
-  hk.Shift.morning: 'Morning',
-  hk.Shift.day: 'Day',
-  hk.Shift.night: 'Night',
-}[s]!;
