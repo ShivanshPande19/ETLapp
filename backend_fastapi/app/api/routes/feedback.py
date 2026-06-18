@@ -68,7 +68,6 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
     total = len(feedbacks)
     court_ratings = [f.court_rating for f in feedbacks if f.court_rating]
     outlet_ratings = [f.outlet_rating for f in feedbacks if f.outlet_rating]
-    all_ratings = court_ratings + outlet_ratings
 
     # ✅ Per-star distribution of outlet ratings (index 0 => 1★ ... index 4 => 5★)
     distribution = [0, 0, 0, 0, 0]
@@ -94,8 +93,17 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
         total_count=total,
         avg_court_rating=_avg(court_ratings),
         avg_outlet_rating=_avg(outlet_ratings),
-        five_star_count=sum(1 for r in all_ratings if r == 5),
-        one_star_count=sum(1 for r in all_ratings if r == 1),
+        # ✅ Count per FEEDBACK (any 5★/1★ rating), not per rating-instance — so
+        # these stay consistent with total_count (a single feedback with both a
+        # court 5★ and an outlet 5★ counts once, not twice).
+        five_star_count=sum(
+            1 for f in feedbacks
+            if f.court_rating == 5 or f.outlet_rating == 5
+        ),
+        one_star_count=sum(
+            1 for f in feedbacks
+            if f.court_rating == 1 or f.outlet_rating == 1
+        ),
         this_week_count=this_week,
         last_week_count=last_week,
         rating_distribution=distribution,

@@ -7,15 +7,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../data/courts_repository.dart';
 import '../../sales/data/sales_repository.dart';
-import '../../complaints/data/complaints_repository.dart';
-import '../../complaints/domain/complaint_model.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart';
 
-// ✅ NEW: api_client (dioProvider) + new maintenance model
+// ✅ api_client (dioProvider) + maintenance model + feedback model
 import '../../../core/network/api_client.dart';
 import '../../maintenance/domain/maintenance_notifier.dart'
     show MaintenanceIssueModel;
+import '../../feedbacks/domain/etl_feedback_notifier.dart'
+    show EtlFeedbackModel;
 
 // ─── Palette (matches app exactly) ───────────────────────────────────────────
 
@@ -38,9 +38,13 @@ final _courtSalesProvider = FutureProvider.autoDispose
           .getSalesSummary(courtId: id, period: 'yesterday');
     });
 
-final _courtComplaintsProvider = FutureProvider.autoDispose
-    .family<List<ComplaintModel>, int>((ref, id) async {
-      return ref.read(complaintsRepoProvider).getComplaints(courtId: id);
+final _courtFeedbackProvider = FutureProvider.autoDispose
+    .family<List<EtlFeedbackModel>, int>((ref, id) async {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get('/feedback/court/$id');
+      return (res.data as List? ?? [])
+          .map((e) => EtlFeedbackModel.fromJson(e as Map<String, dynamic>))
+          .toList();
     });
 
 // ✅ NEW: New backend format {items: [...]} + JWT-authenticated dio
@@ -142,7 +146,7 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
 
   void _invalidateAll() {
     ref.invalidate(_courtSalesProvider(widget.court.id));
-    ref.invalidate(_courtComplaintsProvider(widget.court.id));
+    ref.invalidate(_courtFeedbackProvider(widget.court.id));
     ref.invalidate(_courtMaintenanceProvider(widget.court.id));
     ref.invalidate(_courtHkProvider(widget.court.id));
   }
@@ -157,19 +161,16 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
   @override
   Widget build(BuildContext context) {
     final salesAsync = ref.watch(_courtSalesProvider(widget.court.id));
-    final complaintsAsync = ref.watch(
-      _courtComplaintsProvider(widget.court.id),
+    final feedbackAsync = ref.watch(
+      _courtFeedbackProvider(widget.court.id),
     );
     final maintenanceAsync = ref.watch(
       _courtMaintenanceProvider(widget.court.id),
     );
     final hkAsync = ref.watch(_courtHkProvider(widget.court.id));
 
-    final openComplaints =
-        complaintsAsync
-            .whenData((l) => l.where((c) => c.status == 'open').length)
-            .value ??
-        0;
+    final feedbackCount =
+        feedbackAsync.whenData((l) => l.length).value ?? 0;
 
     // ✅ FIX: "Open" = anything not CLOSED (new status system)
     final openMaintenance =
@@ -188,7 +189,7 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Header (dark) ────────────────────────────────
-              _buildHeader(openComplaints, openMaintenance),
+              _buildHeader(feedbackCount, openMaintenance),
 
               // ── White card area ──────────────────────────────
               Expanded(
@@ -237,30 +238,26 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                         ),
                         const SizedBox(height: 24),
 
-                        // ── Complaints ─────────────────────────
+                        // ── Feedbacks ──────────────────────────
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            _sectionTitle('Complaints'),
-                            if (openComplaints > 0)
-                              _badge('$openComplaints open', _danger),
+                            _sectionTitle('Feedbacks'),
+                            if (feedbackCount > 0)
+                              _badge('$feedbackCount total', _blue),
                           ],
                         ),
                         const SizedBox(height: 10),
-                        complaintsAsync.when(
+                        feedbackAsync.when(
                           loading: () => _skeletonCard(110),
                           error: (_, __) =>
-                              _errorCard('Complaints unavailable'),
+                              _errorCard('Feedbacks unavailable'),
                           data: (list) => list.isEmpty
                               ? _emptyCard(
-                                  Icons.chat_bubble_outline_rounded,
-                                  'No complaints for this court',
+                                  Icons.reviews_outlined,
+                                  'No feedback for this court yet',
                                 )
-                              : _ComplaintsSection(
-                                  items: list,
-                                  onStatusChange: (id, s) =>
-                                      _updateComplaint(id, s),
-                                ),
+                              : _FeedbackSection(items: list),
                         ),
                         const SizedBox(height: 24),
 
@@ -308,7 +305,7 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
   }
 
   // ── Header ────────────────────────────────────────────────────────────────
-  Widget _buildHeader(int openComplaints, int openMaintenance) {
+  Widget _buildHeader(int feedbackCount, int openMaintenance) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       child: Column(
@@ -395,9 +392,9 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
           Row(
             children: [
               _QuickPill(
-                label: 'Open Complaints',
-                value: '$openComplaints',
-                color: openComplaints > 0 ? _danger : _ok,
+                label: 'Feedbacks',
+                value: '$feedbackCount',
+                color: _blue,
               ),
               const SizedBox(width: 8),
               _QuickPill(
@@ -410,20 +407,6 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
         ],
       ),
     );
-  }
-
-  // ── Status update handler (complaints only) ───────────────────────────────
-  Future<void> _updateComplaint(int id, String newStatus) async {
-    try {
-      await ref.read(complaintsRepoProvider).updateStatus(id, newStatus);
-      ref.invalidate(_courtComplaintsProvider(widget.court.id));
-      HapticFeedback.mediumImpact();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to update — please retry')),
-      );
-    }
   }
 
   // ── Utility widgets ───────────────────────────────────────────────────────
@@ -790,43 +773,6 @@ class _HkCard extends StatelessWidget {
   );
 }
 
-// ─── Complaints Section ───────────────────────────────────────────────────────
-
-class _ComplaintsSection extends StatelessWidget {
-  final List<ComplaintModel> items;
-  final void Function(int id, String status) onStatusChange;
-  const _ComplaintsSection({required this.items, required this.onStatusChange});
-
-  @override
-  Widget build(BuildContext context) {
-    final open = items.where((c) => c.status == 'open').toList();
-    final inProg = items.where((c) => c.status == 'in_progress').toList();
-    final resolved = items.where((c) => c.status == 'resolved').toList();
-    final sorted = [...open, ...inProg, ...resolved];
-
-    return Column(
-      children: [
-        _SummaryBar(
-          total: items.length,
-          open: open.length,
-          inProg: inProg.length,
-          resolved: resolved.length,
-        ),
-        const SizedBox(height: 10),
-        ...sorted.map(
-          (c) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _ComplaintTile(
-              item: c,
-              onStatusChange: (s) => onStatusChange(c.id, s),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 // ─── Maintenance Section (read-only summary) ─────────────────────────────────
 // ✅ NEW: New status system, actions Maintenance tab mein hote hain
 
@@ -1056,24 +1002,110 @@ class _Stat extends StatelessWidget {
   );
 }
 
-// ─── Complaint Tile (matches complaints_screen.dart exactly) ─────────────────
+// ─── Feedback Section (court-level, premium) ─────────────────────────────────
 
-class _ComplaintTile extends StatelessWidget {
-  final ComplaintModel item;
-  final void Function(String) onStatusChange;
-  const _ComplaintTile({required this.item, required this.onStatusChange});
+Color _ratingColor(int? r) {
+  if (r == null) return _grey;
+  if (r >= 4) return _ok;
+  if (r == 3) return _warn;
+  return _danger;
+}
+
+class _FeedbackSection extends StatelessWidget {
+  final List<EtlFeedbackModel> items;
+  const _FeedbackSection({required this.items});
 
   @override
   Widget build(BuildContext context) {
-    final cat = _catMeta(item.category);
-    final status = _statusMeta(item.status);
+    final rated = items
+        .map((f) => f.outletRating ?? f.courtRating)
+        .whereType<int>()
+        .toList();
+    final avg = rated.isEmpty
+        ? 0.0
+        : rated.reduce((a, b) => a + b) / rated.length;
+    final five = items
+        .where((f) => f.outletRating == 5 || f.courtRating == 5)
+        .length;
+    final one = items
+        .where((f) => f.outletRating == 1 || f.courtRating == 1)
+        .length;
+
+    final sorted = [...items]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final visible = sorted.take(5).toList();
+
+    return Column(
+      children: [
+        // Premium dark summary bar
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _black,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            children: [
+              _Stat('Total', '${items.length}', _white),
+              _fbDiv(),
+              _Stat('Avg', avg > 0 ? avg.toStringAsFixed(1) : '—', _warn),
+              _fbDiv(),
+              _Stat('5★', '$five', _ok),
+              _fbDiv(),
+              _Stat('1★', '$one', _danger),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...visible.map(
+          (f) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _FeedbackTile(item: f),
+          ),
+        ),
+        if (sorted.length > 5)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              '+ ${sorted.length - 5} more in Feedbacks tab',
+              style: GoogleFonts.inter(fontSize: 12, color: _grey),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _fbDiv() => Container(
+    width: 1,
+    height: 34,
+    color: _white.withOpacity(0.1),
+    margin: const EdgeInsets.symmetric(horizontal: 8),
+  );
+}
+
+class _FeedbackTile extends StatelessWidget {
+  final EtlFeedbackModel item;
+  const _FeedbackTile({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final rating = item.outletRating ?? item.courtRating;
+    final rColor = _ratingColor(rating);
+    final comment =
+        (item.outletComments != null &&
+            item.outletComments!.trim().isNotEmpty)
+        ? item.outletComments!
+        : (item.courtComments != null &&
+              item.courtComments!.trim().isNotEmpty)
+        ? item.courtComments!
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: _white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: status.color.withOpacity(0.2), width: 1.5),
+        border: Border.all(color: rColor.withOpacity(0.2), width: 1.5),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -1091,11 +1123,16 @@ class _ComplaintTile extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: cat.color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(11),
+                  color: rColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
                 ),
                 child: Center(
-                  child: Text(cat.emoji, style: const TextStyle(fontSize: 19)),
+                  child: Text(
+                    item.customerName.isNotEmpty
+                        ? item.customerName[0].toUpperCase()
+                        : '?',
+                    style: GoogleFonts.antonSc(fontSize: 16, color: rColor),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1104,97 +1141,67 @@ class _ComplaintTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      cat.label,
+                      item.customerName,
                       style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: _black,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      '${_fmtTime(item.createdAt)}',
+                      _fmtTime(item.createdAt),
                       style: GoogleFonts.inter(fontSize: 12, color: _grey),
                     ),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: status.color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  status.label,
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: status.color,
+              if (rating != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: rColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.star_rounded, size: 13, color: rColor),
+                      const SizedBox(width: 3),
+                      Text(
+                        '$rating',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: rColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 10),
-          Divider(color: Colors.grey.shade100, height: 1),
-          const SizedBox(height: 10),
-          Text(
-            item.description,
-            style: GoogleFonts.inter(fontSize: 13, color: _black, height: 1.5),
-          ),
-          if (item.status != 'resolved') ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                if (item.status == 'open') ...[
-                  _ActionBtn(
-                    'In Progress',
-                    _warn,
-                    () => onStatusChange('in_progress'),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                _ActionBtn('Resolve', _ok, () => onStatusChange('resolved')),
-              ],
+          if (comment != null) ...[
+            const SizedBox(height: 10),
+            Divider(color: Colors.grey.shade100, height: 1),
+            const SizedBox(height: 10),
+            Text(
+              '"$comment"',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: _black,
+                height: 1.5,
+                fontStyle: FontStyle.italic,
+              ),
             ),
           ],
         ],
       ),
     );
   }
-}
-
-// ─── Action Button ────────────────────────────────────────────────────────────
-
-class _ActionBtn extends StatelessWidget {
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  const _ActionBtn(this.label, this.color, this.onTap);
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: () {
-      HapticFeedback.selectionClick();
-      onTap();
-    },
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.25)),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    ),
-  );
 }
 
 // ─── App Card ─────────────────────────────────────────────────────────────────
@@ -1224,32 +1231,6 @@ class _AppCard extends StatelessWidget {
 }
 
 // ─── Helper classes ───────────────────────────────────────────────────────────
-
-class _CatMeta {
-  final String emoji, label;
-  final Color color;
-  const _CatMeta(this.emoji, this.label, this.color);
-}
-
-class _StatusMetaD {
-  final String label;
-  final Color color;
-  const _StatusMetaD(this.label, this.color);
-}
-
-_CatMeta _catMeta(String cat) => switch (cat) {
-  'food' => const _CatMeta('🍔', 'Food Quality', _blue),
-  'staff' => const _CatMeta('🧑', 'Staff Behaviour', _danger),
-  'cleanliness' => const _CatMeta('🧹', 'Cleanliness', _purple),
-  _ => const _CatMeta('📋', 'Other Issue', _grey),
-};
-
-_StatusMetaD _statusMeta(String s) => switch (s) {
-  'open' => const _StatusMetaD('Open', _danger),
-  'in_progress' => const _StatusMetaD('In Progress', _warn),
-  'resolved' => const _StatusMetaD('Resolved', _ok),
-  _ => const _StatusMetaD('Unknown', _grey),
-};
 
 String _fmtTime(DateTime? dt) {
   if (dt == null) return '—';

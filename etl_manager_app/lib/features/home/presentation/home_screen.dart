@@ -1254,8 +1254,15 @@ class _CourtRowState extends State<_CourtRow>
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
               color: _white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _border, width: 1.5),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFECECEC), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             child: Row(
               children: [
@@ -1265,7 +1272,7 @@ class _CourtRowState extends State<_CourtRow>
                   decoration: BoxDecoration(
                     color: _lightGrey,
                     shape: BoxShape.circle,
-                    border: Border.all(color: _border.withOpacity(0.12)),
+                    border: Border.all(color: const Color(0xFFECECEC)),
                   ),
                   child: const Icon(
                     Icons.storefront_rounded,
