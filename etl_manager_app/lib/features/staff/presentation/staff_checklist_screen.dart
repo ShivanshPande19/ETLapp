@@ -8,9 +8,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../domain/housekeeping_notifier.dart';
 import '../domain/housekeeping_models.dart' as hk;
+import '../data/housekeeping_repository.dart';
 
 // ✅ NEW IMPORT: DB se real court name laane ke liye
 import '../../courts/domain/courts_notifier.dart';
+
+// ✅ Read-only status for a specific (past) date — used by the date browser.
+final _dayStatusProvider = FutureProvider.autoDispose
+    .family<hk.FullStatusResponse?, String>((ref, date) async {
+      return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
+    });
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
@@ -133,6 +140,29 @@ String _shiftTimeRange(hk.Shift shift) => const {
   hk.Shift.night: '4:00 PM – 12:00 AM',
 }[shift]!;
 
+// ─── Date helpers (date browser) ──────────────────────────────────────────────
+
+const _kWeekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _kMonthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+String _ymd(DateTime d) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${d.year}-${two(d.month)}-${two(d.day)}';
+}
+
+bool _isSameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+String _prettyDay(DateTime d) {
+  final now = DateTime.now();
+  if (_isSameDay(d, now)) return 'Today';
+  if (_isSameDay(d, now.subtract(const Duration(days: 1)))) return 'Yesterday';
+  return '${_kWeekdayNames[d.weekday - 1]}, ${d.day} ${_kMonthNames[d.month - 1]}';
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 class StaffChecklistScreen extends ConsumerStatefulWidget {
@@ -147,6 +177,11 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
+
+  // ✅ Date browser — defaults to today; can navigate to past dates (read-only).
+  DateTime _selectedDate = DateTime.now();
+
+  bool get _isToday => _isSameDay(_selectedDate, DateTime.now());
 
   @override
   void initState() {
@@ -585,6 +620,147 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
+  // ── Date browser controls ──────────────────────────────────────────────────
+
+  void _changeDate(int deltaDays) {
+    final next = _selectedDate.add(Duration(days: deltaDays));
+    // Block navigation into the future.
+    if (next.isAfter(DateTime.now())) return;
+    HapticFeedback.selectionClick();
+    setState(() => _selectedDate = next);
+  }
+
+  void _goToday() {
+    if (_isToday) return;
+    HapticFeedback.selectionClick();
+    setState(() => _selectedDate = DateTime.now());
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      builder: (ctx, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: _white,
+            onPrimary: _black,
+            surface: _surface,
+            onSurface: _white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      HapticFeedback.selectionClick();
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  // ── Read-only history list (for past dates) ────────────────────────────────
+
+  Widget _buildHistoryList(hk.Shift shift, double bottomPad) {
+    final hkState = ref.watch(housekeepingNotifierProvider);
+    final courtId = hkState.courtId;
+    final dateStr = _ymd(_selectedDate);
+    final async = ref.watch(_dayStatusProvider(dateStr));
+    final dailyTasks = _tasksForShift(shift);
+
+    return async.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.only(top: 80),
+        child: Center(
+          child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+        ),
+      ),
+      error: (_, __) => _HistoryMessage(
+        icon: Icons.wifi_off_rounded,
+        title: 'Could not load',
+        subtitle: 'Switch dates and try again.',
+      ),
+      data: (status) {
+        // Map taskId -> status item for this court + shift + date.
+        final Map<String, hk.TaskStatusItem> items = {};
+        if (status != null && courtId != null) {
+          for (final court in status.courts) {
+            if (court.courtId != courtId) continue;
+            for (final sh in court.shifts) {
+              if (sh.shift != shift) continue;
+              for (final t in sh.tasks) {
+                items[t.taskId] = t;
+              }
+            }
+          }
+        }
+
+        final doneCount =
+            dailyTasks.where((t) => items[t.id]?.isDone == true).length;
+
+        return ListView(
+          padding: EdgeInsets.fromLTRB(20, 18, 20, bottomPad),
+          children: [
+            // Summary banner
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: _light,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _black.withOpacity(0.06)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.history_rounded, size: 17, color: _grey),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Viewing past records · read only',
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: _grey,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$doneCount / ${dailyTasks.length}',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: doneCount == dailyTasks.length
+                          ? _success
+                          : _black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            ...dailyTasks.asMap().entries.map((e) {
+              final item = items[e.value.id];
+              return _HistoryTaskTile(
+                taskDef: e.value,
+                isDone: item?.isDone == true,
+                photoUrl: item?.photoUrl,
+              );
+            }),
+
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                'Weekly & monthly tasks are tracked on Today.',
+                style: GoogleFonts.inter(fontSize: 11.5, color: _faint),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final hkState = ref.watch(housekeepingNotifierProvider);
@@ -609,6 +785,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
     final navBarClearance = MediaQuery.of(context).padding.bottom + 92.0;
     final shiftActive = _isShiftTimeActive(shift);
+    final isToday = _isToday;
 
     return Scaffold(
       backgroundColor: _bg,
@@ -641,7 +818,9 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '$doneCount of $totalVisible tasks completed',
+                                isToday
+                                    ? '$doneCount of $totalVisible tasks completed'
+                                    : _prettyDay(_selectedDate),
                                 style: GoogleFonts.inter(
                                   fontSize: 13,
                                   color: _grey,
@@ -650,7 +829,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                             ],
                           ),
                         ),
-                        if (doneCount > 0)
+                        if (isToday && doneCount > 0)
                           AnimatedContainer(
                             duration: const Duration(milliseconds: 300),
                             padding: const EdgeInsets.symmetric(
@@ -751,8 +930,19 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                       ),
                     ),
 
-                    // ── Inactive warning banner ──────────────────────
-                    if (!shiftActive) ...[
+                    // ── Date browser ─────────────────────────────────
+                    const SizedBox(height: 10),
+                    _DateNavBar(
+                      label: _prettyDay(_selectedDate),
+                      isToday: isToday,
+                      onPrev: () => _changeDate(-1),
+                      onNext: isToday ? null : () => _changeDate(1),
+                      onToday: _goToday,
+                      onPickDate: _pickDate,
+                    ),
+
+                    // ── Inactive warning banner (today only) ──────────
+                    if (isToday && !shiftActive) ...[
                       const SizedBox(height: 10),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -801,7 +991,8 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                       top: Radius.circular(28),
                     ),
                   ),
-                  child: ListView(
+                  child: isToday
+                      ? ListView(
                     padding: EdgeInsets.fromLTRB(20, 20, 20, navBarClearance),
                     children: [
                       // Daily tasks
@@ -902,7 +1093,8 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                           ),
                         ),
                     ],
-                  ),
+                      )
+                    : _buildHistoryList(shift, navBarClearance),
                 ),
               ),
             ],
@@ -1689,6 +1881,277 @@ class _SectionDivider extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(child: Container(height: 1, color: _black.withOpacity(0.07))),
       ],
+    );
+  }
+}
+
+
+// ─── Date Nav Bar ─────────────────────────────────────────────────────────────
+
+class _DateNavBar extends StatelessWidget {
+  final String label;
+  final bool isToday;
+  final VoidCallback onPrev;
+  final VoidCallback? onNext;
+  final VoidCallback onToday;
+  final VoidCallback onPickDate;
+
+  const _DateNavBar({
+    required this.label,
+    required this.isToday,
+    required this.onPrev,
+    required this.onNext,
+    required this.onToday,
+    required this.onPickDate,
+  });
+
+  Widget _navBtn(IconData icon, VoidCallback? onTap) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 40,
+        height: 38,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: enabled ? _white.withOpacity(0.06) : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Icon(icon, size: 20, color: enabled ? _white : _faint),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        children: [
+          _navBtn(Icons.chevron_left_rounded, onPrev),
+          Expanded(
+            child: GestureDetector(
+              onTap: onPickDate,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.calendar_today_rounded,
+                      size: 13,
+                      color: _grey,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _white,
+                      ),
+                    ),
+                    if (!isToday) ...[
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: onToday,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _white,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Today',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: _black,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          _navBtn(Icons.chevron_right_rounded, onNext),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── History (read-only) Task Tile ──────────────────────────────────────────────
+
+class _HistoryTaskTile extends StatelessWidget {
+  final _TaskDef taskDef;
+  final bool isDone;
+  final String? photoUrl;
+
+  const _HistoryTaskTile({
+    required this.taskDef,
+    required this.isDone,
+    this.photoUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto = isDone && photoUrl != null && photoUrl!.isNotEmpty;
+
+    Widget right;
+    if (hasPhoto) {
+      right = Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            photoUrl!,
+            fit: BoxFit.cover,
+            loadingBuilder: (_, child, progress) {
+              if (progress == null) return child;
+              return Container(
+                color: _success.withOpacity(0.08),
+                child: const Center(
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: _success,
+                    ),
+                  ),
+                ),
+              );
+            },
+            errorBuilder: (_, __, ___) => Container(
+              color: _success.withOpacity(0.08),
+              child: const Icon(Icons.check_rounded, size: 16, color: _success),
+            ),
+          ),
+        ),
+      );
+    } else {
+      right = Icon(
+        isDone
+            ? Icons.verified_rounded
+            : Icons.remove_circle_outline_rounded,
+        size: 18,
+        color: isDone ? _success : _faint,
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: isDone ? _success.withOpacity(0.06) : _light,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDone ? _success.withOpacity(0.22) : _black.withOpacity(0.06),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: (isDone ? _success : taskDef.color).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              isDone ? Icons.check_rounded : taskDef.icon,
+              size: 18,
+              color: isDone ? _success : taskDef.color.withOpacity(0.5),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  taskDef.title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isDone ? _black : _grey,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isDone ? 'Completed' : 'Not completed',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: isDone ? _success.withOpacity(0.7) : _grey,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          right,
+        ],
+      ),
+    );
+  }
+}
+
+// ─── History empty / error message ──────────────────────────────────────────────
+
+class _HistoryMessage extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _HistoryMessage({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 80),
+      child: Column(
+        children: [
+          Icon(icon, size: 40, color: _grey),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _black,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(fontSize: 13, color: _grey),
+          ),
+        ],
+      ),
     );
   }
 }
