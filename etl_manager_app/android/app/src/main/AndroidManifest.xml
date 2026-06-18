@@ -53,6 +53,12 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="http"/>
         </intent>
+        <!-- ✅ Phone dialer (tel:) — needed on Android 11+ so canLaunchUrl/
+             launchUrl can open the dialer (dual-SIM shows the SIM chooser). -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
     </queries>
 
 </manifest>
