@@ -8,6 +8,7 @@ import '../../sales/data/sales_repository.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart';
 import '../../auth/domain/auth_notifier.dart';
+import '../../courts/data/courts_repository.dart';
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,12 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
 
   try {
     final repo = ref.read(housekeepingRepoProvider);
+
+    // ✅ Real court names (id → name) so the widget shows actual courts,
+    // not hardcoded "Court 1/2/3".
+    final courts = await ref.read(courtsRepositoryProvider).getCourts();
+    final courtNames = {for (final c in courts) c.id: c.name};
+
     final status = await repo.getFullStatus(date: today);
 
     if (status == null || status.courts.isEmpty) return [];
@@ -125,7 +132,7 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
       }
 
       return CourtHkRow(
-        courtName: 'Court ${court.courtId}',
+        courtName: courtNames[court.courtId] ?? 'Court ${court.courtId}',
         morning: morning,
         day: day,
         night: night,

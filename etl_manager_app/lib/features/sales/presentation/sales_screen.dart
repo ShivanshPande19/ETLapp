@@ -659,10 +659,10 @@ class _PeriodTabState extends State<_PeriodTab>
           curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
           decoration: BoxDecoration(
-            color: widget.isSelected ? _black : _white,
+            color: widget.isSelected ? _black : const Color(0xFFF6F6F7),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: widget.isSelected ? _black : _border.withOpacity(0.3),
+              color: widget.isSelected ? _black : const Color(0xFFECECEC),
               width: 1.5,
             ),
             boxShadow: widget.isSelected
@@ -792,10 +792,7 @@ class _VendorBentoGridState extends State<_VendorBentoGrid> {
               decoration: BoxDecoration(
                 color: const Color(0xFFFFFFFF),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: const Color(0xFF1A1A1A).withOpacity(0.3),
-                  width: 1.5,
-                ),
+                border: Border.all(color: _cardBorder, width: 1.5),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
