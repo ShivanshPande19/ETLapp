@@ -14,6 +14,9 @@ const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
 const _lightGrey = Color(0xFFF2F2F2);
 const _border = Color(0xFF1A1A1A);
+// Premium accents (subtle — not loud)
+const _accent = Color(0xFF22C55E); // emerald — revenue/positive (matches app)
+const _cardBorder = Color(0xFFECECEC); // soft light border for premium cards
 
 // ── Period config ─────────────────────────────────────────────────────────────
 
@@ -36,13 +39,8 @@ class SalesScreen extends ConsumerStatefulWidget {
 
 class _SalesScreenState extends ConsumerState<SalesScreen>
     with TickerProviderStateMixin {
-  int? _prevCourtId = -999;
-  double _animTotal = 0;
-  double _prevTotal = 0;
-
   AnimationController? _fadeCtrl;
   AnimationController? _switchCtrl;
-  AnimationController? _numCtrl;
 
   Animation<double>? _fadeAnim;
   Animation<double>? _switchFade;
@@ -64,57 +62,24 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
 
     _switchCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: const Duration(milliseconds: 420),
     );
     _switchFade = CurvedAnimation(
       parent: _switchCtrl!,
       curve: Curves.easeOutCubic,
     );
-    _switchSlide = Tween<Offset>(begin: const Offset(0, 0.03), end: Offset.zero)
+    _switchSlide = Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero)
         .animate(
           CurvedAnimation(parent: _switchCtrl!, curve: Curves.easeOutCubic),
         );
     _switchCtrl!.value = 1.0;
-
-    _numCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
   }
 
   @override
   void dispose() {
     _fadeCtrl?.dispose();
     _switchCtrl?.dispose();
-    _numCtrl?.dispose();
     super.dispose();
-  }
-
-  // ── Trigger on court/period change ────────────────────────────────────────
-
-  void _onNewData(double newTotal, int? courtId) {
-    if (courtId == _prevCourtId) return;
-    _prevCourtId = courtId;
-    _prevTotal = _animTotal;
-
-    _switchCtrl?.reverse().then((_) {
-      if (mounted) _switchCtrl?.forward();
-    });
-
-    _numCtrl?.reset();
-    _numCtrl?.addListener(() {
-      if (mounted) {
-        setState(() {
-          _animTotal =
-              _prevTotal + ((_numCtrl?.value ?? 0) * (newTotal - _prevTotal));
-        });
-      }
-    });
-    _numCtrl?.animateTo(
-      1.0,
-      duration: const Duration(milliseconds: 600),
-      curve: Curves.easeOutCubic,
-    );
   }
 
   // ── Period change — triggers content fade ─────────────────────────────────
@@ -141,7 +106,6 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
 
       if (pickedDate == null || !mounted) return;
       HapticFeedback.selectionClick();
-      _triggerSwitchAnim();
 
       final dateStr = pickedDate.toIso8601String().split('T').first;
 
@@ -155,18 +119,10 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
           );
     } else {
       HapticFeedback.selectionClick();
-      _triggerSwitchAnim();
       ref
           .read(salesNotifierProvider.notifier)
           .fetchSummary(courtId: courtId, period: period);
     }
-  }
-
-  void _triggerSwitchAnim() {
-    _prevCourtId = -998;
-    _switchCtrl?.reverse().then((_) {
-      if (mounted) _switchCtrl?.forward();
-    });
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -213,11 +169,13 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
     final isLoading = salesState.status == SalesLoadStatus.loading;
     final repo = ref.read(salesRepositoryProvider);
 
-    if (summary != null && salesState.status == SalesLoadStatus.loaded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _onNewData(summary.totalSales, salesState.selectedCourtId);
-      });
-    }
+    // ✅ Fade the content in once per real data change (no postFrame loop /
+    // vestigial number animation — that pattern caused the fade glitch).
+    ref.listen<SalesState>(salesNotifierProvider, (prev, next) {
+      if (next.status == SalesLoadStatus.loaded && next.summary != null) {
+        _switchCtrl?.forward(from: 0);
+      }
+    });
 
     return Scaffold(
       backgroundColor: _black,
@@ -390,7 +348,6 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                           selectedCourtId: salesState.selectedCourtId,
                           onSelect: (id) {
                             HapticFeedback.selectionClick();
-                            _prevCourtId = -998;
                             ref
                                 .read(salesNotifierProvider.notifier)
                                 .fetchSummary(
@@ -921,14 +878,10 @@ class _VendorBentoCardState extends State<_VendorBentoCard>
 
   @override
   Widget build(BuildContext context) {
-    final bg = widget.isFilled ? _black : _white;
     final textColor = widget.isFilled ? _white : _black;
     final subColor = widget.isFilled ? Colors.white54 : _grey;
     final barBg = widget.isFilled ? Colors.white.withOpacity(0.15) : _lightGrey;
-    final barFg = widget.isFilled ? _white : _black;
-    final borderColor = widget.isFilled
-        ? Colors.transparent
-        : _border.withOpacity(0.3);
+    final barFg = widget.isFilled ? _white : _accent;
 
     return GestureDetector(
       onTapDown: (_) => _pressCtrl?.forward(),
@@ -942,9 +895,27 @@ class _VendorBentoCardState extends State<_VendorBentoCard>
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor, width: 1.5),
+            color: widget.isFilled ? null : _white,
+            gradient: widget.isFilled
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF1E1E1E), _black],
+                  )
+                : null,
+            borderRadius: BorderRadius.circular(20),
+            border: widget.isFilled
+                ? null
+                : Border.all(color: _cardBorder, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: widget.isFilled
+                    ? _black.withOpacity(0.22)
+                    : Colors.black.withOpacity(0.04),
+                blurRadius: widget.isFilled ? 18 : 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1127,11 +1098,18 @@ class _VendorRowState extends State<_VendorRow>
             duration: const Duration(milliseconds: 100),
             curve: Curves.easeOut,
             child: Container(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: _white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _border, width: 1.5),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _cardBorder, width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1215,7 +1193,9 @@ class _VendorRowState extends State<_VendorRow>
                         value: val,
                         minHeight: 5,
                         backgroundColor: _lightGrey,
-                        valueColor: const AlwaysStoppedAnimation<Color>(_black),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          _accent,
+                        ),
                       ),
                     ),
                   ),
