@@ -107,37 +107,43 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
 
     if (status == null || status.courts.isEmpty) return [];
 
-    return status.courts.map((court) {
-      ShiftPillData morning = _emptyPill('M');
-      ShiftPillData day = _emptyPill('D');
-      ShiftPillData night = _emptyPill('N');
+    // ✅ Only show courts that actually exist in the DB (/courts/). Any stale
+    // court id coming from the housekeeping status that isn't a real court is
+    // skipped — so no more hardcoded-looking "Court 2 / Court 3".
+    return status.courts
+        .where((court) => courtNames.containsKey(court.courtId))
+        .map((court) {
+          ShiftPillData morning = _emptyPill('M');
+          ShiftPillData day = _emptyPill('D');
+          ShiftPillData night = _emptyPill('N');
 
-      for (final s in court.shifts) {
-        final pill = ShiftPillData(
-          label: s.shift == Shift.morning
-              ? 'M'
-              : s.shift == Shift.day
-              ? 'D'
-              : 'N',
-          done: s.done,
-          total: s.total,
-        );
-        if (s.shift == Shift.morning) {
-          morning = pill;
-        } else if (s.shift == Shift.day) {
-          day = pill;
-        } else {
-          night = pill;
-        }
-      }
+          for (final s in court.shifts) {
+            final pill = ShiftPillData(
+              label: s.shift == Shift.morning
+                  ? 'M'
+                  : s.shift == Shift.day
+                  ? 'D'
+                  : 'N',
+              done: s.done,
+              total: s.total,
+            );
+            if (s.shift == Shift.morning) {
+              morning = pill;
+            } else if (s.shift == Shift.day) {
+              day = pill;
+            } else {
+              night = pill;
+            }
+          }
 
-      return CourtHkRow(
-        courtName: courtNames[court.courtId] ?? 'Court ${court.courtId}',
-        morning: morning,
-        day: day,
-        night: night,
-      );
-    }).toList();
+          return CourtHkRow(
+            courtName: courtNames[court.courtId]!,
+            morning: morning,
+            day: day,
+            night: night,
+          );
+        })
+        .toList();
   } on DioException catch (e) {
     debugPrint('🧹 [HK] ❌ DioError: ${e.response?.statusCode} ${e.message}');
     return [];

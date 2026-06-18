@@ -1260,8 +1260,30 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
   }
 
   Future<void> _callTechnician(String phone) async {
-    final uri = Uri.parse('tel:$phone');
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+    // Keep only digits and a leading '+' so spaces/dashes don't break the URI.
+    final cleaned = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    final uri = Uri(scheme: 'tel', path: cleaned);
+    try {
+      // Opens the phone dialer with the number pre-filled. On a dual-SIM phone
+      // the native dialer shows the SIM chooser when the call is placed.
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open the dialer ($cleaned).')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Calling is not supported on this device.'),
+          ),
+        );
+      }
+    }
   }
 
   void _viewPhoto(String url) {

@@ -2,8 +2,8 @@ from datetime import datetime, timedelta
 from typing import List
 from sqlalchemy.orm import Session
 
-# NAYA IMPORT: Yahan actual Court table ko import kar rahe hain taaki ID's dynamic milein
-from ..models.court import Court 
+# NAYA IMPORT: Court table models/sale.py mein hai (models/court.py exist nahi karti)
+from ..models.sale import Court
 
 from ..models.housekeeping import (
     HousekeepingRecord, WeeklyTaskRecord, MonthlyTaskRecord, ShiftEnum
