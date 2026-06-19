@@ -57,3 +57,21 @@ class RosterResponse(BaseModel):
     total_staff: int
     present_count: int
     staff_list: List[StaffRosterItem]
+
+
+# ─── ETL manager court-wise roster ───────────────────────────────────────────
+
+class CourtRosterItem(BaseModel):
+    court_id: int
+    court_name: str
+    total_staff: int
+    present_count: int
+    staff_list: List[StaffRosterItem]
+
+
+class EtlRosterResponse(BaseModel):
+    date: date
+    total_courts: int
+    total_staff: int
+    total_present: int
+    courts: List[CourtRosterItem]

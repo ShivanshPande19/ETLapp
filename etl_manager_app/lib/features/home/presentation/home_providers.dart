@@ -308,6 +308,43 @@ final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
 });
 
 
+// ─── ETL MANAGER COURT-WISE ROSTER ──────────────────────────────────────────
+
+// Selected court filter for the ETL roster. null => all courts.
+class SelectedRosterCourtNotifier extends Notifier<int?> {
+  @override
+  int? build() => null;
+
+  void setCourt(int? courtId) => state = courtId;
+}
+
+final selectedRosterCourtProvider =
+    NotifierProvider<SelectedRosterCourtNotifier, int?>(
+      SelectedRosterCourtNotifier.new,
+    );
+
+final etlRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
+  ref,
+) async {
+  // Date + court filter dono pe auto-refetch hota hai.
+  final selectedDate = ref.watch(selectedRosterDateProvider);
+  final courtId = ref.watch(selectedRosterCourtProvider);
+
+  try {
+    final dio = ref.read(dioProvider);
+    final query = <String, dynamic>{};
+    if (selectedDate != null) query['target_date'] = _ymd(selectedDate);
+    if (courtId != null) query['court_id'] = courtId;
+
+    final response = await dio.get('/roster/etl', queryParameters: query);
+    return Map<String, dynamic>.from(response.data as Map);
+  } catch (e) {
+    debugPrint('🔴 [ETL_ROSTER] Exception: $e');
+    rethrow;
+  }
+});
+
+
 // ─── CURRENT OUTLET NAME (real data, no hardcoding) ─────────────────────────
 
 final currentOutletNameProvider = FutureProvider.autoDispose<String?>((
