@@ -3,10 +3,10 @@
 from datetime import date
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from ..models.staff import Staff
 from ..models.attendance import Attendance
 from ..models.sale import Court
+from ..core.query_utils import day_range
 from ..schemas.attendance import (
     RosterResponse,
     StaffRosterItem,
@@ -21,10 +21,12 @@ def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterRe
         Staff.is_active == True
     ).all()
 
-    # 2. Aaj ki attendance nikalo us outlet ki
+    # 2. Aaj ki attendance nikalo us outlet ki (portable day-range; Postgres-safe)
+    _start, _end = day_range(target_date)
     attendances = db.query(Attendance).filter(
         Attendance.outlet_id == outlet_id,
-        func.date(Attendance.check_in_time) == target_date
+        Attendance.check_in_time >= _start,
+        Attendance.check_in_time < _end,
     ).all()
 
     # Dictionary banalo taaki fast search ho sake {staff_id: attendance_record}
@@ -77,9 +79,11 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
         Staff.is_active == True,
     ).all()
 
+    _start, _end = day_range(target_date)
     attendances = db.query(Attendance).filter(
         Attendance.court_id == court.id,
-        func.date(Attendance.check_in_time) == target_date,
+        Attendance.check_in_time >= _start,
+        Attendance.check_in_time < _end,
     ).all()
     attendance_map = {a.staff_id: a for a in attendances}
 

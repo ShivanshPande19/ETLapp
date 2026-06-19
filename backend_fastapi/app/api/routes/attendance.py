@@ -4,7 +4,6 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 import httpx
 import os
@@ -14,6 +13,8 @@ from app.database import get_db
 from app.models.attendance import Attendance
 from app.models.staff import Staff
 from app.schemas.attendance import AttendanceStatusOut
+from app.core.config import settings
+from app.core.query_utils import day_range
 from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -60,9 +61,9 @@ async def _save_selfie(photo: UploadFile, prefix: str) -> str:
     if not data:
         raise HTTPException(status_code=400, detail="Empty image upload.")
 
-    os.makedirs("uploads/attendance", exist_ok=True)
+    os.makedirs(os.path.join(settings.UPLOAD_DIR, "attendance"), exist_ok=True)
     ext = _EXT_BY_TYPE.get(photo.content_type, "jpg")
-    file_path = f"uploads/attendance/{prefix}_{uuid.uuid4()}.{ext}"
+    file_path = f"{settings.UPLOAD_DIR}/attendance/{prefix}_{uuid.uuid4()}.{ext}"
     with open(file_path, "wb") as buffer:
         buffer.write(data)
     return file_path
@@ -83,11 +84,13 @@ def _resolve_staff(user: CurrentUser, db: Session) -> Staff:
 
 
 def _todays_record(db: Session, staff_id: int) -> Optional[Attendance]:
+    _start, _end = day_range(date.today())
     return (
         db.query(Attendance)
         .filter(
             Attendance.staff_id == staff_id,
-            func.date(Attendance.check_in_time) == date.today(),
+            Attendance.check_in_time >= _start,
+            Attendance.check_in_time < _end,
         )
         .order_by(Attendance.check_in_time.desc())
         .first()
