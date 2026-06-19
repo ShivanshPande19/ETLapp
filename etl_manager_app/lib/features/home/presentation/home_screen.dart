@@ -807,6 +807,82 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                           const SizedBox(height: 24),
 
+                          // ── Staff Attendance roster entry ─────────────
+                          _StaggerRow(
+                            anim: _stagger(4),
+                            child: GestureDetector(
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                context.push('/attendance-roster');
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(18),
+                                decoration: BoxDecoration(
+                                  color: _black,
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: _black.withOpacity(0.12),
+                                      blurRadius: 18,
+                                      offset: const Offset(0, 8),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 46,
+                                      height: 46,
+                                      decoration: BoxDecoration(
+                                        color: const Color(
+                                          0xFF60A5FA,
+                                        ).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(13),
+                                      ),
+                                      child: const Icon(
+                                        Icons.groups_rounded,
+                                        color: Color(0xFF60A5FA),
+                                        size: 24,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Staff Attendance',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w800,
+                                              color: _white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Court-wise roster & check-ins',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 12,
+                                              color: Colors.white60,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_forward_ios_rounded,
+                                      size: 14,
+                                      color: Colors.white.withOpacity(0.5),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
                           // ── Courts — stagger 4 ────────────────────────
                           _StaggerRow(
                             anim: _stagger(4),

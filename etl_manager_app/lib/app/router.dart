@@ -30,6 +30,7 @@ import '../features/staff/presentation/staff_report_screen.dart';
 
 import '../features/staff/presentation/outlet_staff_home_screen.dart';
 import '../features/staff/presentation/mark_attendance_screen.dart';
+import '../features/staff/presentation/etl_roster_screen.dart';
 
 import 'shell_screen.dart';
 import 'biometric_gate.dart';
@@ -178,6 +179,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const MarkAttendanceScreen(),
+          slideFromRight: true,
+        ),
+      ),
+      GoRoute(
+        path: '/attendance-roster',
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: const EtlRosterScreen(),
           slideFromRight: true,
         ),
       ),
