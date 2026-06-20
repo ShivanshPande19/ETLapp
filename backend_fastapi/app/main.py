@@ -24,7 +24,6 @@ from .api.routes import feedback
 from .api.routes import maintenance
 from .api.routes import staff
 from .api.routes import events
-from .api.routes import music
 from .api.routes import roster
 from .api.routes import attendance
 
@@ -124,7 +123,6 @@ app.include_router(housekeeping.router, prefix="/housekeeping", tags=["Housekeep
 app.include_router(maintenance.router,                          tags=["Maintenance"])
 app.include_router(staff.router,        prefix="/staff",        tags=["Staff"])
 app.include_router(events.router,       prefix="/events",       tags=["Events"])
-app.include_router(music.router,        prefix="/music",        tags=["Music"])
 app.include_router(roster.router,       prefix="/roster",       tags=["Roster"])
 app.include_router(attendance.router,   prefix="/attendance",   tags=["Attendance"])
 app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"])
