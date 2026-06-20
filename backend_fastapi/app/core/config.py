@@ -11,6 +11,19 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./app/etl.db"
 
+    # File uploads (selfies, onboarding docs). On Railway point this at a
+    # mounted volume path (e.g. /app/data/uploads) so files survive redeploys.
+    UPLOAD_DIR: str = "uploads"
+
+    # Public base URL of THIS backend (e.g. https://xxx.up.railway.app).
+    # Used to build absolute links (set-password magic link, doc URLs).
+    PUBLIC_BASE_URL: str = ""
+
+    # Resend transactional email (https://resend.com). If RESEND_API_KEY is
+    # empty, email sending is skipped gracefully (links are logged / returned).
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "ETL Onboarding <onboarding@resend.dev>"
+
     # Petpooja API credentials
     PETPOOJA_APP_KEY: str = ""
     PETPOOJA_APP_SECRET: str = ""

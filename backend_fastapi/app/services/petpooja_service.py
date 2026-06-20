@@ -4,12 +4,21 @@ from datetime import date, timedelta, datetime
 import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import func
 
 from ..core.config import settings
 from ..models.sale import Outlet, DailySaleCache, Court, PetpoojaOrder
 
 PETPOOJA_URL = "https://api.petpooja.com/V1/thirdparty/generic_get_orders/"
+
+
+def _upsert(db: Session, table):
+    """Return the dialect-correct INSERT construct. Both SQLite and Postgres
+    expose the same `.on_conflict_do_update(index_elements=..., set_=...)` API,
+    so callers stay identical across dialects."""
+    dialect = db.get_bind().dialect.name
+    return pg_insert(table) if dialect == "postgresql" else sqlite_insert(table)
 
 
 async def fetch_raw(rest_id: str, order_date: str) -> dict:
@@ -99,7 +108,7 @@ async def sync_outlet_for_dates(
             total_amt = float(order.get("total", 0))
             
             # --- UPSERT: Individual Bill in PetpoojaOrder (Duplicate Blocking) ---
-            stmt = sqlite_insert(PetpoojaOrder).values(
+            stmt = _upsert(db, PetpoojaOrder).values(
                 order_id=order_id,
                 outlet_id=outlet.id,
                 business_date=business_date,
@@ -128,7 +137,7 @@ async def sync_outlet_for_dates(
         avg = round(tot / cnt, 2) if cnt > 0 else 0.0
         now = datetime.utcnow()
         
-        cache_stmt = sqlite_insert(DailySaleCache).values(
+        cache_stmt = _upsert(db, DailySaleCache).values(
             outlet_id=outlet.id,
             sale_date=b_date,
             total_sales=tot,

@@ -3,21 +3,31 @@ import pathlib
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# 🚀 BULLETPROOF LOGIC: Railway khud ek hidden variable deta hai. 
-# Agar wo variable hai, toh hum cloud par hain. Warna Mac par hain!
-if os.getenv("RAILWAY_ENVIRONMENT_NAME"):
-    db_path = "/app/data/etl.db"
+# ─── DB URL resolution ────────────────────────────────────────────────────────
+# Priority:
+#   1. DATABASE_URL env (Railway Postgres plugin sets this automatically) → prod
+#   2. Local SQLite file → dev (Mac)
+#
+# Railway/Heroku sometimes provide the legacy "postgres://" scheme which
+# SQLAlchemy 2.x rejects — normalize it to "postgresql://".
+_env_url = os.getenv("DATABASE_URL", "").strip()
+
+if _env_url:
+    if _env_url.startswith("postgres://"):
+        _env_url = _env_url.replace("postgres://", "postgresql://", 1)
+    DATABASE_URL = _env_url
 else:
-    db_path = "app/etl.db"
+    # Local dev fallback — SQLite file (persisted on Railway volume if used).
+    if os.getenv("RAILWAY_ENVIRONMENT_NAME"):
+        db_path = "/app/data/etl.db"
+    else:
+        db_path = "app/etl.db"
+    _db_file = pathlib.Path(db_path)
+    _db_file.parent.mkdir(parents=True, exist_ok=True)
+    DATABASE_URL = f"sqlite:///{_db_file}"
 
-_db_file = pathlib.Path(db_path)
-
-# Ensure folder exists safely
-_db_file.parent.mkdir(parents=True, exist_ok=True)
-
-DATABASE_URL = f"sqlite:///{_db_file}"
-
-_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+_is_sqlite = DATABASE_URL.startswith("sqlite")
+_connect_args = {"check_same_thread": False} if _is_sqlite else {}
 
 engine = create_engine(
     DATABASE_URL,
@@ -42,23 +52,36 @@ def ensure_attendance_columns() -> None:
 
     `Base.metadata.create_all` creates missing tables but never ALTERs an
     existing one, so newly-added model columns won't appear on an already
-    created `attendance` table. This adds any missing check-out columns
-    (SQLite supports `ALTER TABLE ... ADD COLUMN`). Safe to run on every boot.
+    created `attendance` table. This adds any missing check-out columns.
+    Safe to run on every boot (best-effort).
+
+    On a fresh Postgres DB `create_all` builds the full table, so the ALTER
+    branch never runs there — but we still pick dialect-correct types just in
+    case.
     """
-    needed = {
-        "check_out_time": "DATETIME",
-        "check_out_lat": "FLOAT",
-        "check_out_lng": "FLOAT",
-        "check_out_address": "VARCHAR",
-        "check_out_photo_url": "VARCHAR",
-    }
+    if _is_sqlite:
+        types = {
+            "check_out_time": "DATETIME",
+            "check_out_lat": "FLOAT",
+            "check_out_lng": "FLOAT",
+            "check_out_address": "VARCHAR",
+            "check_out_photo_url": "VARCHAR",
+        }
+    else:
+        types = {
+            "check_out_time": "TIMESTAMP",
+            "check_out_lat": "DOUBLE PRECISION",
+            "check_out_lng": "DOUBLE PRECISION",
+            "check_out_address": "VARCHAR",
+            "check_out_photo_url": "VARCHAR",
+        }
     try:
         with engine.begin() as conn:
             insp = inspect(conn)
             if "attendance" not in insp.get_table_names():
                 return  # create_all will build it fresh with all columns
             existing = {c["name"] for c in insp.get_columns("attendance")}
-            for col, col_type in needed.items():
+            for col, col_type in types.items():
                 if col not in existing:
                     conn.execute(
                         text(f"ALTER TABLE attendance ADD COLUMN {col} {col_type}")
