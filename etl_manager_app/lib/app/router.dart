@@ -10,7 +10,6 @@ import '../features/home/presentation/home_screen.dart';
 import '../features/home/presentation/outlet_home_screen.dart';
 import '../features/sales/presentation/sales_screen.dart';
 import '../features/sales/presentation/outlet_sales_screen.dart';
-import '../features/music/presentation/music_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../features/complaints/presentation/complaints_screen.dart';
@@ -121,7 +120,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               loc == '/sales' ||
               loc == '/outlet-sales' ||
               loc == '/housekeeping' ||
-              loc == '/music' ||
               loc.startsWith('/staff/') ||
               loc == '/') {
             return '/outlet-staff-home';
@@ -130,7 +128,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           if (loc == '/home') return '/outlet-home';
           if (loc == '/sales') return '/outlet-sales';
           if (loc == '/housekeeping' ||
-              loc == '/music' ||
               loc.startsWith('/staff') ||
               loc == '/outlet-staff-home') {
             return '/outlet-home';
@@ -232,14 +229,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               context: context,
               state: state,
               child: const OutletSalesScreen(),
-            ),
-          ),
-          GoRoute(
-            path: '/music',
-            pageBuilder: (context, state) => _buildPage(
-              context: context,
-              state: state,
-              child: const MusicScreen(),
             ),
           ),
           GoRoute(

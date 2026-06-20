@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+
 
 class Settings(BaseSettings):
     APP_NAME: str = "ETL Manager API"
@@ -29,11 +29,6 @@ class Settings(BaseSettings):
     PETPOOJA_APP_SECRET: str = ""
     PETPOOJA_ACCESS_TOKEN: str = ""
     PETPOOJA_COOKIE: str = ""
-
-    # Spotify credentials
-    spotify_client_id: Optional[str] = None
-    spotify_client_secret: Optional[str] = None
-    spotify_redirect_uri: Optional[str] = None
 
     class Config:
         env_file = ".env"
