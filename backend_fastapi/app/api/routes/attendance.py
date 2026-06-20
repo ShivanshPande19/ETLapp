@@ -63,10 +63,12 @@ async def _save_selfie(photo: UploadFile, prefix: str) -> str:
 
     os.makedirs(os.path.join(settings.UPLOAD_DIR, "attendance"), exist_ok=True)
     ext = _EXT_BY_TYPE.get(photo.content_type, "jpg")
-    file_path = f"{settings.UPLOAD_DIR}/attendance/{prefix}_{uuid.uuid4()}.{ext}"
-    with open(file_path, "wb") as buffer:
+    filename = f"{prefix}_{uuid.uuid4()}.{ext}"
+    with open(os.path.join(settings.UPLOAD_DIR, "attendance", filename), "wb") as buffer:
         buffer.write(data)
-    return file_path
+    # Return the URL path (served by the /uploads mount), NOT the disk path —
+    # so it resolves correctly even when UPLOAD_DIR points at a volume.
+    return f"uploads/attendance/{filename}"
 
 
 def _resolve_staff(user: CurrentUser, db: Session) -> Staff:

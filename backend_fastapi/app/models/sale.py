@@ -44,6 +44,14 @@ class Outlet(Base):
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # ✅ Per-outlet Petpooja credentials (nullable). If null, the sync falls
+    # back to the global keys in settings/.env. This supports both a single
+    # shared ETL Petpooja account AND outlets that carry their own creds.
+    pp_app_key = Column(String, nullable=True)
+    pp_app_secret = Column(String, nullable=True)
+    pp_access_token = Column(String, nullable=True)
+    pp_cookie = Column(String, nullable=True)
+
     court = relationship("Court", back_populates="outlets")
     sales_cache = relationship("DailySaleCache", back_populates="outlet", cascade="all, delete-orphan")
 

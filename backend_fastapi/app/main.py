@@ -26,6 +26,7 @@ from .api.routes import staff
 from .api.routes import events
 from .api.routes import roster
 from .api.routes import attendance
+from .api.routes import onboarding
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -34,13 +35,14 @@ from .models import maintenance as _maintenance_models
 from .models import manager as _manager_models
 from .models import staff as _staff_models
 from .models import attendance as _attendance_models
+from .models import onboarding as _onboarding_models
 
 from .services.scheduler_service import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -48,6 +50,10 @@ async def lifespan(app: FastAPI):
     # ✅ Add any newly-introduced columns to existing tables (check-out fields)
     ensure_attendance_columns()
     print("[DB] Attendance schema ensured ✓")
+
+    # ✅ Add per-outlet Petpooja credential columns if missing
+    ensure_outlet_columns()
+    print("[DB] Outlet schema ensured ✓")
 
     _hk_routes._main_loop = asyncio.get_event_loop()
     print("[SSE] Event loop captured ✓")
@@ -125,4 +131,5 @@ app.include_router(staff.router,        prefix="/staff",        tags=["Staff"])
 app.include_router(events.router,       prefix="/events",       tags=["Events"])
 app.include_router(roster.router,       prefix="/roster",       tags=["Roster"])
 app.include_router(attendance.router,   prefix="/attendance",   tags=["Attendance"])
+app.include_router(onboarding.router,   prefix="/onboarding",   tags=["Onboarding"])
 app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"])
