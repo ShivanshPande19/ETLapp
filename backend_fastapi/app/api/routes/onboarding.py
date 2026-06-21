@@ -10,7 +10,7 @@ import uuid
 import secrets
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import (
     APIRouter, Depends, HTTPException, Request, Form, File, UploadFile, Query,
@@ -25,7 +25,7 @@ from ...models.manager import Manager
 from ...models.onboarding import OutletApplication
 from ...schemas.onboarding import (
     ApplicationOut, ApplicationListResponse, ApproveRequest, ApproveResponse,
-    RejectRequest,
+    RejectRequest, OutletWithDocs,
 )
 from ...core.config import settings
 from ...core.security import create_token, hash_password
@@ -331,6 +331,52 @@ def reject_application(
     app.reviewed_at = datetime.utcnow()
     db.commit()
     return {"message": "Application rejected."}
+
+
+# ─── ETL MANAGER: outlets of a court (with onboarding documents) ─────────────
+
+@router.get("/outlets", response_model=List[OutletWithDocs])
+def list_court_outlets(
+    court_id: int = Query(...),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Active outlets in a court, each enriched with the documents/owner info
+    from its approved onboarding application (if it was onboarded that way)."""
+    _require_etl_manager(user)
+
+    outlets = (
+        db.query(Outlet)
+        .filter(Outlet.court_id == court_id, Outlet.is_active == 1)
+        .order_by(Outlet.vendor_name)
+        .all()
+    )
+    apps = (
+        db.query(OutletApplication)
+        .filter(OutletApplication.created_outlet_id.isnot(None))
+        .all()
+    )
+    by_outlet = {a.created_outlet_id: a for a in apps}
+
+    result = []
+    for o in outlets:
+        a = by_outlet.get(o.id)
+        result.append(OutletWithDocs(
+            outlet_id=o.id,
+            court_id=o.court_id,
+            vendor_name=o.vendor_name,
+            rest_id=o.rest_id,
+            owner_name=a.owner_name if a else None,
+            owner_email=a.owner_email if a else None,
+            owner_phone=a.owner_phone if a else None,
+            gst_url=a.gst_url if a else None,
+            fssai_url=a.fssai_url if a else None,
+            term_sheet_url=a.term_sheet_url if a else None,
+            agreement_url=a.agreement_url if a else None,
+            has_petpooja_creds=bool(o.pp_app_key),
+            application_id=a.id if a else None,
+        ))
+    return result
 
 
 # ─── Email body ──────────────────────────────────────────────────────────────

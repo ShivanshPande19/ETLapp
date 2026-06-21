@@ -99,3 +99,60 @@ class ApproveResult {
     message: j['message'] ?? '',
   );
 }
+
+
+
+/// An outlet in a court, enriched with its onboarding documents/owner info.
+class OutletWithDocs {
+  final int outletId;
+  final int courtId;
+  final String vendorName;
+  final String restId;
+  final String? ownerName;
+  final String? ownerEmail;
+  final String? ownerPhone;
+  final String? gstUrl;
+  final String? fssaiUrl;
+  final String? termSheetUrl;
+  final String? agreementUrl;
+  final bool hasPetpoojaCreds;
+  final int? applicationId;
+
+  OutletWithDocs({
+    required this.outletId,
+    required this.courtId,
+    required this.vendorName,
+    required this.restId,
+    this.ownerName,
+    this.ownerEmail,
+    this.ownerPhone,
+    this.gstUrl,
+    this.fssaiUrl,
+    this.termSheetUrl,
+    this.agreementUrl,
+    this.hasPetpoojaCreds = false,
+    this.applicationId,
+  });
+
+  bool get hasAnyDoc =>
+      (gstUrl != null && gstUrl!.isNotEmpty) ||
+      (fssaiUrl != null && fssaiUrl!.isNotEmpty) ||
+      (termSheetUrl != null && termSheetUrl!.isNotEmpty) ||
+      (agreementUrl != null && agreementUrl!.isNotEmpty);
+
+  factory OutletWithDocs.fromJson(Map<String, dynamic> j) => OutletWithDocs(
+    outletId: j['outlet_id'] ?? 0,
+    courtId: j['court_id'] ?? 0,
+    vendorName: j['vendor_name'] ?? '',
+    restId: j['rest_id'] ?? '',
+    ownerName: j['owner_name'],
+    ownerEmail: j['owner_email'],
+    ownerPhone: j['owner_phone'],
+    gstUrl: j['gst_url'],
+    fssaiUrl: j['fssai_url'],
+    termSheetUrl: j['term_sheet_url'],
+    agreementUrl: j['agreement_url'],
+    hasPetpoojaCreds: j['has_petpooja_creds'] ?? false,
+    applicationId: j['application_id'],
+  );
+}
