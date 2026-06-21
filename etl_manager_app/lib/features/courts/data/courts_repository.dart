@@ -65,6 +65,19 @@ class CourtsRepository {
       return [];
     }
   }
+
+  /// ETL manager: create a new court.
+  Future<Court> createCourt({required String name, String? location}) async {
+    final response = await _dio.post(
+      '/courts/',
+      data: {
+        'name': name,
+        if (location != null && location.trim().isNotEmpty)
+          'location': location.trim(),
+      },
+    );
+    return Court.fromJson(response.data as Map<String, dynamic>);
+  }
 }
 
 final courtsRepositoryProvider = Provider<CourtsRepository>((ref) {
