@@ -57,3 +57,19 @@ class RejectRequest(BaseModel):
 class SetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class OutletWithDocs(BaseModel):
+    outlet_id: int
+    court_id: int
+    vendor_name: str
+    rest_id: str
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+    owner_phone: Optional[str] = None
+    gst_url: Optional[str] = None
+    fssai_url: Optional[str] = None
+    term_sheet_url: Optional[str] = None
+    agreement_url: Optional[str] = None
+    has_petpooja_creds: bool = False
+    application_id: Optional[int] = None
