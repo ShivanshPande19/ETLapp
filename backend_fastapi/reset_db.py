@@ -27,6 +27,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from sqlalchemy import text
 from app.database import Base, engine, SessionLocal, DATABASE_URL
 
 # Register ALL models so drop_all / create_all see every table.
@@ -62,7 +63,23 @@ def main():
         return
 
     print("Dropping all tables...")
-    Base.metadata.drop_all(bind=engine)
+    # The schema has a circular FK (managers -> outlets -> courts -> managers),
+    # so metadata.drop_all() can't topologically sort it. Drop everything in a
+    # dialect-safe way instead.
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if dialect == "postgresql":
+            # Nukes all tables, sequences and constraints in one shot.
+            conn.execute(text("DROP SCHEMA public CASCADE"))
+            conn.execute(text("CREATE SCHEMA public"))
+        elif dialect == "sqlite":
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            for t in list(Base.metadata.tables.keys()):
+                conn.execute(text(f'DROP TABLE IF EXISTS "{t}"'))
+        else:
+            for t in list(Base.metadata.tables.keys()):
+                conn.execute(text(f'DROP TABLE IF EXISTS "{t}" CASCADE'))
+
     print("Creating fresh empty schema...")
     Base.metadata.create_all(bind=engine)
 
