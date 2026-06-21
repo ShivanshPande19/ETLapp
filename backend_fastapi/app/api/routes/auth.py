@@ -68,7 +68,9 @@ def seed_user(req: SeedRequest, db: Session = Depends(get_db)):
 def set_password_page(request: Request, token: str = ""):
     """Browser page where a newly-onboarded outlet owner sets their password."""
     return templates.TemplateResponse(
-        "set_password.html", {"request": request, "token": token}
+        request=request,
+        name="set_password.html",
+        context={"request": request, "token": token},
     )
 
 
