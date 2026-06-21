@@ -298,7 +298,7 @@ final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
     if (selectedDate != null) {
       query['target_date'] = _ymd(selectedDate);
     }
-    final response = await dio.get('/roster', queryParameters: query);
+    final response = await dio.get('/roster/', queryParameters: query);
 
     return response.data;
   } catch (e) {
