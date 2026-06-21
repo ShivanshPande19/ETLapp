@@ -101,8 +101,9 @@ def apply_form(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     return templates.TemplateResponse(
-        "onboarding.html",
-        {"request": request, "courts": courts},
+        request=request,
+        name="onboarding.html",
+        context={"request": request, "courts": courts},
     )
 
 
@@ -157,8 +158,9 @@ async def submit_application(
     db.commit()
 
     return templates.TemplateResponse(
-        "onboarding_success.html",
-        {"request": request, "outlet_name": outlet_name, "court_name": court.name},
+        request=request,
+        name="onboarding_success.html",
+        context={"request": request, "outlet_name": outlet_name, "court_name": court.name},
     )
 
 
