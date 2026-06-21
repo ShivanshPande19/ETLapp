@@ -19,6 +19,15 @@ class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
       state = AsyncValue.error(e, st);
     }
   }
+
+  /// Create a new court, then refresh the list. Throws on failure so the
+  /// caller can show an error.
+  Future<void> createCourt({required String name, String? location}) async {
+    await ref
+        .read(courtsRepositoryProvider)
+        .createCourt(name: name, location: location);
+    await fetchCourts();
+  }
 }
 
 final courtsNotifierProvider =

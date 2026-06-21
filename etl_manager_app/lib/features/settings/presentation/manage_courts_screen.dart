@@ -32,6 +32,42 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
 
     return Scaffold(
       backgroundColor: _bg,
+      floatingActionButton: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          _showNewCourtSheet(context);
+        },
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          decoration: BoxDecoration(
+            color: _red,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: [
+              BoxShadow(
+                color: _red.withOpacity(0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.add_rounded, color: _white, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'New Court',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -267,4 +303,192 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
       ),
     );
   }
+
+  void _showNewCourtSheet(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final locCtrl = TextEditingController();
+    bool loading = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: StatefulBuilder(
+          builder: (ctx, setSheet) => Container(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+            decoration: const BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5E5E5),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'New Court',
+                  style: GoogleFonts.antonSc(
+                    fontSize: 22,
+                    color: _black,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _CourtField(
+                  controller: nameCtrl,
+                  label: 'Court Name',
+                  hint: 'e.g. Central 50',
+                ),
+                const SizedBox(height: 12),
+                _CourtField(
+                  controller: locCtrl,
+                  label: 'Location (optional)',
+                  hint: 'e.g. Sector 50, Noida',
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: GestureDetector(
+                    onTap: loading
+                        ? null
+                        : () async {
+                            final name = nameCtrl.text.trim();
+                            if (name.isEmpty) return;
+                            setSheet(() => loading = true);
+                            try {
+                              await ref
+                                  .read(courtsNotifierProvider.notifier)
+                                  .createCourt(
+                                    name: name,
+                                    location: locCtrl.text.trim(),
+                                  );
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Court "$name" created'),
+                                    behavior: SnackBarBehavior.floating,
+                                    backgroundColor: _black,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              setSheet(() => loading = false);
+                              final dup = e.toString().contains('409');
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(dup
+                                        ? 'A court with this name already exists'
+                                        : 'Could not create court'),
+                                    behavior: SnackBarBehavior.floating,
+                                    backgroundColor: const Color(0xFFEF4444),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      decoration: BoxDecoration(
+                        color: _black,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Center(
+                        child: loading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: _white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                'Create Court',
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _white,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CourtField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label, hint;
+  const _CourtField({
+    required this.controller,
+    required this.label,
+    required this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: _grey,
+          letterSpacing: 0.3,
+        ),
+      ),
+      const SizedBox(height: 6),
+      TextField(
+        controller: controller,
+        style: GoogleFonts.inter(fontSize: 14, color: _black),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: GoogleFonts.inter(fontSize: 14, color: _grey),
+          filled: true,
+          fillColor: const Color(0xFFF5F5F5),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E5E5)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E5E5)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _black, width: 1.5),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 13,
+          ),
+        ),
+      ),
+    ],
+  );
 }
