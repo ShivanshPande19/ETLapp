@@ -13,3 +13,8 @@ class Court(BaseModel):
 
 class CourtsResponse(BaseModel):
     courts: List[Court]
+
+
+class CourtCreate(BaseModel):
+    name: str
+    location: Optional[str] = None

@@ -21,11 +21,19 @@ def _upsert(db: Session, table):
     return pg_insert(table) if dialect == "postgresql" else sqlite_insert(table)
 
 
-async def fetch_raw(rest_id: str, order_date: str) -> dict:
+async def fetch_raw(
+    rest_id: str,
+    order_date: str,
+    app_key: str | None = None,
+    app_secret: str | None = None,
+    access_token: str | None = None,
+    cookie: str | None = None,
+) -> dict:
+    # Per-outlet creds if provided (non-empty), else fall back to global .env.
     payload = {
-        "app_key": settings.PETPOOJA_APP_KEY,
-        "app_secret": settings.PETPOOJA_APP_SECRET,
-        "access_token": settings.PETPOOJA_ACCESS_TOKEN,
+        "app_key": app_key or settings.PETPOOJA_APP_KEY,
+        "app_secret": app_secret or settings.PETPOOJA_APP_SECRET,
+        "access_token": access_token or settings.PETPOOJA_ACCESS_TOKEN,
         "restID": rest_id,
         "order_date": order_date,
         "refId": "",
@@ -33,7 +41,7 @@ async def fetch_raw(rest_id: str, order_date: str) -> dict:
 
     headers = {
         "Content-Type": "application/json",
-        "Cookie": f"PETPOOJA_API={settings.PETPOOJA_COOKIE}",
+        "Cookie": f"PETPOOJA_API={cookie or settings.PETPOOJA_COOKIE}",
     }
 
     print(f"[PETPOOJA FETCH START] rest_id={rest_id} order_date={order_date}")
@@ -78,7 +86,14 @@ async def sync_outlet_for_dates(
         print(f"[FETCHING] vendor={outlet.vendor_name} date={api_date_str}")
         
         try:
-            raw = await fetch_raw(outlet.rest_id, api_date_str)
+            raw = await fetch_raw(
+                outlet.rest_id,
+                api_date_str,
+                app_key=outlet.pp_app_key,
+                app_secret=outlet.pp_app_secret,
+                access_token=outlet.pp_access_token,
+                cookie=outlet.pp_cookie,
+            )
         except Exception as e:
             print(f"[PETPOOJA ERROR] Exception while fetching {outlet.rest_id} on {api_date_str}: {e}")
             continue

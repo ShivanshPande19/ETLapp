@@ -88,3 +88,27 @@ def ensure_attendance_columns() -> None:
                     )
     except Exception as e:  # never block startup on a best-effort migration
         print(f"[MIGRATION] ensure_attendance_columns skipped: {e}")
+
+
+def ensure_outlet_columns() -> None:
+    """Add per-outlet Petpooja credential columns to an existing `outlets`
+    table (create_all never ALTERs existing tables). Best-effort + idempotent."""
+    needed = {
+        "pp_app_key": "VARCHAR",
+        "pp_app_secret": "VARCHAR",
+        "pp_access_token": "VARCHAR",
+        "pp_cookie": "VARCHAR",
+    }
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "outlets" not in insp.get_table_names():
+                return  # create_all will build it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("outlets")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE outlets ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:  # never block startup on a best-effort migration
+        print(f"[MIGRATION] ensure_outlet_columns skipped: {e}")

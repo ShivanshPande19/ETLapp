@@ -1,0 +1,59 @@
+# backend_fastapi/app/schemas/onboarding.py
+
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+
+
+class ApplicationOut(BaseModel):
+    id: int
+    court_id: int
+    court_name: Optional[str] = None
+    outlet_name: str
+    owner_name: str
+    owner_phone: str
+    owner_email: str
+    gst_url: Optional[str] = None
+    fssai_url: Optional[str] = None
+    term_sheet_url: Optional[str] = None
+    agreement_url: Optional[str] = None
+    status: str
+    rejection_reason: Optional[str] = None
+    created_outlet_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ApplicationListResponse(BaseModel):
+    applications: List[ApplicationOut]
+    pending_count: int
+
+
+class ApproveRequest(BaseModel):
+    # Petpooja restaurant/store mapping id — REQUIRED so sales sync works.
+    rest_id: str
+    # Optional per-outlet Petpooja creds. If omitted, the global .env creds are used.
+    pp_app_key: Optional[str] = None
+    pp_app_secret: Optional[str] = None
+    pp_access_token: Optional[str] = None
+    pp_cookie: Optional[str] = None
+
+
+class ApproveResponse(BaseModel):
+    outlet_id: int
+    manager_email: str
+    set_password_link: str
+    email_sent: bool
+    message: str
+
+
+class RejectRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class SetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
