@@ -60,6 +60,16 @@ class OnboardingRepository {
       data: {'reason': reason ?? ''},
     );
   }
+
+  Future<List<OutletWithDocs>> listCourtOutlets(int courtId) async {
+    final res = await _dio.get(
+      '/onboarding/outlets',
+      queryParameters: {'court_id': courtId},
+    );
+    return (res.data as List? ?? [])
+        .map((e) => OutletWithDocs.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 }
 
 final onboardingRepositoryProvider = Provider<OnboardingRepository>((ref) {
@@ -72,4 +82,10 @@ final applicationsProvider = FutureProvider.autoDispose
       return ref
           .read(onboardingRepositoryProvider)
           .listApplications(courtId: courtId);
+    });
+
+/// Outlets (with documents) for a given court.
+final courtOutletsProvider = FutureProvider.autoDispose
+    .family<List<OutletWithDocs>, int>((ref, courtId) async {
+      return ref.read(onboardingRepositoryProvider).listCourtOutlets(courtId);
     });

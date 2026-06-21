@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../app/dio_provider.dart' show baseUrl;
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../../onboarding/presentation/outlet_applications_screen.dart';
+import '../../onboarding/data/onboarding_repository.dart';
+import '../../onboarding/domain/onboarding_models.dart';
 import '../domain/staff_notifier.dart';
 import '../domain/staff_model.dart';
 
@@ -34,6 +38,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
   bool _backPressed = false;
+  int _tab = 0; // 0 = Staff, 1 = Outlets
 
   @override
   void initState() {
@@ -137,11 +142,11 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                         ),
                         children: [
                           const TextSpan(
-                            text: 'S',
+                            text: 'M',
                             style: TextStyle(color: _red),
                           ),
                           const TextSpan(
-                            text: 'TAFF',
+                            text: 'ANAGE',
                             style: TextStyle(color: _white),
                           ),
                         ],
@@ -186,149 +191,216 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                       top: Radius.circular(28),
                     ),
                   ),
-                  child: state.isLoading
-                      ? const Center(
-                          child: CircularProgressIndicator(color: _black),
-                        )
-                      : state.error != null
-                      ? Center(
-                          child: Text(
-                            state.error!,
-                            style: GoogleFonts.inter(color: _grey),
-                          ),
-                        )
-                      : state.staffList.isEmpty
-                      ? _EmptyState(onAdd: () => _showAddSheet(context))
-                      : Column(
-                          children: [
-                            Expanded(
-                              child: ListView.separated(
-                                padding: EdgeInsets.fromLTRB(
-                                  20,
-                                  24,
-                                  20,
-                                  MediaQuery.of(context).padding.bottom + 100,
-                                ),
-                                itemCount: state.staffList.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(height: 10),
-                                itemBuilder: (_, i) => _StaffCard(
-                                  staff: state.staffList[i],
-                                  onRemove: () => _confirmRemove(
-                                    context,
-                                    state.staffList[i],
-                                  ),
-                                  onReassign: () => _showReassignSheet(
-                                    context,
-                                    state.staffList[i],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                        child: _SegToggle(
+                          tab: _tab,
+                          onChange: (i) => setState(() => _tab = i),
                         ),
+                      ),
+                      Expanded(
+                        child: _tab == 0
+                            ? _buildStaffBody()
+                            : _buildOutletsBody(),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
         ),
       ),
-      floatingActionButton: state.isLoading
-          ? null
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => OutletApplicationsScreen(
-                          courtId: widget.courtId,
-                          courtName: widget.courtName,
-                        ),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    height: 52,
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    decoration: BoxDecoration(
-                      color: _red,
-                      borderRadius: BorderRadius.circular(999),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _red.withOpacity(0.3),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.inbox_rounded,
-                          color: _white,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Applications',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: _white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                GestureDetector(
+      floatingActionButton: _tab == 0
+          ? (state.isLoading
+              ? null
+              : _FabButton(
+                  label: 'Add Staff',
+                  icon: Icons.person_add_rounded,
+                  color: _black,
                   onTap: () => _showAddSheet(context),
-                  child: Container(
-                    height: 52,
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    decoration: BoxDecoration(
-                      color: _black,
-                      borderRadius: BorderRadius.circular(999),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.25),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.person_add_rounded,
-                          color: _white,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Add Staff',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: _white,
-                          ),
-                        ),
-                      ],
+                ))
+          : _FabButton(
+              label: 'Applications',
+              icon: Icons.inbox_rounded,
+              color: _red,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OutletApplicationsScreen(
+                      courtId: widget.courtId,
+                      courtName: widget.courtName,
                     ),
                   ),
-                ),
-              ],
+                );
+              },
             ),
     );
   }
+
+  Widget _buildStaffBody() {
+    final state = ref.watch(staffNotifierProvider);
+    if (state.isLoading) {
+      return const Center(child: CircularProgressIndicator(color: _black));
+    }
+    if (state.error != null) {
+      return Center(
+        child: Text(state.error!, style: GoogleFonts.inter(color: _grey)),
+      );
+    }
+    if (state.staffList.isEmpty) {
+      return _EmptyState(onAdd: () => _showAddSheet(context));
+    }
+    return ListView.separated(
+      padding: EdgeInsets.fromLTRB(
+        20, 16, 20, MediaQuery.of(context).padding.bottom + 100,
+      ),
+      itemCount: state.staffList.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) => _StaffCard(
+        staff: state.staffList[i],
+        onRemove: () => _confirmRemove(context, state.staffList[i]),
+        onReassign: () => _showReassignSheet(context, state.staffList[i]),
+      ),
+    );
+  }
+
+  Widget _buildOutletsBody() {
+    final async = ref.watch(courtOutletsProvider(widget.courtId));
+    return async.when(
+      loading: () =>
+          const Center(child: CircularProgressIndicator(color: _black)),
+      error: (_, __) => Center(
+        child: Text('Could not load outlets',
+            style: GoogleFonts.inter(color: _grey)),
+      ),
+      data: (outlets) {
+        if (outlets.isEmpty) return const _OutletsEmpty();
+        return ListView.separated(
+          padding: EdgeInsets.fromLTRB(
+            20, 16, 20, MediaQuery.of(context).padding.bottom + 100,
+          ),
+          itemCount: outlets.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (_, i) => _OutletCard(
+            outlet: outlets[i],
+            onTap: () => _showOutletDocs(outlets[i]),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openDoc(String? url) async {
+    if (url == null || url.isEmpty) return;
+    final clean = url.startsWith('/') ? url.substring(1) : url;
+    final uri = Uri.parse('$baseUrl/$clean');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _showOutletDocs(OutletWithDocs o) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (_, sc) => Container(
+          decoration: const BoxDecoration(
+            color: _white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: ListView(
+            controller: sc,
+            padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E5E5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(o.vendorName,
+                  style: GoogleFonts.inter(
+                      fontSize: 20, fontWeight: FontWeight.w900, color: _black)),
+              const SizedBox(height: 4),
+              Row(children: [
+                const Icon(Icons.tag_rounded, size: 14, color: _grey),
+                const SizedBox(width: 4),
+                Text('rest_id: ${o.restId}',
+                    style: GoogleFonts.inter(fontSize: 12.5, color: _grey)),
+              ]),
+              const SizedBox(height: 18),
+              if (o.ownerName != null)
+                _docOwnerRow(Icons.person_rounded, 'Owner', o.ownerName!),
+              if (o.ownerPhone != null)
+                _docOwnerRow(Icons.phone_rounded, 'Phone', o.ownerPhone!),
+              if (o.ownerEmail != null)
+                _docOwnerRow(Icons.email_rounded, 'Login Email', o.ownerEmail!),
+              const SizedBox(height: 16),
+              Text('DOCUMENTS',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: _grey,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 10),
+              _OutletDocTile(label: 'GST Certificate', url: o.gstUrl, onOpen: _openDoc),
+              _OutletDocTile(label: 'FSSAI License', url: o.fssaiUrl, onOpen: _openDoc),
+              _OutletDocTile(label: 'Term Sheet', url: o.termSheetUrl, onOpen: _openDoc),
+              _OutletDocTile(label: 'Agreement', url: o.agreementUrl, onOpen: _openDoc),
+              if (!o.hasAnyDoc)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'No documents on record for this outlet.',
+                    style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        color: _grey,
+                        fontStyle: FontStyle.italic),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _docOwnerRow(IconData icon, String label, String value) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(children: [
+          Icon(icon, size: 16, color: _grey),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 90,
+            child: Text(label,
+                style: GoogleFonts.inter(
+                    fontSize: 13, color: _grey, fontWeight: FontWeight.w600)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: GoogleFonts.inter(
+                    fontSize: 13.5,
+                    color: _black,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ]),
+      );
 
   void _showAddSheet(BuildContext context) {
     final nameCtrl = TextEditingController();
@@ -822,4 +894,281 @@ class _SheetField extends StatelessWidget {
       ),
     ],
   );
+}
+
+
+
+// ─── Staff / Outlets segmented toggle ─────────────────────────────────────────
+
+class _SegToggle extends StatelessWidget {
+  final int tab;
+  final void Function(int) onChange;
+  const _SegToggle({required this.tab, required this.onChange});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F2F2),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          _seg(0, 'Staff', Icons.people_alt_rounded),
+          _seg(1, 'Outlets', Icons.storefront_rounded),
+        ],
+      ),
+    );
+  }
+
+  Widget _seg(int idx, String label, IconData icon) {
+    final active = tab == idx;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onChange(idx);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? _black : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: active ? _white : _grey),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: active ? _white : _grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── FAB pill ──────────────────────────────────────────────────────────────────
+
+class _FabButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _FabButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: _white, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─── Outlet card ───────────────────────────────────────────────────────────────
+
+class _OutletCard extends StatelessWidget {
+  final OutletWithDocs outlet;
+  final VoidCallback onTap;
+  const _OutletCard({required this.outlet, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE5E5E5), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _black.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.storefront_rounded, size: 20, color: _black),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    outlet.vendorName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _black,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Text(
+                        'rest_id: ${outlet.restId}',
+                        style: GoogleFonts.inter(fontSize: 12, color: _grey),
+                      ),
+                      if (outlet.hasAnyDoc) ...[
+                        const SizedBox(width: 8),
+                        const Icon(Icons.description_rounded,
+                            size: 12, color: _grey),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                size: 20, color: _grey.withOpacity(0.5)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OutletsEmpty extends StatelessWidget {
+  const _OutletsEmpty();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: _grey.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.storefront_outlined,
+                  size: 28, color: _grey),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No outlets yet',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: _black,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Approve an application to add an outlet',
+              style: GoogleFonts.inter(fontSize: 13, color: _grey),
+            ),
+          ],
+        ),
+      );
+}
+
+class _OutletDocTile extends StatelessWidget {
+  final String label;
+  final String? url;
+  final Future<void> Function(String?) onOpen;
+  const _OutletDocTile({
+    required this.label,
+    required this.url,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final has = url != null && url!.isNotEmpty;
+    return GestureDetector(
+      onTap: has ? () => onOpen(url) : null,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: has ? const Color(0xFFFAFAFA) : const Color(0xFFFCFCFC),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFEDEDED)),
+        ),
+        child: Row(
+          children: [
+            Icon(has ? Icons.description_rounded : Icons.block_rounded,
+                size: 18, color: has ? _black : Colors.grey.shade400),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: has ? _black : Colors.grey.shade400,
+                ),
+              ),
+            ),
+            if (has)
+              const Icon(Icons.open_in_new_rounded, size: 16, color: _grey)
+            else
+              Text('Not provided',
+                  style: GoogleFonts.inter(
+                      fontSize: 11.5, color: Colors.grey.shade400)),
+          ],
+        ),
+      ),
+    );
+  }
 }
