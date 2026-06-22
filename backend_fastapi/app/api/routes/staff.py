@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...schemas.staff import StaffResponse, StaffListResponse, CourtAssignRequest
 from ...services.staff_service import (
-    get_all_staff, get_staff_by_court,
+    get_all_staff, get_staff_by_court, get_staff_by_outlet,
     create_staff, deactivate_staff, reassign_court
 )
 from ...core.config import settings
@@ -60,6 +60,12 @@ def list_all_staff(db: Session = Depends(get_db)):
 @router.get("/court/{court_id}", response_model=StaffListResponse)
 def list_staff_by_court(court_id: int, db: Session = Depends(get_db)):
     return StaffListResponse(staff=get_staff_by_court(court_id, db))
+
+
+# ── GET staff by outlet (outlet staff shown in the outlet detail sheet) ───────
+@router.get("/outlet/{outlet_id}", response_model=StaffListResponse)
+def list_staff_by_outlet(outlet_id: int, db: Session = Depends(get_db)):
+    return StaffListResponse(staff=get_staff_by_outlet(outlet_id, db))
 
 
 # ── POST add new ETL staff (multipart: name, phone, email, password, photo) ────

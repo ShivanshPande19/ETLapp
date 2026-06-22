@@ -106,3 +106,15 @@ class StaffNotifier extends Notifier<StaffState> {
 final staffNotifierProvider = NotifierProvider<StaffNotifier, StaffState>(
   StaffNotifier.new,
 );
+
+
+
+// ── Outlet staff (for the outlet detail sheet) ────────────────────────────────
+final outletStaffProvider = FutureProvider.autoDispose
+    .family<List<StaffModel>, int>((ref, outletId) async {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get('/staff/outlet/$outletId');
+      return (res.data['staff'] as List? ?? [])
+          .map((e) => StaffModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    });

@@ -353,6 +353,44 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                 _docOwnerRow(Icons.phone_rounded, 'Phone', o.ownerPhone!),
               if (o.ownerEmail != null)
                 _docOwnerRow(Icons.email_rounded, 'Login Email', o.ownerEmail!),
+
+              const SizedBox(height: 16),
+              Text('STAFF',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: _grey,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 10),
+              Consumer(
+                builder: (context, ref, _) {
+                  final async = ref.watch(outletStaffProvider(o.outletId));
+                  return async.when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: _black, strokeWidth: 2),
+                        ),
+                      ),
+                    ),
+                    error: (_, __) =>
+                        _outletStaffFallback('Could not load staff'),
+                    data: (list) => list.isEmpty
+                        ? _outletStaffFallback(
+                            'No outlet staff assigned yet')
+                        : Column(
+                            children: list
+                                .map((s) => _OutletStaffTile(staff: s))
+                                .toList(),
+                          ),
+                  );
+                },
+              ),
+
               const SizedBox(height: 16),
               Text('DOCUMENTS',
                   style: GoogleFonts.inter(
@@ -382,6 +420,30 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
       ),
     );
   }
+
+  Widget _outletStaffFallback(String msg) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFAFAFA),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFEDEDED)),
+        ),
+        child: Row(children: [
+          Icon(Icons.group_off_rounded, size: 18, color: Colors.grey.shade400),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              msg,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: _grey,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ]),
+      );
 
   Widget _docOwnerRow(IconData icon, String label, String value) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -1317,6 +1379,83 @@ class _OutletDocTile extends StatelessWidget {
                       fontSize: 11.5, color: Colors.grey.shade400)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+
+// ─── Outlet staff tile (shown inside the outlet detail sheet) ─────────────────
+
+class _OutletStaffTile extends StatelessWidget {
+  final StaffModel staff;
+  const _OutletStaffTile({required this.staff});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto = staff.photoUrl != null && staff.photoUrl!.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAFAFA),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFEDEDED)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _red.withOpacity(0.08),
+              shape: BoxShape.circle,
+              border: Border.all(color: _red.withOpacity(0.2)),
+              image: hasPhoto
+                  ? DecorationImage(
+                      image: NetworkImage('$baseUrl/${staff.photoUrl}'),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
+            ),
+            child: hasPhoto
+                ? null
+                : Center(
+                    child: Text(
+                      staff.name.isNotEmpty ? staff.name[0].toUpperCase() : '?',
+                      style: GoogleFonts.antonSc(fontSize: 17, color: _red),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  staff.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _black,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  (staff.phone != null && staff.phone!.isNotEmpty)
+                      ? staff.phone!
+                      : staff.email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(fontSize: 12, color: _grey),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
