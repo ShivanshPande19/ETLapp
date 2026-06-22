@@ -314,6 +314,23 @@ class AppTheme {
         thickness: 1,
       ),
 
+      // SnackBar — dark pill, WHITE readable text (M3 dark default was dark
+      // text on an inverse-surface, which looked like an unreadable black bar).
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF1A1A1A),
+        contentTextStyle: GoogleFonts.inter(
+          color: Colors.white,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        elevation: 8,
+      ),
+
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
