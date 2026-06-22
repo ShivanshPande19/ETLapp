@@ -10,6 +10,13 @@ def get_staff_by_court(court_id: int, db: Session) -> list[Staff]:
         Staff.is_active == True
     ).all()
 
+
+def get_staff_by_outlet(outlet_id: int, db: Session) -> list[Staff]:
+    return db.query(Staff).filter(
+        Staff.outlet_id == outlet_id,
+        Staff.is_active == True
+    ).all()
+
 def get_all_staff(db: Session) -> list[Staff]:
     return db.query(Staff).filter(Staff.is_active == True).all()
 
