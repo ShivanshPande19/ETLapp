@@ -26,12 +26,16 @@ def create_staff(
     name: str,
     email: str,
     password: str,
-    court_id: int,
+    role: str = "etl_staff",
+    court_id: int | None = None,
+    outlet_id: int | None = None,
     phone: str | None = None,
     photo_url: str | None = None,
 ) -> Staff | None:
-    """Create an ETL staff account for a court. ETL managers can only create
-    etl_staff (outlet staff are created by outlet managers)."""
+    """Create a staff account.
+    - ETL managers create etl_staff (court_id set).
+    - Outlet managers create outlet_staff (outlet_id set).
+    """
     existing = db.query(Staff).filter(Staff.email == email).first()
     if existing:
         return None  # Already exists
@@ -39,9 +43,9 @@ def create_staff(
         name=name,
         email=email,
         hashed_password=hash_password(password),
-        role="etl_staff",
+        role=role,
         court_id=court_id,
-        outlet_id=None,
+        outlet_id=outlet_id,
         phone=phone,
         photo_url=photo_url,
         is_active=True,

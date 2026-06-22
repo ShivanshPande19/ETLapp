@@ -11,7 +11,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/services/biometric_service.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
+import '../../home/presentation/home_providers.dart' show currentOutletNameProvider;
 import '../presentation/manage_courts_screen.dart';
+import 'outlet_staff_management_screen.dart';
 
 const _bg = Color(0xFF080808);
 const _white = Color(0xFFFFFFFF);
@@ -146,6 +148,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     final courtsAsync = ref.watch(courtsNotifierProvider); // NEW WATCH
     final name = auth.managerName ?? 'Manager';
     final email = auth.managerEmail ?? 'manager@etl.com';
+    final roleLabel = auth.isEtlManager
+        ? 'Admin Access'
+        : auth.isOutletManager
+            ? 'Outlet Manager'
+            : 'Staff Access';
+    final outletName =
+        ref.watch(currentOutletNameProvider).value ?? 'Your Outlet';
 
     return Scaffold(
       backgroundColor: _bg,
@@ -295,7 +304,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                       children: [
                         _StaggerItem(
                           anim: _itemAnim(0),
-                          child: _ProfileCard(name: name, email: email),
+                          child: _ProfileCard(
+                              name: name, email: email, roleLabel: roleLabel),
                         ),
                         const SizedBox(height: 28),
                         _StaggerItem(
@@ -319,53 +329,94 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                     ? _onBiometricToggle
                                     : null,
                               ),
-                              _GroupDivider(),
-                              _InfoTile(
-                                icon: Icons.schedule_rounded,
-                                label: 'Sales Data Sync',
-                                value: 'Daily · 12:00 AM',
-                                valueColor: _grey,
-                              ),
+                              if (auth.isManager) ...[
+                                _GroupDivider(),
+                                _InfoTile(
+                                  icon: Icons.schedule_rounded,
+                                  label: 'Sales Data Sync',
+                                  value: 'Daily · 12:00 AM',
+                                  valueColor: _grey,
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                        const SizedBox(height: 24),
-                        _StaggerItem(
-                          anim: _itemAnim(3),
-                          child: const _SectionLabel('COURTS'),
-                        ),
-                        const SizedBox(height: 10),
-                        _StaggerItem(
-                          anim: _itemAnim(4),
-                          child: _SettingsGroup(
-                            children: [
-                              // CHANGED: Linked subtitle dynamically to real counts
-                              _NavTile(
-                                icon: Icons.store_rounded,
-                                label: 'Manage Courts',
-                                subtitle: courtsAsync.when(
-                                  loading: () => 'Loading courts...',
-                                  error: (_, __) => 'ETL Courts',
-                                  data: (list) =>
-                                      'ETL · ${list.length} active ${list.length == 1 ? 'court' : 'courts'}',
-                                ),
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const ManageCourtsScreen(),
+                        // ── Role-specific section ─────────────────────
+                        if (auth.isEtlManager) ...[
+                          const SizedBox(height: 24),
+                          _StaggerItem(
+                            anim: _itemAnim(3),
+                            child: const _SectionLabel('COURTS'),
+                          ),
+                          const SizedBox(height: 10),
+                          _StaggerItem(
+                            anim: _itemAnim(4),
+                            child: _SettingsGroup(
+                              children: [
+                                _NavTile(
+                                  icon: Icons.store_rounded,
+                                  label: 'Manage Courts',
+                                  subtitle: courtsAsync.when(
+                                    loading: () => 'Loading courts...',
+                                    error: (_, __) => 'ETL Courts',
+                                    data: (list) =>
+                                        'ETL · ${list.length} active ${list.length == 1 ? 'court' : 'courts'}',
+                                  ),
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ManageCourtsScreen(),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              _GroupDivider(),
-                              _NavTile(
-                                icon: Icons.point_of_sale_rounded,
-                                label: 'POS Integrations',
-                                subtitle: 'GoFrugal, Petpooja, Vyapar',
-                                onTap: () {},
-                              ),
-                            ],
+                                _GroupDivider(),
+                                _NavTile(
+                                  icon: Icons.point_of_sale_rounded,
+                                  label: 'POS Integrations',
+                                  subtitle: 'GoFrugal, Petpooja, Vyapar',
+                                  onTap: () {},
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
+                        ] else if (auth.isOutletManager) ...[
+                          const SizedBox(height: 24),
+                          _StaggerItem(
+                            anim: _itemAnim(3),
+                            child: const _SectionLabel('MY OUTLET'),
+                          ),
+                          const SizedBox(height: 10),
+                          _StaggerItem(
+                            anim: _itemAnim(4),
+                            child: _SettingsGroup(
+                              children: [
+                                _NavTile(
+                                  icon: Icons.people_alt_rounded,
+                                  label: 'Manage Staff',
+                                  subtitle: 'Add & manage your outlet staff',
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          OutletStaffManagementScreen(
+                                        outletId: auth.outletId ?? 0,
+                                        outletName: outletName,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                _GroupDivider(),
+                                _InfoTile(
+                                  icon: Icons.storefront_rounded,
+                                  label: 'Outlet',
+                                  value: outletName,
+                                  valueColor: _black,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         _StaggerItem(
                           anim: _itemAnim(5),
@@ -502,8 +553,12 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _ProfileCard extends StatelessWidget {
-  final String name, email;
-  const _ProfileCard({required this.name, required this.email});
+  final String name, email, roleLabel;
+  const _ProfileCard({
+    required this.name,
+    required this.email,
+    required this.roleLabel,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
@@ -576,7 +631,7 @@ class _ProfileCard extends StatelessWidget {
                     const Icon(Icons.shield_rounded, size: 11, color: _white),
                     const SizedBox(width: 5),
                     Text(
-                      'Admin Access',
+                      roleLabel,
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
