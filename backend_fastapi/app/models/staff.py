@@ -19,5 +19,9 @@ class Staff(Base):
     # Outlet staff ke liye outlet assign hoga
     outlet_id       = Column(Integer, ForeignKey("outlets.id"), nullable=True)
     
+    # ✅ Contact + profile photo (collected at onboarding)
+    phone           = Column(String,  nullable=True)
+    photo_url       = Column(String,  nullable=True)
+    
     is_active       = Column(Boolean, nullable=False, default=True)
     created_at      = Column(DateTime, server_default=func.now())

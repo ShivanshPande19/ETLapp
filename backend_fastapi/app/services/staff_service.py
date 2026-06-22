@@ -2,7 +2,7 @@
 from sqlalchemy.orm import Session
 from ..models.staff import Staff
 from ..core.security import hash_password
-from ..schemas.staff import StaffCreate
+
 
 def get_staff_by_court(court_id: int, db: Session) -> list[Staff]:
     return db.query(Staff).filter(
@@ -13,16 +13,30 @@ def get_staff_by_court(court_id: int, db: Session) -> list[Staff]:
 def get_all_staff(db: Session) -> list[Staff]:
     return db.query(Staff).filter(Staff.is_active == True).all()
 
-def create_staff(data: StaffCreate, db: Session) -> Staff:
-    existing = db.query(Staff).filter(Staff.email == data.email).first()
+def create_staff(
+    db: Session,
+    *,
+    name: str,
+    email: str,
+    password: str,
+    court_id: int,
+    phone: str | None = None,
+    photo_url: str | None = None,
+) -> Staff | None:
+    """Create an ETL staff account for a court. ETL managers can only create
+    etl_staff (outlet staff are created by outlet managers)."""
+    existing = db.query(Staff).filter(Staff.email == email).first()
     if existing:
         return None  # Already exists
     staff = Staff(
-        name=data.name,
-        email=data.email,
-        hashed_password=hash_password(data.password),
-        role="staff",
-        court_id=data.court_id,
+        name=name,
+        email=email,
+        hashed_password=hash_password(password),
+        role="etl_staff",
+        court_id=court_id,
+        outlet_id=None,
+        phone=phone,
+        photo_url=photo_url,
         is_active=True,
     )
     db.add(staff)

@@ -14,6 +14,8 @@ class StaffResponse(BaseModel):
     email: str
     role: str
     court_id: Optional[int]
+    phone: Optional[str] = None
+    photo_url: Optional[str] = None
     is_active: bool
 
     class Config:

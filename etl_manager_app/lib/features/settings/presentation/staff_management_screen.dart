@@ -1,10 +1,12 @@
 // lib/features/staff/presentation/staff_management_screen.dart
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../app/dio_provider.dart' show baseUrl;
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
@@ -404,146 +406,275 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
 
   void _showAddSheet(BuildContext context) {
     final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final passCtrl = TextEditingController();
+    File? photoFile;
     bool loading = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-          decoration: const BoxDecoration(
-            color: _white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE5E5E5),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Add New Staff',
-                style: GoogleFonts.antonSc(
-                  fontSize: 22,
-                  color: _black,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _SheetField(
-                controller: nameCtrl,
-                label: 'Full Name',
-                hint: 'Rahul Sharma',
-              ),
-              const SizedBox(height: 12),
-              _SheetField(
-                controller: emailCtrl,
-                label: 'Email',
-                hint: 'rahul@etl.com',
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 12),
-              _SheetField(
-                controller: passCtrl,
-                label: 'Password',
-                hint: '••••••••',
-                obscure: true,
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: StatefulBuilder(
-                  builder: (ctx, setSheet) => GestureDetector(
-                    onTap: loading
-                        ? null
-                        : () async {
-                            if (nameCtrl.text.isEmpty ||
-                                emailCtrl.text.isEmpty ||
-                                passCtrl.text.isEmpty)
-                              return;
-                            setSheet(() => loading = true);
-                            final ok = await ref
-                                .read(staffNotifierProvider.notifier)
-                                .addStaff(
-                                  name: nameCtrl.text.trim(),
-                                  email: emailCtrl.text.trim(),
-                                  password: passCtrl.text,
-                                  courtId: widget.courtId,
-                                );
-                            if (context.mounted) Navigator.pop(context);
-                            if (!ok && context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Email already registered',
-                                    style: GoogleFonts.inter(color: _white),
-                                  ),
-                                  backgroundColor: _black,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  margin: const EdgeInsets.fromLTRB(
-                                    16,
-                                    0,
-                                    16,
-                                    16,
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(vertical: 15),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
+            decoration: const BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
                       decoration: BoxDecoration(
-                        color: _black,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Center(
-                        child: loading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  color: _white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(
-                                'Add Staff',
-                                style: GoogleFonts.inter(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: _white,
-                                ),
-                              ),
+                        color: const Color(0xFFE5E5E5),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Add Staff',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 22,
+                      color: _black,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'New ETL staff for ${widget.courtName}',
+                    style: GoogleFonts.inter(fontSize: 13, color: _grey),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Photo picker
+                  Center(
+                    child: GestureDetector(
+                      onTap: () => _pickStaffPhoto(
+                        ctx,
+                        (f) => setSheet(() => photoFile = f),
+                      ),
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 92,
+                            height: 92,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF2F2F2),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFFE5E5E5),
+                                width: 2,
+                              ),
+                              image: photoFile != null
+                                  ? DecorationImage(
+                                      image: FileImage(photoFile!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                            ),
+                            child: photoFile == null
+                                ? const Icon(
+                                    Icons.person_rounded,
+                                    size: 42,
+                                    color: _grey,
+                                  )
+                                : null,
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Container(
+                              width: 30,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: _red,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: _white, width: 2),
+                              ),
+                              child: const Icon(
+                                Icons.camera_alt_rounded,
+                                size: 15,
+                                color: _white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      photoFile == null ? 'Tap to add photo' : 'Tap to change',
+                      style: GoogleFonts.inter(fontSize: 12, color: _grey),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+
+                  _SheetField(
+                    controller: nameCtrl,
+                    label: 'Full Name',
+                    hint: 'Rahul Sharma',
+                  ),
+                  const SizedBox(height: 12),
+                  _SheetField(
+                    controller: phoneCtrl,
+                    label: 'Phone Number',
+                    hint: '10-digit mobile',
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 12),
+                  _SheetField(
+                    controller: emailCtrl,
+                    label: 'Email (login id)',
+                    hint: 'rahul@etl.com',
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  _SheetField(
+                    controller: passCtrl,
+                    label: 'Password (tell the staff)',
+                    hint: 'min 4 characters',
+                    obscure: true,
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: GestureDetector(
+                      onTap: loading
+                          ? null
+                          : () async {
+                              if (nameCtrl.text.trim().isEmpty ||
+                                  phoneCtrl.text.trim().isEmpty ||
+                                  emailCtrl.text.trim().isEmpty ||
+                                  passCtrl.text.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Text(
+                                      'Name, phone, email and password are required',
+                                    ),
+                                    backgroundColor: _black,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                                return;
+                              }
+                              setSheet(() => loading = true);
+                              final ok = await ref
+                                  .read(staffNotifierProvider.notifier)
+                                  .addStaff(
+                                    name: nameCtrl.text.trim(),
+                                    email: emailCtrl.text.trim(),
+                                    password: passCtrl.text,
+                                    courtId: widget.courtId,
+                                    phone: phoneCtrl.text.trim(),
+                                    photoPath: photoFile?.path,
+                                  );
+                              if (context.mounted) Navigator.pop(context);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      ok
+                                          ? 'Staff added. Share the email & password with them.'
+                                          : 'Could not add (email may already exist)',
+                                    ),
+                                    backgroundColor: ok ? _black : _red,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        decoration: BoxDecoration(
+                          color: _black,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Center(
+                          child: loading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: _white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(
+                                  'Add Staff',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: _white,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _pickStaffPhoto(
+    BuildContext ctx,
+    void Function(File) onPicked,
+  ) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: ctx,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: _white,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded, color: _black),
+              title: Text('Take Photo',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded, color: _black),
+              title: Text('Choose from Gallery',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final XFile? img = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 70,
+      maxWidth: 800,
+    );
+    if (img != null) onPicked(File(img.path));
   }
 
   void _confirmRemove(BuildContext context, StaffModel staff) {
@@ -731,13 +862,21 @@ class _StaffCard extends StatelessWidget {
             color: _red.withOpacity(0.08),
             shape: BoxShape.circle,
             border: Border.all(color: _red.withOpacity(0.2)),
+            image: (staff.photoUrl != null && staff.photoUrl!.isNotEmpty)
+                ? DecorationImage(
+                    image: NetworkImage('$baseUrl/${staff.photoUrl}'),
+                    fit: BoxFit.cover,
+                  )
+                : null,
           ),
-          child: Center(
-            child: Text(
-              staff.name[0].toUpperCase(),
-              style: GoogleFonts.antonSc(fontSize: 18, color: _red),
-            ),
-          ),
+          child: (staff.photoUrl == null || staff.photoUrl!.isEmpty)
+              ? Center(
+                  child: Text(
+                    staff.name.isNotEmpty ? staff.name[0].toUpperCase() : '?',
+                    style: GoogleFonts.antonSc(fontSize: 18, color: _red),
+                  ),
+                )
+              : null,
         ),
         const SizedBox(width: 14),
         Expanded(
@@ -755,8 +894,18 @@ class _StaffCard extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 staff.email,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.inter(fontSize: 12, color: _grey),
               ),
+              if (staff.phone != null && staff.phone!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Text(
+                    staff.phone!,
+                    style: GoogleFonts.inter(fontSize: 11.5, color: _grey),
+                  ),
+                ),
             ],
           ),
         ),

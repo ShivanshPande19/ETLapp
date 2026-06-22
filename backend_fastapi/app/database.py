@@ -112,3 +112,22 @@ def ensure_outlet_columns() -> None:
                     )
     except Exception as e:  # never block startup on a best-effort migration
         print(f"[MIGRATION] ensure_outlet_columns skipped: {e}")
+
+
+def ensure_staff_columns() -> None:
+    """Add profile columns (phone, photo_url) to an existing `staff` table.
+    Best-effort + idempotent."""
+    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR"}
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "staff" not in insp.get_table_names():
+                return
+            existing = {c["name"] for c in insp.get_columns("staff")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE staff ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:
+        print(f"[MIGRATION] ensure_staff_columns skipped: {e}")
