@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/biometric_service.dart';
 import '../../auth/domain/auth_notifier.dart';
+import '../../courts/domain/courts_notifier.dart';
 
 const _bg = Color(0xFF080808);
 const _white = Color(0xFFFFFFFF);
@@ -139,18 +140,11 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
     ),
   );
 
-  String _shiftLabel(String? zone) {
-    if (zone == null) return 'Not Assigned';
-    switch (zone) {
-      case '1':
-        return 'Court 1 · Morning Shift';
-      case '2':
-        return 'Court 2 · Day Shift';
-      case '3':
-        return 'Court 3 · Evening Shift';
-      default:
-        return 'Court $zone';
-    }
+  String _currentShiftLabel() {
+    final h = DateTime.now().hour;
+    if (h >= 6 && h < 12) return 'Morning Shift · 6 AM – 12 PM';
+    if (h >= 12 && h < 16) return 'Day Shift · 12 PM – 4 PM';
+    return 'Night Shift · 4 PM – 12 AM';
   }
 
   @override
@@ -160,6 +154,12 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
     final email = auth.managerEmail ?? 'staff@etl.com';
     final zone = auth.zone;
     final courtId = auth.courtId;
+    final courtsAsync = ref.watch(courtsNotifierProvider);
+    String courtLabel = 'Court $courtId';
+    courtsAsync.whenData((courts) {
+      final m = courts.where((c) => c.id == courtId);
+      if (m.isNotEmpty) courtLabel = m.first.name;
+    });
 
     return Scaffold(
       backgroundColor: _bg,
@@ -322,7 +322,7 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                             name: name,
                             email: email,
                             zone: zone,
-                            courtId: courtId,
+                            courtLabel: courtLabel,
                           ),
                         ),
                         const SizedBox(height: 28),
@@ -368,7 +368,7 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                                 icon: Icons.store_rounded,
                                 label: 'Assigned Court',
                                 value: zone != null
-                                    ? 'Court $courtId'
+                                    ? courtLabel
                                     : 'Not Assigned',
                                 valueColor: zone != null ? _black : _grey,
                               ),
@@ -376,7 +376,7 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                               _InfoTile(
                                 icon: Icons.schedule_rounded,
                                 label: 'Current Shift',
-                                value: _shiftLabel(zone),
+                                value: _currentShiftLabel(),
                                 valueColor: _grey,
                               ),
                               _GroupDivider(),
@@ -536,12 +536,12 @@ class _SectionLabel extends StatelessWidget {
 class _StaffProfileCard extends StatelessWidget {
   final String name, email;
   final String? zone;
-  final int courtId;
+  final String courtLabel;
   const _StaffProfileCard({
     required this.name,
     required this.email,
     required this.zone,
-    required this.courtId,
+    required this.courtLabel,
   });
 
   @override
@@ -656,7 +656,7 @@ class _StaffProfileCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            'Court $courtId',
+                            courtLabel,
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
