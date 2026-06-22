@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../domain/housekeeping_notifier.dart';
 import '../domain/housekeeping_models.dart' as hk;
 import '../data/housekeeping_repository.dart';
+import '../../../core/network/api_client.dart';
 
 // ✅ NEW IMPORT: DB se real court name laane ke liye
 import '../../courts/domain/courts_notifier.dart';
@@ -494,17 +495,17 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
       return;
     }
 
-    final source = await _showPhotoSourceSheet(task);
-    if (source == null || !mounted) return;
+    final proceed = await _showPhotoSourceSheet(task);
+    if (proceed != ImageSource.camera || !mounted) return;
 
     final picker = ImagePicker();
-    final xFile = source == ImageSource.camera
-        ? await picker.pickImage(
-            source: ImageSource.camera,
-            imageQuality: 80,
-            maxWidth: 1280,
-          )
-        : await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    // Camera ONLY — gallery is intentionally disabled so staff cannot submit
+    // old/fake photos. Every proof is a live capture, watermarked on upload.
+    final xFile = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+      maxWidth: 1280,
+    );
     if (xFile == null || !mounted) return;
     final photo = File(xFile.path);
 
@@ -1186,7 +1187,7 @@ class _TaskTileState extends State<_TaskTile>
         child: hasLocal
             ? Image.file(widget.photo!, fit: BoxFit.cover)
             : Image.network(
-                widget.photoUrl!,
+                resolveMediaUrl(widget.photoUrl)!,
                 fit: BoxFit.cover,
                 loadingBuilder: (_, child, progress) {
                   if (progress == null) return child;
@@ -1524,7 +1525,7 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
               ),
               const SizedBox(height: 5),
               Text(
-                'A photo is required to mark this task done.',
+                'Live camera only - take a fresh photo to mark this done.',
                 style: GoogleFonts.inter(fontSize: 13, color: _grey),
               ),
               const SizedBox(height: 28),
@@ -1538,16 +1539,25 @@ class _PhotoPickerSheetState extends State<_PhotoPickerSheet>
                   onTap: () => Navigator.of(context).pop(ImageSource.camera),
                 ),
               ),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _SheetOptionButton(
-                  icon: Icons.photo_library_outlined,
-                  label: 'Choose from Gallery',
-                  sublabel: 'Pick an existing photo',
-                  isPrimary: false,
-                  onTap: () => Navigator.of(context).pop(ImageSource.gallery),
-                ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.verified_user_rounded,
+                    size: 13,
+                    color: _faint,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Location & time are stamped on every photo',
+                    style: GoogleFonts.inter(
+                      fontSize: 11.5,
+                      color: _faint,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               GestureDetector(
@@ -2023,7 +2033,7 @@ class _HistoryTaskTile extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Image.network(
-            photoUrl!,
+            resolveMediaUrl(photoUrl)!,
             fit: BoxFit.cover,
             loadingBuilder: (_, child, progress) {
               if (progress == null) return child;

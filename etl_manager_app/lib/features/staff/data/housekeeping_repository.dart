@@ -1,11 +1,9 @@
 // lib/features/staff/data/housekeeping_repository.dart
 
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
-import '../../../core/cloudinary/cloudinary_service.dart';
 import '../domain/housekeeping_models.dart';
 
 class HousekeepingRepository {
@@ -55,7 +53,7 @@ class HousekeepingRepository {
 
   Future<bool> markWeeklyDone({
     required int courtId,
-    String? photoUrl, // pass URL after uploading via HousekeepingStorageService
+    String? photoUrl, // pass URL after uploading via PhotoUploadService
     int? doneBy,
   }) async {
     try {
@@ -74,7 +72,7 @@ class HousekeepingRepository {
 
   Future<bool> markMonthlyDone({
     required int courtId,
-    String? photoUrl, // pass URL after uploading via HousekeepingStorageService
+    String? photoUrl, // pass URL after uploading via PhotoUploadService
     int? doneBy,
   }) async {
     try {

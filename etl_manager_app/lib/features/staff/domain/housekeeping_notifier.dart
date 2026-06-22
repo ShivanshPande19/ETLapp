@@ -3,9 +3,11 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import '../data/housekeeping_repository.dart';
 import '../../../core/utils/token_storage.dart';
-import '../../../core/cloudinary/cloudinary_service.dart';
+import '../../../core/network/api_client.dart';
+import '../../../core/storage/photo_upload_service.dart';
 import 'housekeeping_models.dart' as hk;
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -266,6 +268,29 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
 
   String get _today => DateTime.now().toIso8601String().substring(0, 10);
 
+  // Best-effort current position — never throws, returns null on any failure
+  // (permissions denied, services off, timeout). Watermark falls back to a
+  // time-only stamp in that case.
+  Future<Position?> _safePosition() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 8),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   hk.Shift get _autoShift {
     final h = DateTime.now().hour;
     if (h >= 6 && h < 12) return hk.Shift.morning;
@@ -323,28 +348,37 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       final date = state.date;
       final courtId = state.courtId!;
 
-      // ── Upload photo to Cloudinary ───────────────────────────────────────
-      String? photoUrl;
-      if (taskId == 'flagswash') {
-        photoUrl = await HousekeepingStorageService.uploadWeeklyPhoto(
-          photo: photo,
-          courtId: courtId,
-          date: date,
+      // ── Capture location for the watermark (best-effort, non-blocking) ───
+      double? lat;
+      double? lng;
+      String? addressLine;
+      try {
+        final pos = await _safePosition();
+        if (pos != null) {
+          lat = pos.latitude;
+          lng = pos.longitude;
+          addressLine = await PhotoUploadService.reverseGeocode(lat, lng);
+        }
+      } catch (e) {
+        debugPrint('housekeeping location capture failed: $e');
+      }
+
+      // ── Compress + watermark + upload to Railway volume ──────────────────
+      final photoUrl = await PhotoUploadService.uploadHousekeepingPhoto(
+        dio: ref.read(dioProvider),
+        photo: photo,
+        addressLine: addressLine,
+        lat: lat,
+        lng: lng,
+      );
+
+      if (photoUrl == null) {
+        final newLoading = Set<String>.from(state.loadingTasks)..remove(key);
+        state = state.copyWith(
+          loadingTasks: newLoading,
+          error: 'Photo upload failed. Check your connection.',
         );
-      } else if (taskId == 'fireaudit') {
-        photoUrl = await HousekeepingStorageService.uploadMonthlyPhoto(
-          photo: photo,
-          courtId: courtId,
-          date: date,
-        );
-      } else {
-        photoUrl = await HousekeepingStorageService.uploadTaskPhoto(
-          photo: photo,
-          courtId: courtId,
-          shift: state.shift.name,
-          date: date,
-          taskId: taskId,
-        );
+        return false;
       }
 
       // ── POST to backend ──────────────────────────────────────────────────

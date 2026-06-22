@@ -5,13 +5,14 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Path, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.maintenance import MaintenanceIssue
 from ...models.sale import Court, Outlet
+from ...core.uploads import save_upload_image
 from ..deps import CurrentUser, get_current_user, require_etl_manager, require_outlet_user
 from .events import notify_clients
 
@@ -168,6 +169,17 @@ async def _notify(issue: MaintenanceIssue):
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/maintenance/upload-photo", status_code=201)
+async def upload_maintenance_photo(
+    photo: UploadFile = File(...),
+    user: CurrentUser = Depends(require_outlet_user),
+):
+    """Persist a maintenance proof photo on the Railway volume (replaces the
+    old Cloudinary flow) and return its public URL path."""
+    photo_url = await save_upload_image(photo, "maintenance", "mnt")
+    return {"photo_url": photo_url}
+
 
 @router.post("/maintenance/", response_model=IssueOut, status_code=201)
 async def raise_ticket(
