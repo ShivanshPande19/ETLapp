@@ -87,6 +87,59 @@ class StaffNotifier extends Notifier<StaffState> {
     }
   }
 
+  // ── Outlet staff (managed by the outlet manager for their own outlet) ───────
+
+  Future<void> fetchByOutletId(int outletId) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final res = await _dio.get('/staff/outlet/$outletId');
+      final list = (res.data['staff'] as List)
+          .map((e) => StaffModel.fromJson(e))
+          .toList();
+      state = state.copyWith(staffList: list, isLoading: false);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: 'Failed to load staff');
+    }
+  }
+
+  Future<bool> addOutletStaff({
+    required String name,
+    required String email,
+    required String password,
+    required int outletId,
+    String? phone,
+    String? photoPath,
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        'name': name,
+        'email': email,
+        'password': password,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        if (photoPath != null && photoPath.isNotEmpty)
+          'photo': await MultipartFile.fromFile(
+            photoPath,
+            filename: photoPath.split('/').last,
+          ),
+      });
+      await _dio.post('/staff/outlet', data: formData);
+      await fetchByOutletId(outletId);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> removeOutletStaff(int staffId, int outletId) async {
+    try {
+      await _dio.patch('/staff/$staffId/deactivate');
+      await fetchByOutletId(outletId);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<bool> reassignStaff(
     int staffId,
     int newCourtId,

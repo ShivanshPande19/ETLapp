@@ -98,7 +98,50 @@ async def add_staff(
         name=name,
         email=email,
         password=password,
+        role="etl_staff",
         court_id=court_id,
+        phone=(phone or "").strip() or None,
+        photo_url=photo_url,
+    )
+    if not staff:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    return staff
+
+
+# ── POST add outlet staff (outlet manager only; for their own outlet) ─────────
+@router.post("/outlet", response_model=StaffResponse, status_code=201)
+async def add_outlet_staff(
+    name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    phone: Optional[str] = Form(None),
+    photo: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # Only an outlet manager can add staff — and only to their OWN outlet
+    # (outlet_id is taken from the token, never the client).
+    if user.role != "outlet_manager" or user.outlet_id is None:
+        raise HTTPException(
+            status_code=403, detail="Outlet manager access required."
+        )
+
+    name = name.strip()
+    email = email.strip().lower()
+    if not name or not email or not password:
+        raise HTTPException(
+            status_code=400, detail="Name, email and password are required."
+        )
+
+    photo_url = await _save_staff_photo(photo)
+
+    staff = create_staff(
+        db,
+        name=name,
+        email=email,
+        password=password,
+        role="outlet_staff",
+        outlet_id=user.outlet_id,
         phone=(phone or "").strip() or None,
         photo_url=photo_url,
     )
