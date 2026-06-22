@@ -53,17 +53,23 @@ class StaffNotifier extends Notifier<StaffState> {
     required String email,
     required String password,
     required int courtId,
+    String? phone,
+    String? photoPath,
   }) async {
     try {
-      await _dio.post(
-        '/staff/',
-        data: {
-          'name': name,
-          'email': email,
-          'password': password,
-          'court_id': courtId,
-        },
-      );
+      final formData = FormData.fromMap({
+        'name': name,
+        'email': email,
+        'password': password,
+        'court_id': courtId,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        if (photoPath != null && photoPath.isNotEmpty)
+          'photo': await MultipartFile.fromFile(
+            photoPath,
+            filename: photoPath.split('/').last,
+          ),
+      });
+      await _dio.post('/staff/', data: formData);
       await fetchByCourtId(courtId);
       return true;
     } catch (e) {
