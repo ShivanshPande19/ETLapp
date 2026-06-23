@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -152,8 +153,11 @@ class _OutletApplicationsScreenState
                   borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
                 ),
                 child: async.when(
-                  loading: () => const Center(
-                      child: CircularProgressIndicator(color: _black)),
+                  loading: () => const SkeletonList(
+                    dark: false,
+                    count: 5,
+                    tileHeight: 76,
+                  ),
                   error: (e, _) => _ErrorView(onRetry: _refresh),
                   data: (data) {
                     final filtered = _filter == 'all'

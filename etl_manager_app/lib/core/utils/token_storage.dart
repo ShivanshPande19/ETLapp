@@ -9,11 +9,25 @@ class TokenStorage {
   static const _zoneKey = 'user_zone';
   static const _outletKey = 'user_outlet_id';
 
-  static Future<void> saveToken(String token) async =>
-      await _storage.write(key: _tokenKey, value: token);
+  // In-memory cache of the auth token. The Dio interceptor reads the token on
+  // EVERY request; hitting the Keychain/Keystore each time adds noticeable
+  // latency (a few ms, more on cold Android). Cache it after the first read so
+  // subsequent requests are instant.
+  static String? _cachedToken;
+  static bool _tokenLoaded = false;
 
-  static Future<String?> getToken() async =>
-      await _storage.read(key: _tokenKey);
+  static Future<void> saveToken(String token) async {
+    _cachedToken = token;
+    _tokenLoaded = true;
+    await _storage.write(key: _tokenKey, value: token);
+  }
+
+  static Future<String?> getToken() async {
+    if (_tokenLoaded) return _cachedToken;
+    _cachedToken = await _storage.read(key: _tokenKey);
+    _tokenLoaded = true;
+    return _cachedToken;
+  }
 
   static Future<void> saveManagerInfo(String name, String email) async {
     await _storage.write(key: _nameKey, value: name);
@@ -52,5 +66,9 @@ class TokenStorage {
     return role?.toLowerCase() == 'staff';
   }
 
-  static Future<void> clearAll() async => await _storage.deleteAll();
+  static Future<void> clearAll() async {
+    _cachedToken = null;
+    _tokenLoaded = false;
+    await _storage.deleteAll();
+  }
 }

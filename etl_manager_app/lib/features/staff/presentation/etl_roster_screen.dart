@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 
 import '../../home/presentation/home_providers.dart';
 import '../../../app/dio_provider.dart'; // baseUrl for selfie images
+import '../../../core/widgets/skeleton.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -220,8 +221,11 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
                   borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
                 ),
                 child: rosterState.when(
-                  loading: () => const Center(
-                    child: CircularProgressIndicator(color: _black),
+                  loading: () => const SkeletonList(
+                    dark: false,
+                    count: 5,
+                    tileHeight: 78,
+                    showTrailing: true,
                   ),
                   error: (err, _) => _RosterError(
                     onRetry: () => ref.invalidate(etlRosterProvider),

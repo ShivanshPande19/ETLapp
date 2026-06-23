@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/token_storage.dart';
@@ -1460,14 +1461,10 @@ class _Skeleton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: width,
-    height: height,
-    decoration: BoxDecoration(
-      color: dark ? Colors.white.withOpacity(0.15) : _lightGrey,
-      borderRadius: BorderRadius.circular(8),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final box = SkeletonBox(width: width, height: height, radius: 8);
+    return dark ? Shimmer(child: box) : Shimmer.light(child: box);
+  }
 }
 
 // ─── Error Row ────────────────────────────────────────────────────────────────

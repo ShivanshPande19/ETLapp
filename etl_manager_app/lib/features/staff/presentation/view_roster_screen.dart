@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:intl/intl.dart';
 
 import '../../home/presentation/home_providers.dart';
@@ -188,8 +189,10 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
                   borderRadius: BorderRadius.vertical(top: Radius.circular(40)),
                 ),
                 child: rosterState.when(
-                  loading: () => const Center(
-                    child: CircularProgressIndicator(color: _black),
+                  loading: () => const SkeletonList(
+                    dark: false,
+                    count: 5,
+                    tileHeight: 76,
                   ),
                   error: (err, _) => _RosterError(
                     onRetry: () => ref.invalidate(dailyRosterProvider),

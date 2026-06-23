@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 
 // NEW IMPORT: Dynamic Courts Notifier
 import '../../courts/domain/courts_notifier.dart';
@@ -116,19 +117,17 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
                     backgroundColor: _white,
                     onRefresh: () async => _refresh(),
                     child: async.when(
-                      loading: () => const Center(
-                        child: CircularProgressIndicator(
-                          color: _black,
-                          strokeWidth: 2,
-                        ),
+                      loading: () => const SkeletonList(
+                        dark: false,
+                        count: 6,
+                        tileHeight: 88,
                       ),
                       error: (_, __) => _errorView(),
                       data: (items) => courtsAsync.when(
-                        loading: () => const Center(
-                          child: CircularProgressIndicator(
-                            color: _black,
-                            strokeWidth: 2,
-                          ),
+                        loading: () => const SkeletonList(
+                          dark: false,
+                          count: 6,
+                          tileHeight: 88,
                         ),
                         error: (_, __) => _errorView(),
                         data: (courts) => _buildContent(items, courts, bottom),
