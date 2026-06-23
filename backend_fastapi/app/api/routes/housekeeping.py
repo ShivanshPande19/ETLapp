@@ -9,6 +9,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import desc
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,15 @@ except ImportError:
             return {"id": 0}
 
 router = APIRouter()
+
+
+def _upsert_insert(db: Session):
+    """Return the dialect-correct INSERT construct. Postgres and SQLite both
+    expose `.on_conflict_do_update(index_elements=..., set_=...)`, but the
+    SQLite construct cannot be compiled by the Postgres dialect (and vice
+    versa) — so we must pick the right one at runtime."""
+    dialect = db.get_bind().dialect.name
+    return pg_insert(HkTask) if dialect == "postgresql" else sqlite_insert(HkTask)
 
 _COURTS     = [1, 2, 3]
 _SHIFTS     = ["morning", "day", "night"]
@@ -200,7 +210,7 @@ def submit_shift(
 
     for task in body.tasks:
         stmt = (
-            sqlite_insert(HkTask)
+            _upsert_insert(db)
             .values(
                 court_id   = body.court_id,
                 shift      = body.shift,
