@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/maintenance_notifier.dart';
+import '../../../core/network/api_client.dart';
 import '../../auth/domain/auth_notifier.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
@@ -697,7 +698,7 @@ class _TicketCard extends StatelessWidget {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child: Image.network(
-                        issue.photoUrl!,
+                        resolveMediaUrl(issue.photoUrl)!,
                         width: 42,
                         height: 42,
                         fit: BoxFit.cover,
@@ -1294,7 +1295,7 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
         backgroundColor: Colors.transparent,
         child: Stack(
           children: [
-            Center(child: InteractiveViewer(child: Image.network(url))),
+            Center(child: InteractiveViewer(child: Image.network(resolveMediaUrl(url) ?? url))),
             Positioned(
               top: 50,
               left: 16,
@@ -1489,7 +1490,7 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(16),
                         child: Image.network(
-                          issue.photoUrl!,
+                          resolveMediaUrl(issue.photoUrl)!,
                           height: 150,
                           width: double.infinity,
                           fit: BoxFit.cover,

@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import desc
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.housekeeping import HkTask, HkRecurring
+from ...core.uploads import save_upload_image
 from .events import notify_clients
 
 try:
@@ -172,6 +173,18 @@ def _recurring_status(
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.post("/upload-photo", status_code=status.HTTP_201_CREATED)
+async def upload_housekeeping_photo(
+    photo: UploadFile = File(...),
+    _user=Depends(get_current_user),
+):
+    """Persist a (watermarked) housekeeping proof photo on the Railway volume
+    and return its public URL path. Replaces the old Cloudinary flow — the
+    client compresses + watermarks (location + time) before uploading."""
+    photo_url = await save_upload_image(photo, "housekeeping", "hk")
+    return {"photo_url": photo_url}
 
 
 @router.post("/submit", status_code=status.HTTP_200_OK)

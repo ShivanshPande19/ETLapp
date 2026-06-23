@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 // ✅ FIX: Ye wala dio JWT token attach karta hai (app/dio_provider.dart nahi karta tha)
 import '../../../core/network/api_client.dart';
-import '../../../core/cloudinary/cloudinary_service.dart';
+import '../../../core/storage/photo_upload_service.dart';
 
 // ─── Data Model ──────────────────────────────────────────────────────────────
 
@@ -137,9 +137,12 @@ class MaintenanceNotifier
     File? photo,
   }) async {
     try {
+      final dio = ref.read(dioProvider);
+
       String? photoUrl;
       if (photo != null) {
-        photoUrl = await HousekeepingStorageService.uploadMaintenancePhoto(
+        photoUrl = await PhotoUploadService.uploadMaintenancePhoto(
+          dio: dio,
           photo: photo,
         );
         if (photoUrl == null) {
@@ -147,7 +150,6 @@ class MaintenanceNotifier
         }
       }
 
-      final dio = ref.read(dioProvider);
       // ✅ outlet_id / staff_name ab JWT se aate hain — body mein nahi
       await dio.post(
         '/maintenance/',
