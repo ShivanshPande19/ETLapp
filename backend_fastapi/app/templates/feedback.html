@@ -33,7 +33,7 @@
         /* 🌟 FRONT POSTER (🔴 RED PREMIUM THEME) */
         .card-front {
             background: linear-gradient(135deg, #0f0505 0%, #1a0a0a 100%);
-            padding: 40px 24px; justify-content: space-between; align-items: center; text-align: center;
+            padding: 30px 22px; justify-content: space-between; align-items: center; text-align: center;
             background-image: radial-gradient(circle at top right, rgba(239, 68, 68, 0.2), transparent 50%),
                               radial-gradient(circle at bottom left, rgba(139, 0, 0, 0.15), transparent 50%);
             transition: opacity 0.3s ease, visibility 0.3s ease;
@@ -46,14 +46,56 @@
             pointer-events: none;
         }
         
-        .etl-brand h1 { 
-            font-family: 'Anton', sans-serif; 
-            font-size: 56px; 
-            color: #EF4444; /* 🔴 Premium Red */
-            line-height: 1.1; 
-            margin-bottom: 12px; 
-            text-transform: uppercase; 
+        .etl-brand h1 {
+            font-family: 'Anton', sans-serif;
+            font-size: 34px;
+            color: #ffffff;
+            line-height: 1.15;
+            margin-bottom: 8px;
+            text-transform: uppercase;
             letter-spacing: 1px;
+        }
+        .etl-brand h1 span { color: #EF4444; text-shadow: 0 0 14px rgba(239, 68, 68, 0.65); }
+
+        .poster-tagline {
+            font-size: 11.5px; font-weight: 700; letter-spacing: 2.5px;
+            text-transform: uppercase; color: #EF4444; margin-bottom: 16px;
+        }
+
+        .poster-intro {
+            font-size: 13px; line-height: 1.55; color: #cfcfcf;
+            padding: 0 4px; margin-bottom: 18px; max-width: 460px;
+        }
+        .poster-intro strong { color: #EF4444; font-weight: 700; }
+
+        /* 📍 "Catch Us Live" horizontal location strip (scrolls sideways — does
+           NOT interfere with the vertical swipe-up-to-flip gesture) */
+        .catch-live { width: 100%; }
+        .catch-live-title {
+            font-size: 11px; font-weight: 800; letter-spacing: 2.5px;
+            text-transform: uppercase; color: #8a8a8a; margin-bottom: 12px;
+        }
+        .loc-row {
+            display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px;
+            -webkit-overflow-scrolling: touch; scrollbar-width: none;
+        }
+        .loc-row::-webkit-scrollbar { display: none; }
+        .loc-pill {
+            flex: 0 0 auto; display: flex; align-items: center; gap: 9px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 14px; padding: 11px 15px; text-align: left;
+        }
+        .loc-pill b { display: block; font-size: 12.5px; font-weight: 700; color: #f4f4f4; white-space: nowrap; }
+        .loc-pill small { display: block; font-size: 10px; color: #999; margin-top: 2px; white-space: nowrap; }
+        .live-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #EF4444;
+            box-shadow: 0 0 8px #EF4444; animation: pulse 1.5s infinite; flex: 0 0 auto;
+        }
+        @keyframes pulse {
+            0%   { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70%  { transform: scale(1);   box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
         
         /* 📍 Front Poster Location Design */
@@ -72,8 +114,6 @@
             margin-bottom: 24px;
             box-shadow: 0 4px 15px rgba(239, 68, 68, 0.1);
         }
-        
-        .etl-brand p { font-size: 15px; color: #bbbbbb; line-height: 1.6; margin-bottom: 30px; padding: 0 10px; }
         
         .swipe-indicator { margin-bottom: 30px; animation: bounce 2s infinite; cursor: pointer; }
         .swipe-indicator span { display: block; font-size: 13px; font-weight: 700; color: #aaaaaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px;}
@@ -123,16 +163,29 @@
     <div class="card" id="card">
         
         <div class="card-face card-front" id="front-face">
-            <div style="margin-top: 20px;"></div>
-            <div class="etl-brand">
-                <h1>Eat.<br>Truck.<br>Love.</h1>
-                
+            <div class="etl-brand" style="margin-top: 6px;">
+                <h1><span>E</span>at. <span>T</span>ruck. <span>L</span>ove.</h1>
+                <p class="poster-tagline">By Azimuth &mdash; Business on Wheels</p>
+                <p class="poster-intro">
+                    India's first organised food trailer park &mdash; we curate the best food brands into vibrant, open-air spaces. <strong>Great food, amazing vibes &amp; safe, hygienic zones</strong> in your neighbourhood.
+                </p>
                 <div class="poster-location">
-                    <i class="fa-solid fa-location-dot"></i> {{ court_name }}
+                    <i class="fa-solid fa-location-dot"></i> You're at {{ court_name }}
                 </div>
-                
-                <p>An organized outdoor food, dining, and lifestyle concept featuring modern mobile kitchens in vibrant public spaces.</p>
             </div>
+
+            <div class="catch-live">
+                <div class="catch-live-title">Catch Us Live</div>
+                <div class="loc-row">
+                    <div class="loc-pill"><span class="live-dot"></span><div><b>Alpha Metro Station</b><small>Greater Noida</small></div></div>
+                    <div class="loc-pill"><span class="live-dot"></span><div><b>Sector 50 (Central 50)</b><small>Noida</small></div></div>
+                    <div class="loc-pill"><span class="live-dot"></span><div><b>Bennett University</b><small>Greater Noida</small></div></div>
+                    <div class="loc-pill"><span class="live-dot"></span><div><b>DLF Cyber Park</b><small>Gurugram</small></div></div>
+                    <div class="loc-pill"><span class="live-dot"></span><div><b>District 9 Sports Arena</b><small>Noida</small></div></div>
+                    <div class="loc-pill"><span class="live-dot"></span><div><b>Near Dabolim Airport</b><small>Vasco, Goa</small></div></div>
+                </div>
+            </div>
+
             <div class="swipe-indicator" id="swipe-btn">
                 <span>Swipe up to give feedback</span>
                 <i class="fa-solid fa-chevron-up"></i>
