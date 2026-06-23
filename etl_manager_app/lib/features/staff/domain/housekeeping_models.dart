@@ -188,6 +188,7 @@ class TaskStatusItem {
   final bool isDone;
   final String? photoUrl;
   final DateTime? doneAt;
+  final String? doneByName;
 
   const TaskStatusItem({
     required this.taskId,
@@ -195,6 +196,7 @@ class TaskStatusItem {
     required this.isDone,
     this.photoUrl,
     this.doneAt,
+    this.doneByName,
   });
 
   factory TaskStatusItem.fromJson(Map<String, dynamic> j) => TaskStatusItem(
@@ -202,6 +204,7 @@ class TaskStatusItem {
     taskTitle: j['task_title'] as String? ?? '',
     isDone: j['is_done'] as bool? ?? false,
     photoUrl: j['photo_url'] as String?,
+    doneByName: j['done_by_name'] as String?,
     doneAt: j['done_at'] != null
         ? DateTime.tryParse(j['done_at'] as String)
         : null,
@@ -267,6 +270,7 @@ class WeeklyTaskStatus {
   final DateTime? lastDoneAt;
   final DateTime? nextDueAt;
   final String? photoUrl;
+  final String? doneByName;
   final bool isOverdue;
 
   const WeeklyTaskStatus({
@@ -274,6 +278,7 @@ class WeeklyTaskStatus {
     this.lastDoneAt,
     this.nextDueAt,
     this.photoUrl,
+    this.doneByName,
     required this.isOverdue,
   });
 
@@ -298,6 +303,7 @@ class WeeklyTaskStatus {
         ? DateTime.tryParse(j['next_due_at'] as String)
         : null,
     photoUrl: j['photo_url'] as String?,
+    doneByName: j['done_by_name'] as String?,
     isOverdue: j['is_overdue'] as bool? ?? false,
   );
 }
@@ -309,6 +315,7 @@ class MonthlyTaskStatus {
   final DateTime? lastDoneAt;
   final DateTime? nextDueAt;
   final String? photoUrl;
+  final String? doneByName;
   final bool isOverdue;
 
   const MonthlyTaskStatus({
@@ -316,6 +323,7 @@ class MonthlyTaskStatus {
     this.lastDoneAt,
     this.nextDueAt,
     this.photoUrl,
+    this.doneByName,
     required this.isOverdue,
   });
 
@@ -341,6 +349,7 @@ class MonthlyTaskStatus {
             ? DateTime.tryParse(j['next_due_at'] as String)
             : null,
         photoUrl: j['photo_url'] as String?,
+        doneByName: j['done_by_name'] as String?,
         isOverdue: j['is_overdue'] as bool? ?? false,
       );
 }

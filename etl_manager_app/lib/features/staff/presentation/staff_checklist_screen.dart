@@ -746,6 +746,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                 taskDef: e.value,
                 isDone: item?.isDone == true,
                 photoUrl: item?.photoUrl,
+                doneByName: item?.doneByName,
               );
             }),
 
@@ -1009,6 +1010,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                           photoUrl: hkState.taskPhotoUrl(e.value.id),
                           isShiftActive: shiftActive,
                           cooldownDays: 0, // daily tasks have no cooldown
+                          doneByName: hkState.taskDoneBy(e.value.id),
                           onTap: () => _handleTaskTap(e.value),
                         ),
                       ),
@@ -1028,6 +1030,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                         photoUrl: hkState.taskPhotoUrl(_kWeeklyTask.id),
                         isShiftActive: shiftActive,
                         cooldownDays: hkState.weeklyRemainingDays, // ✅
+                        doneByName: hkState.taskDoneBy(_kWeeklyTask.id),
                         onTap: () => _handleTaskTap(_kWeeklyTask),
                       ),
 
@@ -1046,6 +1049,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                         photoUrl: hkState.taskPhotoUrl(_kMonthlyTask.id),
                         isShiftActive: shiftActive,
                         cooldownDays: hkState.monthlyRemainingDays, // ✅
+                        doneByName: hkState.taskDoneBy(_kMonthlyTask.id),
                         onTap: () => _handleTaskTap(_kMonthlyTask),
                       ),
 
@@ -1118,6 +1122,7 @@ class _TaskTile extends StatefulWidget {
   final String? photoUrl;
   final bool isShiftActive;
   final int cooldownDays; // ✅ 0 = no cooldown, >0 = locked with countdown
+  final String? doneByName;
   final VoidCallback onTap;
 
   const _TaskTile({
@@ -1131,6 +1136,7 @@ class _TaskTile extends StatefulWidget {
     required this.photoUrl,
     required this.isShiftActive,
     required this.cooldownDays,
+    this.doneByName,
     required this.onTap,
   });
 
@@ -1167,6 +1173,20 @@ class _TaskTileState extends State<_TaskTile>
     super.dispose();
   }
 
+  void _openViewer() {
+    final hasLocal = widget.photo != null;
+    final hasNetwork = widget.photoUrl != null && widget.photoUrl!.isNotEmpty;
+    if (!hasLocal && !hasNetwork) return;
+    HapticFeedback.selectionClick();
+    showHkPhotoViewer(
+      context,
+      url: hasNetwork ? widget.photoUrl : null,
+      file: hasLocal ? widget.photo : null,
+      title: widget.taskDef.title,
+      doneByName: widget.doneByName,
+    );
+  }
+
   Widget _buildThumbnail() {
     final hasLocal = widget.photo != null;
     final hasNetwork = widget.photoUrl != null && widget.photoUrl!.isNotEmpty;
@@ -1175,45 +1195,71 @@ class _TaskTileState extends State<_TaskTile>
       return const Icon(Icons.lock_rounded, size: 16, color: _success);
     }
 
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: hasLocal
-            ? Image.file(widget.photo!, fit: BoxFit.cover)
-            : Image.network(
-                resolveMediaUrl(widget.photoUrl)!,
-                fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) {
-                  if (progress == null) return child;
-                  return Container(
-                    color: _success.withOpacity(0.08),
-                    child: const Center(
-                      child: SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.5,
+    return GestureDetector(
+      onTap: _openViewer,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: hasLocal
+                  ? Image.file(widget.photo!, fit: BoxFit.cover)
+                  : Image.network(
+                      resolveMediaUrl(widget.photoUrl)!,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (_, child, progress) {
+                        if (progress == null) return child;
+                        return Container(
+                          color: _success.withOpacity(0.08),
+                          child: const Center(
+                            child: SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                                color: _success,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (_, __, ___) => Container(
+                        color: _success.withOpacity(0.08),
+                        child: const Icon(
+                          Icons.lock_rounded,
+                          size: 14,
                           color: _success,
                         ),
                       ),
                     ),
-                  );
-                },
-                errorBuilder: (_, __, ___) => Container(
-                  color: _success.withOpacity(0.08),
-                  child: const Icon(
-                    Icons.lock_rounded,
-                    size: 14,
-                    color: _success,
-                  ),
-                ),
+            ),
+          ),
+          Positioned(
+            right: -3,
+            bottom: -3,
+            child: Container(
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                color: _black,
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(color: _white, width: 1.5),
               ),
+              child: const Icon(
+                Icons.open_in_full_rounded,
+                size: 8,
+                color: _white,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1266,7 +1312,9 @@ class _TaskTileState extends State<_TaskTile>
       iconBg = _success.withOpacity(0.12);
       iconColor = _success;
       titleColor = _success;
-      subtitle = 'Saved ✓ — cannot be undone';
+      subtitle = (widget.doneByName != null && widget.doneByName!.trim().isNotEmpty)
+          ? 'By ${widget.doneByName} · Saved ✓'
+          : 'Saved ✓ — cannot be undone';
       rightWidget = _buildThumbnail();
     } else if (dimmed) {
       // Outside shift hours
@@ -2010,11 +2058,13 @@ class _HistoryTaskTile extends StatelessWidget {
   final _TaskDef taskDef;
   final bool isDone;
   final String? photoUrl;
+  final String? doneByName;
 
   const _HistoryTaskTile({
     required this.taskDef,
     required this.isDone,
     this.photoUrl,
+    this.doneByName,
   });
 
   @override
@@ -2023,39 +2073,77 @@ class _HistoryTaskTile extends StatelessWidget {
 
     Widget right;
     if (hasPhoto) {
-      right = Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            resolveMediaUrl(photoUrl)!,
-            fit: BoxFit.cover,
-            loadingBuilder: (_, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                color: _success.withOpacity(0.08),
-                child: const Center(
-                  child: SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
+      right = GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          showHkPhotoViewer(
+            context,
+            url: photoUrl,
+            title: taskDef.title,
+            doneByName: doneByName,
+          );
+        },
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  resolveMediaUrl(photoUrl)!,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (_, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      color: _success.withOpacity(0.08),
+                      child: const Center(
+                        child: SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: _success,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (_, __, ___) => Container(
+                    color: _success.withOpacity(0.08),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      size: 16,
                       color: _success,
                     ),
                   ),
                 ),
-              );
-            },
-            errorBuilder: (_, __, ___) => Container(
-              color: _success.withOpacity(0.08),
-              child: const Icon(Icons.check_rounded, size: 16, color: _success),
+              ),
             ),
-          ),
+            Positioned(
+              right: -3,
+              bottom: -3,
+              child: Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: _black,
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(color: _white, width: 1.5),
+                ),
+                child: const Icon(
+                  Icons.open_in_full_rounded,
+                  size: 8,
+                  color: _white,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     } else {
@@ -2108,7 +2196,11 @@ class _HistoryTaskTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  isDone ? 'Completed' : 'Not completed',
+                  isDone
+                      ? ((doneByName != null && doneByName!.trim().isNotEmpty)
+                            ? 'By $doneByName · Completed'
+                            : 'Completed')
+                      : 'Not completed',
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     color: isDone ? _success.withOpacity(0.7) : _grey,
@@ -2159,6 +2251,158 @@ class _HistoryMessage extends StatelessWidget {
             subtitle,
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(fontSize: 13, color: _grey),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ─── Full-screen Photo Viewer (staff) ────────────────────────────────────────
+
+void showHkPhotoViewer(
+  BuildContext context, {
+  String? url,
+  File? file,
+  required String title,
+  String? doneByName,
+}) {
+  showDialog(
+    context: context,
+    useRootNavigator: true,
+    barrierColor: Colors.black.withOpacity(0.94),
+    builder: (_) => _HkPhotoViewer(
+      url: url,
+      file: file,
+      title: title,
+      doneByName: doneByName,
+    ),
+  );
+}
+
+class _HkPhotoViewer extends StatelessWidget {
+  final String? url;
+  final File? file;
+  final String title;
+  final String? doneByName;
+
+  const _HkPhotoViewer({
+    this.url,
+    this.file,
+    required this.title,
+    this.doneByName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasName = doneByName != null && doneByName!.trim().isNotEmpty;
+    final resolved = url != null ? resolveMediaUrl(url) : null;
+
+    return Dialog.fullscreen(
+      backgroundColor: Colors.black,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 5,
+              child: Center(
+                child: file != null
+                    ? Image.file(file!, fit: BoxFit.contain)
+                    : (resolved != null
+                          ? Image.network(
+                              resolved,
+                              fit: BoxFit.contain,
+                              loadingBuilder: (_, child, prog) => prog == null
+                                  ? child
+                                  : const Center(
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                              errorBuilder: (_, __, ___) => const Center(
+                                child: Icon(
+                                  Icons.broken_image_rounded,
+                                  color: Colors.white38,
+                                  size: 48,
+                                ),
+                              ),
+                            )
+                          : const Center(
+                              child: Icon(
+                                Icons.image_not_supported_rounded,
+                                color: Colors.white38,
+                                size: 48,
+                              ),
+                            )),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                MediaQuery.of(context).padding.top + 12,
+                8,
+                16,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black.withOpacity(0.7), Colors.transparent],
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (hasName) ...[
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.person_rounded,
+                                size: 13,
+                                color: Colors.white70,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'By $doneByName',
+                                style: GoogleFonts.inter(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

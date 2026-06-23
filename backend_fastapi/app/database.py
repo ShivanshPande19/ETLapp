@@ -131,3 +131,27 @@ def ensure_staff_columns() -> None:
                     )
     except Exception as e:
         print(f"[MIGRATION] ensure_staff_columns skipped: {e}")
+
+
+def ensure_hk_columns() -> None:
+    """Add `done_by_name` to existing `hk_tasks` and `hk_recurring` tables
+    (create_all never ALTERs existing tables). Best-effort + idempotent."""
+    targets = {
+        "hk_tasks": {"done_by_name": "VARCHAR"},
+        "hk_recurring": {"done_by_name": "VARCHAR"},
+    }
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            tables = set(insp.get_table_names())
+            for table, needed in targets.items():
+                if table not in tables:
+                    continue  # create_all will build it fresh with all columns
+                existing = {c["name"] for c in insp.get_columns(table)}
+                for col, col_type in needed.items():
+                    if col not in existing:
+                        conn.execute(
+                            text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                        )
+    except Exception as e:
+        print(f"[MIGRATION] ensure_hk_columns skipped: {e}")

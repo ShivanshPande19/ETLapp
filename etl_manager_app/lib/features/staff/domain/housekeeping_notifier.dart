@@ -23,8 +23,10 @@ class HousekeepingState {
   final Map<String, bool> taskDoneMap;
   final Map<String, File?> taskPhotoMap;
   final Map<String, String?> photoUrlMap;
+  final Map<String, String?> doneByMap;
   final Set<String> lockedTasks;
   final Set<String> loadingTasks;
+  final String userName;
 
   // ✅ Cooldown fields
   final int weeklyRemainingDays;
@@ -42,8 +44,10 @@ class HousekeepingState {
     this.taskDoneMap = const <String, bool>{},
     this.taskPhotoMap = const <String, File?>{},
     this.photoUrlMap = const <String, String?>{},
+    this.doneByMap = const <String, String?>{},
     this.lockedTasks = const <String>{},
     this.loadingTasks = const <String>{},
+    this.userName = '',
     this.weeklyRemainingDays = 0,
     this.monthlyRemainingDays = 0,
     this.weeklyNextDue,
@@ -59,6 +63,7 @@ class HousekeepingState {
   bool isTaskLoading(String taskId) => loadingTasks.contains(_k(taskId));
   File? taskPhoto(String taskId) => taskPhotoMap[_k(taskId)];
   String? taskPhotoUrl(String taskId) => photoUrlMap[_k(taskId)];
+  String? taskDoneBy(String taskId) => doneByMap[_k(taskId)];
 
   // ✅ Cooldown helpers
   bool get isWeeklyCooldown => weeklyRemainingDays > 0;
@@ -77,8 +82,10 @@ class HousekeepingState {
     Map<String, bool>? taskDoneMap,
     Map<String, File?>? taskPhotoMap,
     Map<String, String?>? photoUrlMap,
+    Map<String, String?>? doneByMap,
     Set<String>? lockedTasks,
     Set<String>? loadingTasks,
+    String? userName,
     int? weeklyRemainingDays,
     int? monthlyRemainingDays,
     DateTime? weeklyNextDue,
@@ -94,8 +101,10 @@ class HousekeepingState {
       taskDoneMap: taskDoneMap ?? this.taskDoneMap,
       taskPhotoMap: taskPhotoMap ?? this.taskPhotoMap,
       photoUrlMap: photoUrlMap ?? this.photoUrlMap,
+      doneByMap: doneByMap ?? this.doneByMap,
       lockedTasks: lockedTasks ?? this.lockedTasks,
       loadingTasks: loadingTasks ?? this.loadingTasks,
+      userName: userName ?? this.userName,
       weeklyRemainingDays: weeklyRemainingDays ?? this.weeklyRemainingDays,
       monthlyRemainingDays: monthlyRemainingDays ?? this.monthlyRemainingDays,
       weeklyNextDue: weeklyNextDue ?? this.weeklyNextDue,
@@ -120,7 +129,11 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
     final name = await TokenStorage.getManagerName();
     final courtId = _parseZone(zone);
 
-    state = state.copyWith(courtId: courtId, courtName: name ?? 'Staff');
+    state = state.copyWith(
+      courtId: courtId,
+      courtName: name ?? 'Staff',
+      userName: name ?? 'Staff',
+    );
 
     if (courtId != null) {
       await _rehydrateFromBackend(courtId);
@@ -142,6 +155,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       final newDoneMap = Map<String, bool>.from(state.taskDoneMap);
       final newLocked = Set<String>.from(state.lockedTasks);
       final newPhotoUrls = Map<String, String?>.from(state.photoUrlMap);
+      final newDoneBy = Map<String, String?>.from(state.doneByMap);
 
       // ── 1. Daily shift tasks ─────────────────────────────────────────────
       final courtData = status.courts
@@ -157,6 +171,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
               newDoneMap[key] = true;
               newLocked.add(key);
               if (task.photoUrl != null) newPhotoUrls[key] = task.photoUrl;
+              if (task.doneByName != null) newDoneBy[key] = task.doneByName;
             }
           }
         }
@@ -182,6 +197,9 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             if (weeklyEntry.photoUrl != null) {
               newPhotoUrls[key] = weeklyEntry.photoUrl;
             }
+            if (weeklyEntry.doneByName != null) {
+              newDoneBy[key] = weeklyEntry.doneByName;
+            }
           }
         } else if (_isDoneThisWeek(weeklyEntry.lastDoneAt)) {
           // Done this week but cooldown expired — still show as done/locked
@@ -191,6 +209,9 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             newLocked.add(key);
             if (weeklyEntry.photoUrl != null) {
               newPhotoUrls[key] = weeklyEntry.photoUrl;
+            }
+            if (weeklyEntry.doneByName != null) {
+              newDoneBy[key] = weeklyEntry.doneByName;
             }
           }
         }
@@ -216,6 +237,9 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             if (monthlyEntry.photoUrl != null) {
               newPhotoUrls[key] = monthlyEntry.photoUrl;
             }
+            if (monthlyEntry.doneByName != null) {
+              newDoneBy[key] = monthlyEntry.doneByName;
+            }
           }
         } else if (_isDoneThisMonth(monthlyEntry.lastDoneAt)) {
           // Done this month but cooldown expired
@@ -226,6 +250,9 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             if (monthlyEntry.photoUrl != null) {
               newPhotoUrls[key] = monthlyEntry.photoUrl;
             }
+            if (monthlyEntry.doneByName != null) {
+              newDoneBy[key] = monthlyEntry.doneByName;
+            }
           }
         }
       }
@@ -234,6 +261,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
         taskDoneMap: newDoneMap,
         lockedTasks: newLocked,
         photoUrlMap: newPhotoUrls,
+        doneByMap: newDoneBy,
         weeklyRemainingDays: weeklyRemaining,
         monthlyRemainingDays: monthlyRemaining,
         weeklyNextDue: weeklyNextDue,
@@ -413,11 +441,13 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
           final newLocked = Set<String>.from(state.lockedTasks);
           final newDoneMap = Map<String, bool>.from(state.taskDoneMap);
           final newPhotoMap = Map<String, String?>.from(state.photoUrlMap);
+          final newDoneBy = Map<String, String?>.from(state.doneByMap);
 
           for (final s in ['morning', 'day', 'night']) {
             newLocked.add('${s}_flagswash');
             newDoneMap['${s}_flagswash'] = true;
             newPhotoMap['${s}_flagswash'] = photoUrl;
+            newDoneBy['${s}_flagswash'] = state.userName;
           }
 
           state = state.copyWith(
@@ -425,6 +455,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             lockedTasks: newLocked,
             taskDoneMap: newDoneMap,
             photoUrlMap: newPhotoMap,
+            doneByMap: newDoneBy,
             taskPhotoMap: Map<String, File?>.from(state.taskPhotoMap)
               ..[key] = photo,
             weeklyRemainingDays: 7,
@@ -440,11 +471,13 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
           final newLocked = Set<String>.from(state.lockedTasks);
           final newDoneMap = Map<String, bool>.from(state.taskDoneMap);
           final newPhotoMap = Map<String, String?>.from(state.photoUrlMap);
+          final newDoneBy = Map<String, String?>.from(state.doneByMap);
 
           for (final s in ['morning', 'day', 'night']) {
             newLocked.add('${s}_fireaudit');
             newDoneMap['${s}_fireaudit'] = true;
             newPhotoMap['${s}_fireaudit'] = photoUrl;
+            newDoneBy['${s}_fireaudit'] = state.userName;
           }
 
           state = state.copyWith(
@@ -452,6 +485,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             lockedTasks: newLocked,
             taskDoneMap: newDoneMap,
             photoUrlMap: newPhotoMap,
+            doneByMap: newDoneBy,
             taskPhotoMap: Map<String, File?>.from(state.taskPhotoMap)
               ..[key] = photo,
             monthlyRemainingDays: 30,
@@ -470,6 +504,8 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
             ..[key] = photo,
           photoUrlMap: Map<String, String?>.from(state.photoUrlMap)
             ..[key] = photoUrl,
+          doneByMap: Map<String, String?>.from(state.doneByMap)
+            ..[key] = state.userName,
           error: null,
         );
         return true;
