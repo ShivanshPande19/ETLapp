@@ -77,36 +77,50 @@ class AuthNotifier extends Notifier<AuthState> {
   /// Rehydrate auth state from secure storage on cold start so the user stays
   /// logged in after fully closing the app. The Dio interceptor reads the same
   /// token for every request, so API calls keep working.
+  ///
+  /// A minimum delay is enforced so the branded splash is a deliberate moment
+  /// (not a flash). If restore takes longer than the minimum, no extra wait.
+  static const _minSplash = Duration(milliseconds: 1800);
+
   Future<void> _restoreSession() async {
+    final startedAt = DateTime.now();
+    AuthState next;
     try {
       final token = await TokenStorage.getToken();
       if (token == null || token.isEmpty) {
-        state = const AuthState(status: AuthStatus.idle);
-        return;
+        next = const AuthState(status: AuthStatus.idle);
+      } else {
+        final role = await TokenStorage.getRole();
+        final name = await TokenStorage.getManagerName();
+        final email = await TokenStorage.getManagerEmail();
+        final zone = await TokenStorage.getZone();
+        final outletStr = await TokenStorage.getOutletId();
+
+        final courtId = int.tryParse(zone ?? '') ?? 1;
+        final outletId = int.tryParse(outletStr ?? '');
+
+        next = AuthState(
+          status: AuthStatus.success,
+          managerName: name,
+          managerEmail: email,
+          role: role,
+          zone: zone,
+          staffName: name,
+          courtId: courtId,
+          outletId: outletId,
+        );
       }
-
-      final role = await TokenStorage.getRole();
-      final name = await TokenStorage.getManagerName();
-      final email = await TokenStorage.getManagerEmail();
-      final zone = await TokenStorage.getZone();
-      final outletStr = await TokenStorage.getOutletId();
-
-      final courtId = int.tryParse(zone ?? '') ?? 1;
-      final outletId = int.tryParse(outletStr ?? '');
-
-      state = AuthState(
-        status: AuthStatus.success,
-        managerName: name,
-        managerEmail: email,
-        role: role,
-        zone: zone,
-        staffName: name,
-        courtId: courtId,
-        outletId: outletId,
-      );
     } catch (_) {
-      state = const AuthState(status: AuthStatus.idle);
+      next = const AuthState(status: AuthStatus.idle);
     }
+
+    // Hold the splash for at least _minSplash so the animation is seen.
+    final elapsed = DateTime.now().difference(startedAt);
+    if (elapsed < _minSplash) {
+      await Future.delayed(_minSplash - elapsed);
+    }
+
+    state = next;
   }
 
   Future<void> login(String email, String password) async {
