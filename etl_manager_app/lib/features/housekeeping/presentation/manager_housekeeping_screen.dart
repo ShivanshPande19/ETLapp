@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 // CHANGED: Importing the generic courts provider
 import '../../courts/domain/courts_notifier.dart';
+import '../../../core/network/api_client.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -906,7 +907,7 @@ class _DailyTaskTile extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8.5),
                       child: Image.network(
-                        task.photoUrl!,
+                        resolveMediaUrl(task.photoUrl)!,
                         width: 48,
                         height: 48,
                         fit: BoxFit.cover,
@@ -1207,7 +1208,7 @@ class _RecurringTile extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8.5),
                       child: Image.network(
-                        photoUrl!,
+                        resolveMediaUrl(photoUrl)!,
                         width: 48,
                         height: 48,
                         fit: BoxFit.cover,
@@ -1292,7 +1293,7 @@ class _PhotoViewer extends StatelessWidget {
         Center(
           child: InteractiveViewer(
             child: Image.network(
-              url,
+              resolveMediaUrl(url) ?? url,
               fit: BoxFit.contain,
               loadingBuilder: (_, child, prog) => prog == null
                   ? child
