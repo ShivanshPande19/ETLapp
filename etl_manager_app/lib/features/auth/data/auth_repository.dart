@@ -20,6 +20,7 @@ class AuthRepository {
     );
     await TokenStorage.saveRole(data['role']);
     await TokenStorage.saveZone(data['zone']?.toString());
+    await TokenStorage.saveOutletId(data['outlet_id']?.toString());
     return data;
   }
 

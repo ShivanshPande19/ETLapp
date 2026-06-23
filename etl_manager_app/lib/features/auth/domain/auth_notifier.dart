@@ -3,8 +3,9 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/auth_repository.dart';
+import '../../../core/utils/token_storage.dart';
 
-enum AuthStatus { idle, loading, success, error }
+enum AuthStatus { unknown, idle, loading, success, error }
 
 class AuthState {
   final AuthStatus status;
@@ -67,7 +68,46 @@ class AuthState {
 
 class AuthNotifier extends Notifier<AuthState> {
   @override
-  AuthState build() => const AuthState();
+  AuthState build() {
+    // Try to restore a previous session (auth persistence across app kills).
+    Future.microtask(_restoreSession);
+    return const AuthState(status: AuthStatus.unknown);
+  }
+
+  /// Rehydrate auth state from secure storage on cold start so the user stays
+  /// logged in after fully closing the app. The Dio interceptor reads the same
+  /// token for every request, so API calls keep working.
+  Future<void> _restoreSession() async {
+    try {
+      final token = await TokenStorage.getToken();
+      if (token == null || token.isEmpty) {
+        state = const AuthState(status: AuthStatus.idle);
+        return;
+      }
+
+      final role = await TokenStorage.getRole();
+      final name = await TokenStorage.getManagerName();
+      final email = await TokenStorage.getManagerEmail();
+      final zone = await TokenStorage.getZone();
+      final outletStr = await TokenStorage.getOutletId();
+
+      final courtId = int.tryParse(zone ?? '') ?? 1;
+      final outletId = int.tryParse(outletStr ?? '');
+
+      state = AuthState(
+        status: AuthStatus.success,
+        managerName: name,
+        managerEmail: email,
+        role: role,
+        zone: zone,
+        staffName: name,
+        courtId: courtId,
+        outletId: outletId,
+      );
+    } catch (_) {
+      state = const AuthState(status: AuthStatus.idle);
+    }
+  }
 
   Future<void> login(String email, String password) async {
     state = state.copyWith(status: AuthStatus.loading);
@@ -121,7 +161,7 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> logout() async {
     await ref.read(authRepositoryProvider).logout();
-    state = const AuthState();
+    state = const AuthState(status: AuthStatus.idle);
   }
 }
 
