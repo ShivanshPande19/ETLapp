@@ -9,7 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../domain/housekeeping_notifier.dart';
 import '../domain/housekeeping_models.dart' as hk;
 import '../data/housekeeping_repository.dart';
-import '../../../core/network/api_client.dart';
+import '../../../core/widgets/app_network_image.dart';
 
 // ✅ NEW IMPORT: DB se real court name laane ke liye
 import '../../courts/domain/courts_notifier.dart';
@@ -1211,33 +1211,13 @@ class _TaskTileState extends State<_TaskTile>
               borderRadius: BorderRadius.circular(8),
               child: hasLocal
                   ? Image.file(widget.photo!, fit: BoxFit.cover)
-                  : Image.network(
-                      resolveMediaUrl(widget.photoUrl)!,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (_, child, progress) {
-                        if (progress == null) return child;
-                        return Container(
-                          color: _success.withOpacity(0.08),
-                          child: const Center(
-                            child: SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                                color: _success,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                      errorBuilder: (_, __, ___) => Container(
-                        color: _success.withOpacity(0.08),
-                        child: const Icon(
-                          Icons.lock_rounded,
-                          size: 14,
-                          color: _success,
-                        ),
-                      ),
+                  : AppNetworkImage(
+                      url: widget.photoUrl,
+                      width: 38,
+                      height: 38,
+                      memCacheWidth: 120,
+                      background: _success.withOpacity(0.08),
+                      accent: _success,
                     ),
             ),
           ),
@@ -2095,33 +2075,13 @@ class _HistoryTaskTile extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  resolveMediaUrl(photoUrl)!,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (_, child, progress) {
-                    if (progress == null) return child;
-                    return Container(
-                      color: _success.withOpacity(0.08),
-                      child: const Center(
-                        child: SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            color: _success,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                  errorBuilder: (_, __, ___) => Container(
-                    color: _success.withOpacity(0.08),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      size: 16,
-                      color: _success,
-                    ),
-                  ),
+                child: AppNetworkImage(
+                  url: photoUrl,
+                  width: 38,
+                  height: 38,
+                  memCacheWidth: 120,
+                  background: _success.withOpacity(0.08),
+                  accent: _success,
                 ),
               ),
             ),
@@ -2297,7 +2257,6 @@ class _HkPhotoViewer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasName = doneByName != null && doneByName!.trim().isNotEmpty;
-    final resolved = url != null ? resolveMediaUrl(url) : null;
 
     return Dialog.fullscreen(
       backgroundColor: Colors.black,
@@ -2310,33 +2269,11 @@ class _HkPhotoViewer extends StatelessWidget {
               child: Center(
                 child: file != null
                     ? Image.file(file!, fit: BoxFit.contain)
-                    : (resolved != null
-                          ? Image.network(
-                              resolved,
-                              fit: BoxFit.contain,
-                              loadingBuilder: (_, child, prog) => prog == null
-                                  ? child
-                                  : const Center(
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                              errorBuilder: (_, __, ___) => const Center(
-                                child: Icon(
-                                  Icons.broken_image_rounded,
-                                  color: Colors.white38,
-                                  size: 48,
-                                ),
-                              ),
-                            )
-                          : const Center(
-                              child: Icon(
-                                Icons.image_not_supported_rounded,
-                                color: Colors.white38,
-                                size: 48,
-                              ),
-                            )),
+                    : AppNetworkImage(
+                        url: url,
+                        fit: BoxFit.contain,
+                        background: Colors.transparent,
+                      ),
               ),
             ),
           ),

@@ -7,6 +7,7 @@ class TokenStorage {
   static const _emailKey = 'manager_email';
   static const _roleKey = 'user_role';
   static const _zoneKey = 'user_zone';
+  static const _outletKey = 'user_outlet_id';
 
   static Future<void> saveToken(String token) async =>
       await _storage.write(key: _tokenKey, value: token);
@@ -25,6 +26,15 @@ class TokenStorage {
   static Future<void> saveZone(String? zone) async {
     if (zone != null) await _storage.write(key: _zoneKey, value: zone);
   }
+
+  static Future<void> saveOutletId(String? outletId) async {
+    if (outletId != null) {
+      await _storage.write(key: _outletKey, value: outletId);
+    }
+  }
+
+  static Future<String?> getOutletId() async =>
+      await _storage.read(key: _outletKey);
 
   static Future<String?> getManagerName() async =>
       await _storage.read(key: _nameKey);

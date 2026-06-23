@@ -32,6 +32,7 @@ import '../features/staff/presentation/etl_roster_screen.dart';
 
 import 'shell_screen.dart';
 import 'biometric_gate.dart';
+import 'splash_screen.dart';
 
 CustomTransitionPage<T> _buildPage<T>({
   required BuildContext context,
@@ -96,12 +97,25 @@ final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);
 
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/',
     redirect: (context, state) {
-      final isLoggedIn = authState.status == AuthStatus.success;
-      final onLogin = state.matchedLocation == '/login';
-      final onBioGate = state.matchedLocation == '/biometric-gate';
+      final status = authState.status;
       final loc = state.matchedLocation;
+      final onSplash = loc == '/';
+      final onLogin = loc == '/login';
+      final onBioGate = loc == '/biometric-gate';
+
+      // ── Session still being restored from storage → stay on splash ───────
+      if (status == AuthStatus.unknown) {
+        return onSplash ? null : '/';
+      }
+
+      final isLoggedIn = status == AuthStatus.success;
+
+      // ── Restore finished but we're parked on splash → route out ──────────
+      if (onSplash) {
+        return isLoggedIn ? '/biometric-gate' : '/login';
+      }
 
       if (!isLoggedIn && !onLogin) return '/login';
       if (isLoggedIn && onLogin) return '/biometric-gate';
@@ -142,6 +156,15 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
 
     routes: [
+      GoRoute(
+        path: '/',
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: const SplashScreen(),
+          fade: true,
+        ),
+      ),
       GoRoute(
         path: '/login',
         pageBuilder: (context, state) => _buildPage(

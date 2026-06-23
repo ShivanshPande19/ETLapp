@@ -8,7 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 // CHANGED: Importing the generic courts provider
 import '../../courts/domain/courts_notifier.dart';
-import '../../../core/network/api_client.dart';
+import '../../../core/widgets/app_network_image.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -943,37 +943,14 @@ class _DailyTaskTile extends StatelessWidget {
                         width: 1.5,
                       ),
                     ),
-                    child: ClipRRect(
+                    child: AppNetworkImage(
+                      url: task.photoUrl,
+                      width: 48,
+                      height: 48,
+                      memCacheWidth: 144,
                       borderRadius: BorderRadius.circular(8.5),
-                      child: Image.network(
-                        resolveMediaUrl(task.photoUrl)!,
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (_, child, prog) => prog == null
-                            ? child
-                            : Container(
-                                color: _ok.withOpacity(0.06),
-                                child: const Center(
-                                  child: SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 1.5,
-                                      color: _ok,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                        errorBuilder: (_, __, ___) => Container(
-                          color: _lg,
-                          child: const Icon(
-                            Icons.broken_image_rounded,
-                            size: 18,
-                            color: _grey,
-                          ),
-                        ),
-                      ),
+                      background: _ok.withOpacity(0.06),
+                      accent: _ok,
                     ),
                   ),
                   Positioned(
@@ -1268,36 +1245,14 @@ class _RecurringTile extends StatelessWidget {
                         width: 1.5,
                       ),
                     ),
-                    child: ClipRRect(
+                    child: AppNetworkImage(
+                      url: photoUrl,
+                      width: 48,
+                      height: 48,
+                      memCacheWidth: 144,
                       borderRadius: BorderRadius.circular(8.5),
-                      child: Image.network(
-                        resolveMediaUrl(photoUrl)!,
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (_, child, prog) => prog == null
-                            ? child
-                            : Container(
-                                color: stColor.withOpacity(0.06),
-                                child: const Center(
-                                  child: SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 1.5,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                        errorBuilder: (_, __, ___) => Container(
-                          color: _lg,
-                          child: const Icon(
-                            Icons.broken_image_rounded,
-                            size: 18,
-                            color: _grey,
-                          ),
-                        ),
-                      ),
+                      background: stColor.withOpacity(0.06),
+                      accent: stColor,
                     ),
                   ),
                   Positioned(
@@ -1355,20 +1310,10 @@ class _PhotoViewer extends StatelessWidget {
       children: [
         Center(
           child: InteractiveViewer(
-            child: Image.network(
-              resolveMediaUrl(url) ?? url,
+            child: AppNetworkImage(
+              url: url,
               fit: BoxFit.contain,
-              loadingBuilder: (_, child, prog) => prog == null
-                  ? child
-                  : const Center(
-                      child: CircularProgressIndicator(
-                        color: _white,
-                        strokeWidth: 2,
-                      ),
-                    ),
-              errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.broken_image_rounded, color: _grey, size: 48),
-              ),
+              background: Colors.transparent,
             ),
           ),
         ),
