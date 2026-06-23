@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../domain/sales_notifier.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../home/presentation/home_providers.dart'; // ✅ Imported for Real Graph Data
 
 // ─── Premium Palette ─────────────────────────────────────────────────────────
@@ -248,12 +249,11 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                     const SizedBox(height: 8),
 
                     isLoading && summary == null
-                        ? Container(
-                            width: 220,
-                            height: 70,
-                            decoration: BoxDecoration(
-                              color: _white.withOpacity(0.05),
-                              borderRadius: BorderRadius.circular(16),
+                        ? const Shimmer(
+                            child: SkeletonBox(
+                              width: 220,
+                              height: 70,
+                              radius: 16,
                             ),
                           )
                         : TweenAnimationBuilder<double>(
@@ -683,9 +683,18 @@ class _InteractiveTrendGraphState
         border: Border.all(color: Colors.grey.shade200, width: 2),
       ),
       child: insightsState.when(
-        loading: () => const SizedBox(
-          height: 160,
-          child: Center(child: CircularProgressIndicator(color: _black)),
+        loading: () => Shimmer.light(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                SkeletonLine(width: 140, height: 13),
+                SizedBox(height: 14),
+                SkeletonBox(height: 120, radius: 12),
+              ],
+            ),
+          ),
         ),
         error: (err, _) => const SizedBox(
           height: 160,

@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/maintenance_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../auth/domain/auth_notifier.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
@@ -375,11 +376,11 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
                           .read(maintenanceNotifierProvider.notifier)
                           .refresh(),
                       child: state.when(
-                        loading: () => const Center(
-                          child: CircularProgressIndicator(
-                            color: _black,
-                            strokeWidth: 2,
-                          ),
+                        loading: () => const SkeletonList(
+                          dark: false,
+                          count: 5,
+                          tileHeight: 96,
+                          showTrailing: true,
                         ),
                         error: (err, _) => _ErrorView(
                           message: err.toString(),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
@@ -247,7 +248,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
   Widget _buildStaffBody() {
     final state = ref.watch(staffNotifierProvider);
     if (state.isLoading) {
-      return const Center(child: CircularProgressIndicator(color: _black));
+      return const SkeletonList(dark: false, count: 5, tileHeight: 76);
     }
     if (state.error != null) {
       return Center(
@@ -275,7 +276,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     final async = ref.watch(courtOutletsProvider(widget.courtId));
     return async.when(
       loading: () =>
-          const Center(child: CircularProgressIndicator(color: _black)),
+          const SkeletonList(dark: false, count: 4, tileHeight: 76),
       error: (_, __) => Center(
         child: Text('Could not load outlets',
             style: GoogleFonts.inter(color: _grey)),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // NEW IMPORT
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import 'staff_management_screen.dart';
@@ -192,8 +193,10 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                   backgroundColor: _white,
                   onRefresh: () async => ref.invalidate(courtsNotifierProvider),
                   child: courtsAsync.when(
-                    loading: () => const Center(
-                      child: CircularProgressIndicator(color: _black),
+                    loading: () => const SkeletonList(
+                      dark: false,
+                      count: 5,
+                      tileHeight: 76,
                     ),
                     error: (err, _) =>
                         const Center(child: Text("Failed to load courts")),

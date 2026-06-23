@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../domain/etl_feedback_notifier.dart';
+import '../../../core/widgets/skeleton.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -478,11 +479,10 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                       _restartListAnim();
                     },
                     child: feedbacksState.when(
-                      loading: () => const Center(
-                        child: CircularProgressIndicator(
-                          color: _black,
-                          strokeWidth: 2,
-                        ),
+                      loading: () => const SkeletonList(
+                        dark: false,
+                        count: 6,
+                        tileHeight: 92,
                       ),
                       error: (err, _) => _ErrorView(
                         message: err.toString(),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 
 import '../domain/feedback_notifier.dart';
 
@@ -335,11 +336,10 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                         ..forward();
                     },
                     child: feedbacksState.when(
-                      loading: () => const Center(
-                        child: CircularProgressIndicator(
-                          color: _black,
-                          strokeWidth: 2,
-                        ),
+                      loading: () => const SkeletonList(
+                        dark: false,
+                        count: 6,
+                        tileHeight: 92,
                       ),
                       error: (err, _) => _ErrorView(
                         message: err.toString(),

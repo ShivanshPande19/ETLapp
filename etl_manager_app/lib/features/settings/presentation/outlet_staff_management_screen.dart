@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../app/dio_provider.dart' show baseUrl;
@@ -147,8 +148,8 @@ class _OutletStaffManagementScreenState
                         BorderRadius.vertical(top: Radius.circular(28)),
                   ),
                   child: state.isLoading
-                      ? const Center(
-                          child: CircularProgressIndicator(color: _black))
+                      ? const SkeletonList(
+                          dark: false, count: 5, tileHeight: 76)
                       : state.error != null
                           ? Center(
                               child: Text(state.error!,

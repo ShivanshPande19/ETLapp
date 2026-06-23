@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 
 import 'home_providers.dart';
 
@@ -120,8 +121,10 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                   borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
                 ),
                 child: insightsState.when(
-                  loading: () => const Center(
-                    child: CircularProgressIndicator(color: _black),
+                  loading: () => const SkeletonList(
+                    dark: false,
+                    count: 4,
+                    tileHeight: 80,
                   ),
                   error: (err, _) => Center(
                     child: Text(

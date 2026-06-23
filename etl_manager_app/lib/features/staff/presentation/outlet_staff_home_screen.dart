@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../auth/domain/auth_notifier.dart';
@@ -297,17 +298,10 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                               );
 
                               return feedbackState.when(
-                                loading: () => Container(
-                                  height: 200,
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(24),
-                                  ),
-                                  child: const Center(
-                                    child: CircularProgressIndicator(
-                                      color: _black,
-                                      strokeWidth: 2,
-                                    ),
+                                loading: () => Shimmer.light(
+                                  child: const SkeletonBox(
+                                    height: 200,
+                                    radius: 24,
                                   ),
                                 ),
                                 error: (err, stack) => Container(

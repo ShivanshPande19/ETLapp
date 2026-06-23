@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 // CHANGED: Importing the generic courts provider
 import '../../courts/domain/courts_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -1390,8 +1391,11 @@ class _SectionLabel extends StatelessWidget {
 class _Loader extends StatelessWidget {
   const _Loader();
   @override
-  Widget build(BuildContext context) => const Center(
-    child: CircularProgressIndicator(color: _black, strokeWidth: 2),
+  Widget build(BuildContext context) => const SkeletonList(
+    dark: false,
+    count: 6,
+    tileHeight: 70,
+    showTrailing: true,
   );
 }
 

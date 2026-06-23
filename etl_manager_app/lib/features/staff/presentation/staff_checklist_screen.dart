@@ -10,6 +10,7 @@ import '../domain/housekeeping_notifier.dart';
 import '../domain/housekeeping_models.dart' as hk;
 import '../data/housekeeping_repository.dart';
 import '../../../core/widgets/app_network_image.dart';
+import '../../../core/widgets/skeleton.dart';
 
 // ✅ NEW IMPORT: DB se real court name laane ke liye
 import '../../courts/domain/courts_notifier.dart';
@@ -671,11 +672,11 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     final dailyTasks = _tasksForShift(shift);
 
     return async.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.only(top: 80),
-        child: Center(
-          child: CircularProgressIndicator(color: _black, strokeWidth: 2),
-        ),
+      loading: () => const SkeletonList(
+        dark: false,
+        count: 6,
+        tileHeight: 64,
+        padding: EdgeInsets.fromLTRB(20, 18, 20, 20),
       ),
       error: (_, __) => _HistoryMessage(
         icon: Icons.wifi_off_rounded,

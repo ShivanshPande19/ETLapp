@@ -11,6 +11,7 @@ import '../../auth/domain/auth_notifier.dart';
 import '../../staff/presentation/view_roster_screen.dart';
 import 'home_providers.dart';
 import 'weekly_insights_screen.dart';
+import '../../../core/widgets/skeleton.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -309,12 +310,8 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
     ),
   );
 
-  Widget _skeletonCard(double h) => Container(
-    height: h,
-    decoration: BoxDecoration(
-      color: const Color(0xFFEEEEEC),
-      borderRadius: BorderRadius.circular(18),
-    ),
+  Widget _skeletonCard(double h) => Shimmer.light(
+    child: SkeletonBox(height: h, radius: 18),
   );
 
   Widget _errorCard(String msg) => Container(
@@ -570,9 +567,13 @@ class _StaffRosterCard extends ConsumerWidget {
       onTap: onTap,
       child: _AppCard(
         child: rosterState.when(
-          loading: () => const SizedBox(
-            height: 120,
-            child: Center(child: CircularProgressIndicator(color: _black)),
+          loading: () => Shimmer.light(
+            child: Column(
+              children: const [
+                SkeletonTile(height: 52),
+                SkeletonTile(height: 52),
+              ],
+            ),
           ),
           error: (_, __) => const SizedBox(
             height: 120,
@@ -790,12 +791,16 @@ class _ReportsCard extends ConsumerWidget {
                 border: Border.all(color: Colors.grey.shade200),
               ),
               child: insightsState.when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.all(8.0),
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: _purple,
-                      strokeWidth: 2,
+                loading: () => Shimmer.light(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        SkeletonLine(width: 150, height: 13),
+                        SizedBox(height: 14),
+                        SkeletonBox(height: 78, radius: 12),
+                      ],
                     ),
                   ),
                 ),
