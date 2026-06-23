@@ -484,6 +484,7 @@ class _ManagerHousekeepingScreenState
         isDone: api?.isDone ?? false,
         photoUrl: api?.photoUrl,
         doneAt: api?.doneAt,
+        doneByName: api?.doneByName,
       );
     }).toList();
 
@@ -505,13 +506,15 @@ class _ManagerHousekeepingScreenState
       viewDate: viewDate,
       cooldownDays: 7,
       makeEmpty: () => hk.WeeklyTaskStatus(courtId: _court!, isOverdue: true),
-      makeFiltered: (lastDone, nextDue, overdue, photo) => hk.WeeklyTaskStatus(
-        courtId: _court!,
-        lastDoneAt: lastDone,
-        nextDueAt: nextDue,
-        isOverdue: overdue,
-        photoUrl: photo,
-      ),
+      makeFiltered: (lastDone, nextDue, overdue, photo, doneBy) =>
+          hk.WeeklyTaskStatus(
+            courtId: _court!,
+            lastDoneAt: lastDone,
+            nextDueAt: nextDue,
+            isOverdue: overdue,
+            photoUrl: photo,
+            doneByName: doneBy,
+          ),
     );
 
     final effectiveMonthly = _effectiveRecurring<hk.MonthlyTaskStatus>(
@@ -519,13 +522,15 @@ class _ManagerHousekeepingScreenState
       viewDate: viewDate,
       cooldownDays: 30,
       makeEmpty: () => hk.MonthlyTaskStatus(courtId: _court!, isOverdue: true),
-      makeFiltered: (lastDone, nextDue, overdue, photo) => hk.MonthlyTaskStatus(
-        courtId: _court!,
-        lastDoneAt: lastDone,
-        nextDueAt: nextDue,
-        isOverdue: overdue,
-        photoUrl: photo,
-      ),
+      makeFiltered: (lastDone, nextDue, overdue, photo, doneBy) =>
+          hk.MonthlyTaskStatus(
+            courtId: _court!,
+            lastDoneAt: lastDone,
+            nextDueAt: nextDue,
+            isOverdue: overdue,
+            photoUrl: photo,
+            doneByName: doneBy,
+          ),
     );
 
     return ListView(
@@ -590,6 +595,7 @@ class _ManagerHousekeepingScreenState
             nextDueAt: effectiveWeekly.nextDueAt,
             isOverdue: effectiveWeekly.isOverdue,
             photoUrl: effectiveWeekly.photoUrl,
+            doneByName: effectiveWeekly.doneByName,
             onPhotoTap: effectiveWeekly.photoUrl != null
                 ? () => _openPhoto(effectiveWeekly.photoUrl!, 'Flags Washing')
                 : null,
@@ -613,6 +619,7 @@ class _ManagerHousekeepingScreenState
             nextDueAt: effectiveMonthly.nextDueAt,
             isOverdue: effectiveMonthly.isOverdue,
             photoUrl: effectiveMonthly.photoUrl,
+            doneByName: effectiveMonthly.doneByName,
             onPhotoTap: effectiveMonthly.photoUrl != null
                 ? () => _openPhoto(
                     effectiveMonthly.photoUrl!,
@@ -645,10 +652,12 @@ class _ManagerHousekeepingScreenState
     required DateTime viewDate,
     required int cooldownDays,
     required T Function() makeEmpty,
-    required T Function(DateTime?, DateTime?, bool, String?) makeFiltered,
+    required T Function(DateTime?, DateTime?, bool, String?, String?)
+    makeFiltered,
   }) {
     final DateTime? lastDoneAt = raw.lastDoneAt as DateTime?;
     final String? photoUrl = raw.photoUrl as String?;
+    final String? doneByName = raw.doneByName as String?;
     if (lastDoneAt == null) return makeEmpty();
     if (lastDoneAt.isAfter(viewDate)) return makeEmpty();
     final computedNextDue = lastDoneAt.add(Duration(days: cooldownDays));
@@ -658,6 +667,7 @@ class _ManagerHousekeepingScreenState
       computedNextDue,
       isOverdueForView,
       photoUrl,
+      doneByName,
     );
   }
 
@@ -691,11 +701,13 @@ class _MergedTask {
   final bool isDone;
   final String? photoUrl;
   final DateTime? doneAt;
+  final String? doneByName;
   const _MergedTask({
     required this.def,
     required this.isDone,
     this.photoUrl,
     this.doneAt,
+    this.doneByName,
   });
 }
 
@@ -885,6 +897,33 @@ class _DailyTaskTile extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (done &&
+                    task.doneByName != null &&
+                    task.doneByName!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_rounded,
+                        size: 12,
+                        color: _ok.withOpacity(0.75),
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          task.doneByName!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: _ok.withOpacity(0.85),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -1000,6 +1039,7 @@ class _RecurringTile extends StatelessWidget {
   final DateTime? lastDoneAt, nextDueAt;
   final bool isOverdue;
   final String? photoUrl;
+  final String? doneByName;
   final VoidCallback? onPhotoTap;
 
   const _RecurringTile({
@@ -1010,6 +1050,7 @@ class _RecurringTile extends StatelessWidget {
     this.nextDueAt,
     required this.isOverdue,
     this.photoUrl,
+    this.doneByName,
     this.onPhotoTap,
   });
 
@@ -1182,6 +1223,28 @@ class _RecurringTile extends StatelessWidget {
                       Text(
                         subInfo,
                         style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                      ),
+                    if (justDone &&
+                        doneByName != null &&
+                        doneByName!.trim().isNotEmpty)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.person_rounded,
+                            size: 11,
+                            color: _ok.withOpacity(0.75),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            'By $doneByName',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _ok.withOpacity(0.85),
+                            ),
+                          ),
+                        ],
                       ),
                   ],
                 ),

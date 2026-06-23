@@ -16,16 +16,8 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...models.housekeeping import HkTask, HkRecurring
 from ...core.uploads import save_upload_image
+from ..deps import CurrentUser, get_current_user
 from .events import notify_clients
-
-try:
-    from ...core.security import get_current_user
-except ImportError:
-    try:
-        from ...api.deps import get_current_user
-    except ImportError:
-        def get_current_user():
-            return {"id": 0}
 
 router = APIRouter()
 
@@ -113,11 +105,12 @@ def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
 
     tasks = [
         {
-            "task_id":    r.task_id,
-            "task_title": r.task_title or r.task_id,
-            "is_done":    r.is_done,
-            "photo_url":  r.photo_url,
-            "done_at":    r.done_at,
+            "task_id":      r.task_id,
+            "task_title":   r.task_title or r.task_id,
+            "is_done":      r.is_done,
+            "photo_url":    r.photo_url,
+            "done_at":      r.done_at,
+            "done_by_name": r.done_by_name,
         }
         for r in rows
     ]
@@ -178,6 +171,7 @@ def _recurring_status(
         "last_done_at": last_done.isoformat() if last_done else None,
         "next_due_at":  next_due.isoformat()  if next_due  else None,
         "photo_url":    row.photo_url if row else None,
+        "done_by_name": row.done_by_name if row else None,
         "is_overdue":   is_overdue,
     }
 
@@ -201,7 +195,7 @@ async def upload_housekeeping_photo(
 def submit_shift(
     body: ShiftSubmitRequest,
     db:   Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     if not body.tasks:
         raise HTTPException(
@@ -209,25 +203,29 @@ def submit_shift(
         )
 
     for task in body.tasks:
+        # Record who completed it (from the JWT, never the client body).
+        done_name = user.name if task.is_done else None
         stmt = (
             _upsert_insert(db)
             .values(
-                court_id   = body.court_id,
-                shift      = body.shift,
-                date       = body.date,
-                task_id    = task.task_id,
-                task_title = task.task_title,
-                is_done    = task.is_done,
-                photo_url  = task.photo_url,
-                done_at    = task.done_at,
+                court_id     = body.court_id,
+                shift        = body.shift,
+                date         = body.date,
+                task_id      = task.task_id,
+                task_title   = task.task_title,
+                is_done      = task.is_done,
+                photo_url    = task.photo_url,
+                done_at      = task.done_at,
+                done_by_name = done_name,
             )
             .on_conflict_do_update(
                 index_elements=["court_id", "shift", "date", "task_id"],
                 set_={
-                    "is_done":    task.is_done,
-                    "photo_url":  task.photo_url,
-                    "done_at":    task.done_at,
-                    "task_title": task.task_title,
+                    "is_done":      task.is_done,
+                    "photo_url":    task.photo_url,
+                    "done_at":      task.done_at,
+                    "task_title":   task.task_title,
+                    "done_by_name": done_name,
                 },
             )
         )
@@ -284,7 +282,7 @@ def get_status(
 def mark_weekly_done(
     body: RecurringTaskRequest,
     db:   Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     row       = _get_latest_recurring(db, body.court_id, "weekly", _WEEKLY_ID)
     last_done = _parse_done_at(row)
@@ -306,7 +304,7 @@ def mark_weekly_done(
                 },
             )
 
-    _add_recurring(db, body, "weekly", _WEEKLY_ID)
+    _add_recurring(db, body, "weekly", _WEEKLY_ID, done_by_name=user.name)
 
     # ✅ SSE notify
     _fire_notify({
@@ -327,7 +325,7 @@ def mark_weekly_done(
 def mark_monthly_done(
     body: RecurringTaskRequest,
     db:   Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     row       = _get_latest_recurring(db, body.court_id, "monthly", _MONTHLY_ID)
     last_done = _parse_done_at(row)
@@ -349,7 +347,7 @@ def mark_monthly_done(
                 },
             )
 
-    _add_recurring(db, body, "monthly", _MONTHLY_ID)
+    _add_recurring(db, body, "monthly", _MONTHLY_ID, done_by_name=user.name)
 
     # ✅ SSE notify
     _fire_notify({
@@ -371,14 +369,16 @@ def _add_recurring(
     body: RecurringTaskRequest,
     task_type: str,
     task_id: str,
+    done_by_name: Optional[str] = None,
 ) -> None:
     row = HkRecurring(
-        court_id  = body.court_id,
-        task_type = task_type,
-        task_id   = task_id,
-        done_at   = datetime.now().isoformat(),
-        photo_url = body.photo_url,
-        done_by   = body.done_by,
+        court_id     = body.court_id,
+        task_type    = task_type,
+        task_id      = task_id,
+        done_at      = datetime.now().isoformat(),
+        photo_url    = body.photo_url,
+        done_by      = body.done_by,
+        done_by_name = done_by_name,
     )
     db.add(row)
     db.commit()

@@ -26,6 +26,7 @@ class HkTask(Base):
     is_done      = Column(Boolean,  nullable=False, default=False)
     photo_url    = Column(String,   nullable=True)
     done_at      = Column(String,   nullable=True)    # ISO-8601 from Flutter
+    done_by_name = Column(String,   nullable=True)    # staff who completed it
     submitted_at = Column(DateTime, server_default=func.now())
 
     # Composite unique constraint — enforced at DB level
@@ -51,4 +52,5 @@ class HkRecurring(Base):
     done_at    = Column(String,   nullable=False)   # ISO-8601
     photo_url  = Column(String,   nullable=True)
     done_by    = Column(Integer,  nullable=True)    # staff user id
+    done_by_name = Column(String, nullable=True)    # staff who completed it
     created_at = Column(DateTime, server_default=func.now())
