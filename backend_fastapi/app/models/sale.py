@@ -31,6 +31,17 @@ class Court(Base):
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # ── Geofencing ────────────────────────────────────────────────────────────
+    # Center of the court (set via map when creating/editing). Nullable so that
+    # existing courts created before this feature keep working — until a manager
+    # sets a location, geofencing is simply skipped for that court.
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    # Allowed radius (in metres) within which staff must be to mark attendance.
+    geofence_radius = Column(Integer, default=150)
+    # Human-readable address picked from the map (for display only).
+    address = Column(String, nullable=True)
+
     outlets = relationship("Outlet", back_populates="court", cascade="all, delete-orphan")
 
 

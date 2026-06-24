@@ -394,9 +394,15 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
       return;
     }
 
+    final accuracy = (result['accuracy'] as num?)?.toDouble();
     await ref
         .read(attendanceNotifierProvider.notifier)
-        .markAttendance(lat: lat, lng: lng, imagePath: imagePath);
+        .markAttendance(
+          lat: lat,
+          lng: lng,
+          imagePath: imagePath,
+          accuracy: accuracy,
+        );
   }
 
   // ─── Check-out (End Shift) flow — reuses the same camera screen ───────────

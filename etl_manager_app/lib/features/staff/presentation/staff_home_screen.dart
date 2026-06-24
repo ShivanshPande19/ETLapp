@@ -215,9 +215,15 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
       _toast('Could not capture location/photo. Try again.', isError: true);
       return;
     }
+    final accuracy = (result['accuracy'] as num?)?.toDouble();
     await ref
         .read(attendanceNotifierProvider.notifier)
-        .markAttendance(lat: lat, lng: lng, imagePath: imagePath);
+        .markAttendance(
+          lat: lat,
+          lng: lng,
+          imagePath: imagePath,
+          accuracy: accuracy,
+        );
   }
 
   Future<void> _startCheckOut() async {

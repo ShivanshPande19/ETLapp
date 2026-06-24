@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../../home/presentation/home_providers.dart';
 
@@ -31,10 +33,79 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
   bool _isCapturing = false;
   String _errorMsg = '';
 
+  // ── Geofence state ──────────────────────────────────────────────────────────
+  bool _hasGeofence = false; // court has a location configured
+  bool _withinZone = true; // staff currently inside the allowed circle
+  bool _checkingZone = false;
+  String? _courtName;
+  double? _courtLat;
+  double? _courtLng;
+  int _radius = 150;
+  double _accuracyBuffer = 75;
+  double? _distanceFromCourt; // metres
+
   @override
   void initState() {
     super.initState();
     _initializeCameraAndLocation();
+  }
+
+  Future<void> _fetchGeofence() async {
+    try {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get('/attendance/geofence');
+      final data = res.data;
+      if (data is Map && data['has_geofence'] == true) {
+        _hasGeofence = true;
+        _courtName = data['court_name'] as String?;
+        _courtLat = (data['latitude'] as num?)?.toDouble();
+        _courtLng = (data['longitude'] as num?)?.toDouble();
+        _radius = (data['geofence_radius'] as num?)?.toInt() ?? 150;
+        _accuracyBuffer = (data['accuracy_buffer'] as num?)?.toDouble() ?? 75;
+      } else {
+        _hasGeofence = false;
+      }
+    } catch (_) {
+      // If we can't fetch the geofence, don't block the user client-side —
+      // the server still enforces it on submit.
+      _hasGeofence = false;
+    }
+  }
+
+  /// Recompute whether the current position is inside the court's circle.
+  void _evaluateZone() {
+    if (!_hasGeofence ||
+        _currentPosition == null ||
+        _courtLat == null ||
+        _courtLng == null) {
+      _withinZone = true;
+      _distanceFromCourt = null;
+      return;
+    }
+    final dist = Geolocator.distanceBetween(
+      _currentPosition!.latitude,
+      _currentPosition!.longitude,
+      _courtLat!,
+      _courtLng!,
+    );
+    final allowed = _radius +
+        (_currentPosition!.accuracy.clamp(0, _accuracyBuffer));
+    _distanceFromCourt = dist;
+    _withinZone = dist <= allowed;
+  }
+
+  Future<void> _refreshLocation() async {
+    setState(() => _checkingZone = true);
+    try {
+      _currentPosition = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      _evaluateZone();
+    } catch (_) {
+      // keep previous position
+    } finally {
+      if (mounted) setState(() => _checkingZone = false);
+    }
   }
 
   Future<void> _initializeCameraAndLocation() async {
@@ -56,6 +127,10 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
       _currentPosition = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
+
+      // 1b. Fetch this staff's court geofence and evaluate the zone.
+      await _fetchGeofence();
+      _evaluateZone();
 
       // 2. Initialize Front Camera securely
       final cameras = await availableCameras();
@@ -104,6 +179,25 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
         _isCapturing)
       return;
 
+    // 🚫 Geofence gate — block capture if outside the court's allowed circle.
+    if (_hasGeofence && !_withinZone) {
+      HapticFeedback.heavyImpact();
+      final d = _distanceFromCourt;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            d != null
+                ? 'You are ~${d.round()} m from ${_courtName ?? 'the court'}. '
+                    'Move within $_radius m to mark attendance.'
+                : 'You are outside the attendance zone.',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isCapturing = true);
     HapticFeedback.heavyImpact();
 
@@ -116,6 +210,7 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
           'image_path': image.path,
           'latitude': _currentPosition?.latitude,
           'longitude': _currentPosition?.longitude,
+          'accuracy': _currentPosition?.accuracy,
         });
       }
     } catch (e) {
@@ -216,6 +311,61 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
               ),
             ),
           ),
+
+          // 2b. Geofence status banner
+          if (_hasGeofence)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              left: 72,
+              right: 16,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: (_withinZone ? _ok : const Color(0xFFEF4444))
+                      .withOpacity(0.92),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _withinZone
+                          ? Icons.check_circle_rounded
+                          : Icons.location_off_rounded,
+                      color: _white,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _withinZone
+                            ? 'Inside ${_courtName ?? 'court'} zone'
+                            : 'Outside zone${_distanceFromCourt != null ? ' · ~${_distanceFromCourt!.round()} m away' : ''}',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: _white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: _checkingZone ? null : _refreshLocation,
+                      child: _checkingZone
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: _white,
+                              ),
+                            )
+                          : const Icon(Icons.refresh_rounded,
+                              color: _white, size: 18),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           // 3. Watermark Overlay (Bottom)
           Positioned(
@@ -335,7 +485,9 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
                   width: _isCapturing ? 64 : 76,
                   height: _isCapturing ? 64 : 76,
                   decoration: BoxDecoration(
-                    color: _isCapturing ? Colors.grey : _white,
+                    color: (_hasGeofence && !_withinZone)
+                        ? Colors.white38
+                        : (_isCapturing ? Colors.grey : _white),
                     shape: BoxShape.circle,
                     border: Border.all(
                       color: _black.withOpacity(0.2),

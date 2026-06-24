@@ -42,7 +42,7 @@ from .services.scheduler_service import start_scheduler, stop_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -58,6 +58,10 @@ async def lifespan(app: FastAPI):
     # ✅ Add staff profile columns (phone, photo_url) if missing
     ensure_staff_columns()
     print("[DB] Staff schema ensured ✓")
+
+    # ✅ Add court geofencing columns (latitude, longitude, geofence_radius, address)
+    ensure_court_columns()
+    print("[DB] Court schema ensured ✓")
 
     # ✅ Add housekeeping done_by_name columns if missing
     ensure_hk_columns()

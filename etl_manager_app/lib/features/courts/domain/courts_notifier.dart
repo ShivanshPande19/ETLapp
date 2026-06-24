@@ -22,10 +22,40 @@ class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
 
   /// Create a new court, then refresh the list. Throws on failure so the
   /// caller can show an error.
-  Future<void> createCourt({required String name, String? location}) async {
-    await ref
-        .read(courtsRepositoryProvider)
-        .createCourt(name: name, location: location);
+  Future<void> createCourt({
+    required String name,
+    String? location,
+    double? latitude,
+    double? longitude,
+    int? geofenceRadius,
+    String? address,
+  }) async {
+    await ref.read(courtsRepositoryProvider).createCourt(
+          name: name,
+          location: location,
+          latitude: latitude,
+          longitude: longitude,
+          geofenceRadius: geofenceRadius,
+          address: address,
+        );
+    await fetchCourts();
+  }
+
+  /// Set / edit an existing court's geofence location, then refresh.
+  Future<void> updateCourtLocation({
+    required int courtId,
+    required double latitude,
+    required double longitude,
+    required int geofenceRadius,
+    String? address,
+  }) async {
+    await ref.read(courtsRepositoryProvider).updateCourtLocation(
+          courtId: courtId,
+          latitude: latitude,
+          longitude: longitude,
+          geofenceRadius: geofenceRadius,
+          address: address,
+        );
     await fetchCourts();
   }
 }

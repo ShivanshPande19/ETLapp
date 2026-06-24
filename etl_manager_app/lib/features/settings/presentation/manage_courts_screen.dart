@@ -7,6 +7,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
+import '../../courts/data/courts_repository.dart';
+import '../../courts/presentation/location_picker_screen.dart';
 import 'staff_management_screen.dart';
 
 const _bg = Color(0xFF080808);
@@ -274,13 +276,11 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                                             color: _black,
                                           ),
                                         ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          court.location ?? 'Active ETL Court',
-                                          style: GoogleFonts.inter(
-                                            fontSize: 12,
-                                            color: _grey,
-                                          ),
+                                        const SizedBox(height: 5),
+                                        _LocationChip(
+                                          court: court,
+                                          onTap: () =>
+                                              _editCourtLocation(court),
                                         ),
                                       ],
                                     ),
@@ -309,7 +309,7 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
 
   void _showNewCourtSheet(BuildContext context) {
     final nameCtrl = TextEditingController();
-    final locCtrl = TextEditingController();
+    PickedLocation? picked;
     bool loading = false;
 
     showModalBottomSheet(
@@ -356,11 +356,97 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                   label: 'Court Name',
                   hint: 'e.g. Central 50',
                 ),
-                const SizedBox(height: 12),
-                _CourtField(
-                  controller: locCtrl,
-                  label: 'Location (optional)',
-                  hint: 'e.g. Sector 50, Noida',
+                const SizedBox(height: 16),
+                Text(
+                  'LOCATION (OPTIONAL)',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _grey,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () async {
+                    final result = await Navigator.push<PickedLocation>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => LocationPickerScreen(
+                          courtName: nameCtrl.text.trim().isEmpty
+                              ? 'New Court'
+                              : nameCtrl.text.trim(),
+                          initialLat: picked?.latitude,
+                          initialLng: picked?.longitude,
+                          initialRadius: picked?.radius,
+                        ),
+                      ),
+                    );
+                    if (result != null) setSheet(() => picked = result);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F5F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: picked == null
+                            ? const Color(0xFFE5E5E5)
+                            : _red.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          picked == null
+                              ? Icons.add_location_alt_outlined
+                              : Icons.location_on_rounded,
+                          color: picked == null ? _grey : _red,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                picked == null
+                                    ? 'Set location on map'
+                                    : (picked!.address ??
+                                        '${picked!.latitude.toStringAsFixed(5)}, ${picked!.longitude.toStringAsFixed(5)}'),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: _black,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (picked != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Geofence: ${picked!.radius} m',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    color: _grey,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded,
+                            color: _grey.withOpacity(0.6), size: 20),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Without a location, staff at this court can mark attendance '
+                  'from anywhere. Set a location to enable geofencing.',
+                  style: GoogleFonts.inter(fontSize: 11, color: _grey),
                 ),
                 const SizedBox(height: 24),
                 SizedBox(
@@ -377,7 +463,10 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                                   .read(courtsNotifierProvider.notifier)
                                   .createCourt(
                                     name: name,
-                                    location: locCtrl.text.trim(),
+                                    latitude: picked?.latitude,
+                                    longitude: picked?.longitude,
+                                    geofenceRadius: picked?.radius,
+                                    address: picked?.address,
                                   );
                               if (ctx.mounted) Navigator.pop(ctx);
                               if (context.mounted) {
@@ -438,6 +527,94 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Open the map picker for an existing court and persist the new location.
+  /// No other court data is touched.
+  Future<void> _editCourtLocation(Court court) async {
+    HapticFeedback.selectionClick();
+    final result = await Navigator.push<PickedLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationPickerScreen(
+          courtName: court.name,
+          initialLat: court.latitude,
+          initialLng: court.longitude,
+          initialRadius: court.geofenceRadius,
+        ),
+      ),
+    );
+    if (result == null) return;
+    try {
+      await ref.read(courtsNotifierProvider.notifier).updateCourtLocation(
+            courtId: court.id,
+            latitude: result.latitude,
+            longitude: result.longitude,
+            geofenceRadius: result.radius,
+            address: result.address,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Location saved for "${court.name}"'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: _black,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save location'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+      }
+    }
+  }
+}
+
+/// Small tappable chip under a court name showing its geofence status.
+class _LocationChip extends StatelessWidget {
+  final Court court;
+  final VoidCallback onTap;
+  const _LocationChip({required this.court, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasGeo = court.hasGeofence;
+    final label = hasGeo
+        ? 'Geofence ${court.geofenceRadius ?? 150} m · Edit'
+        : 'Set location';
+    final color = hasGeo ? const Color(0xFF16A34A) : _red;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            hasGeo ? Icons.gps_fixed_rounded : Icons.add_location_alt_outlined,
+            size: 13,
+            color: color,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
