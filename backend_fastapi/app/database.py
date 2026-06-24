@@ -66,6 +66,7 @@ def ensure_attendance_columns() -> None:
             "check_out_lng": "FLOAT",
             "check_out_address": "VARCHAR",
             "check_out_photo_url": "VARCHAR",
+            "business_date": "DATE",
         }
     else:
         types = {
@@ -74,6 +75,7 @@ def ensure_attendance_columns() -> None:
             "check_out_lng": "DOUBLE PRECISION",
             "check_out_address": "VARCHAR",
             "check_out_photo_url": "VARCHAR",
+            "business_date": "DATE",
         }
     try:
         with engine.begin() as conn:
@@ -86,6 +88,16 @@ def ensure_attendance_columns() -> None:
                     conn.execute(
                         text(f"ALTER TABLE attendance ADD COLUMN {col} {col_type}")
                     )
+            # Backfill business_date for existing rows from the check-in date so
+            # historical attendance still groups correctly (best-effort).
+            if "business_date" not in existing:
+                conn.execute(
+                    text(
+                        "UPDATE attendance SET business_date = "
+                        + ("date(check_in_time) " if _is_sqlite else "CAST(check_in_time AS DATE) ")
+                        + "WHERE business_date IS NULL AND check_in_time IS NOT NULL"
+                    )
+                )
     except Exception as e:  # never block startup on a best-effort migration
         print(f"[MIGRATION] ensure_attendance_columns skipped: {e}")
 
@@ -117,7 +129,7 @@ def ensure_outlet_columns() -> None:
 def ensure_staff_columns() -> None:
     """Add profile columns (phone, photo_url) to an existing `staff` table.
     Best-effort + idempotent."""
-    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR"}
+    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR", "shift_start": "VARCHAR", "shift_end": "VARCHAR"}
     try:
         with engine.begin() as conn:
             insp = inspect(conn)
@@ -145,6 +157,7 @@ def ensure_court_columns() -> None:
             "longitude": "FLOAT",
             "geofence_radius": "INTEGER",
             "address": "VARCHAR",
+            "day_cutoff_hour": "INTEGER",
         }
     else:
         needed = {
@@ -152,6 +165,7 @@ def ensure_court_columns() -> None:
             "longitude": "DOUBLE PRECISION",
             "geofence_radius": "INTEGER",
             "address": "VARCHAR",
+            "day_cutoff_hour": "INTEGER",
         }
     try:
         with engine.begin() as conn:

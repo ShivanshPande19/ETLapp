@@ -9,6 +9,7 @@ import '../utils/token_storage.dart';
 import '../../features/staff/domain/housekeeping_notifier.dart';
 import '../../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../../features/maintenance/domain/maintenance_notifier.dart'; // ✅ NEW
+import '../../features/notices/domain/notices_notifier.dart';
 
 class SSEService {
   final Ref _ref;
@@ -89,6 +90,13 @@ class SSEService {
         '[SSE] Maintenance update — issue #${data['issue_id']} → ${data['status']}',
       );
       _ref.invalidate(maintenanceNotifierProvider);
+    }
+
+    // ✅ NEW: Notice update (shift change / early logout) — refresh notices + badge
+    if (type == 'notice_update') {
+      debugPrint('[SSE] Notice update — audience ${data['audience']}');
+      _ref.invalidate(noticesNotifierProvider);
+      _ref.invalidate(unreadCountProvider);
     }
   }
 

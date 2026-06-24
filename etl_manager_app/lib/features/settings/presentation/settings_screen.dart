@@ -14,6 +14,8 @@ import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../../home/presentation/home_providers.dart' show currentOutletNameProvider;
 import '../presentation/manage_courts_screen.dart';
 import 'outlet_staff_management_screen.dart';
+import '../../notices/domain/notices_notifier.dart';
+import '../../notices/presentation/notices_screen.dart';
 
 const _bg = Color(0xFF080808);
 const _white = Color(0xFFFFFFFF);
@@ -376,6 +378,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                   label: 'POS Integrations',
                                   subtitle: 'GoFrugal, Petpooja, Vyapar',
                                   onTap: () {},
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          _StaggerItem(
+                            anim: _itemAnim(5),
+                            child: const _SectionLabel('NOTIFICATIONS'),
+                          ),
+                          const SizedBox(height: 10),
+                          _StaggerItem(
+                            anim: _itemAnim(5),
+                            child: _SettingsGroup(
+                              children: [
+                                Consumer(
+                                  builder: (context, ref, _) {
+                                    final unread = ref
+                                            .watch(unreadCountProvider)
+                                            .value ??
+                                        0;
+                                    return _NavTile(
+                                      icon: Icons.notifications_rounded,
+                                      label: 'Notices',
+                                      subtitle: unread > 0
+                                          ? '$unread unread'
+                                          : 'Early logouts & alerts',
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const NoticesScreen(),
+                                          ),
+                                        ).then((_) => ref.invalidate(
+                                            unreadCountProvider));
+                                      },
+                                    );
+                                  },
                                 ),
                               ],
                             ),

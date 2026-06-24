@@ -27,6 +27,7 @@ from .api.routes import events
 from .api.routes import roster
 from .api.routes import attendance
 from .api.routes import onboarding
+from .api.routes import notices
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -36,6 +37,7 @@ from .models import manager as _manager_models
 from .models import staff as _staff_models
 from .models import attendance as _attendance_models
 from .models import onboarding as _onboarding_models
+from .models import notice as _notice_models
 
 from .services.scheduler_service import start_scheduler, stop_scheduler
 
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
     print("[DB] Housekeeping schema ensured ✓")
 
     _hk_routes._main_loop = asyncio.get_event_loop()
+    events._main_loop = asyncio.get_event_loop()
     print("[SSE] Event loop captured ✓")
 
     start_scheduler()
@@ -145,3 +148,4 @@ app.include_router(roster.router,       prefix="/roster",       tags=["Roster"])
 app.include_router(attendance.router,   prefix="/attendance",   tags=["Attendance"])
 app.include_router(onboarding.router,   prefix="/onboarding",   tags=["Onboarding"])
 app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"])
+app.include_router(notices.router,      prefix="/notices",      tags=["Notices"])

@@ -58,6 +58,18 @@ class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
         );
     await fetchCourts();
   }
+
+  /// Set a court's overnight business-day cutoff hour, then refresh.
+  Future<void> updateCourtSettings({
+    required int courtId,
+    required int dayCutoffHour,
+  }) async {
+    await ref.read(courtsRepositoryProvider).updateCourtSettings(
+          courtId: courtId,
+          dayCutoffHour: dayCutoffHour,
+        );
+    await fetchCourts();
+  }
 }
 
 final courtsNotifierProvider =

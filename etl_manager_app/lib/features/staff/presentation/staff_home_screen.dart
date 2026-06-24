@@ -16,6 +16,8 @@ import '../domain/attendance_notifier.dart';
 import '../../feedbacks/domain/court_feedback_notifier.dart';
 import '../../feedbacks/presentation/staff_court_feedback_screen.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
+import '../../notices/domain/notices_notifier.dart';
+import '../../notices/presentation/notices_screen.dart';
 
 // ✅ Real court name from DB
 import '../../courts/domain/courts_notifier.dart';
@@ -335,32 +337,103 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                         ),
                         FadeTransition(
                           opacity: _heroFade,
-                          child: GestureDetector(
-                            onTap: _openSettings,
-                            child: Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: _red.withOpacity(0.15),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: _red.withOpacity(0.35),
-                                  width: 1.5,
-                                ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Consumer(
+                                builder: (context, ref, _) {
+                                  final unread =
+                                      ref.watch(unreadCountProvider).value ?? 0;
+                                  return GestureDetector(
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const NoticesScreen(),
+                                      ),
+                                    ).then((_) =>
+                                        ref.invalidate(unreadCountProvider)),
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Container(
+                                          width: 38,
+                                          height: 38,
+                                          decoration: BoxDecoration(
+                                            color: _white.withOpacity(0.08),
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: _white.withOpacity(0.15),
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.notifications_none_rounded,
+                                            size: 19,
+                                            color: _white.withOpacity(0.9),
+                                          ),
+                                        ),
+                                        if (unread > 0)
+                                          Positioned(
+                                            right: -2,
+                                            top: -2,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(4),
+                                              constraints: const BoxConstraints(
+                                                minWidth: 16,
+                                                minHeight: 16,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: _red,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                    color: _bg, width: 1.5),
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  unread > 9 ? '9+' : '$unread',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 9,
+                                                    height: 1,
+                                                    color: _white,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                },
                               ),
-                              child: Center(
-                                child: Text(
-                                  widget.staffName.isNotEmpty
-                                      ? widget.staffName[0].toUpperCase()
-                                      : 'S',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    color: _red,
-                                    fontWeight: FontWeight.w700,
+                              const SizedBox(width: 10),
+                              GestureDetector(
+                                onTap: _openSettings,
+                                child: Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: _red.withOpacity(0.15),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _red.withOpacity(0.35),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      widget.staffName.isNotEmpty
+                                          ? widget.staffName[0].toUpperCase()
+                                          : 'S',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 16,
+                                        color: _red,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
+                            ],
                           ),
                         ),
                       ],

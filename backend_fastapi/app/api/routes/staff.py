@@ -7,11 +7,13 @@ from fastapi import APIRouter, HTTPException, Depends, Form, File, UploadFile
 from sqlalchemy.orm import Session
 
 from ...database import get_db
-from ...schemas.staff import StaffResponse, StaffListResponse, CourtAssignRequest
+from ...schemas.staff import StaffResponse, StaffListResponse, CourtAssignRequest, ShiftUpdateRequest
 from ...services.staff_service import (
     get_all_staff, get_staff_by_court, get_staff_by_outlet,
     create_staff, deactivate_staff, reassign_court
 )
+from ...services.notice_service import create_notice
+from ...models.staff import Staff
 from ...core.config import settings
 from ..deps import get_current_user, CurrentUser
 
@@ -165,4 +167,51 @@ def assign_court(staff_id: int, req: CourtAssignRequest, db: Session = Depends(g
     staff = reassign_court(staff_id, req.court_id, db)
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
+    return staff
+
+
+# ── PATCH set shift timings (ETL manager only) ───────────────────────────────
+@router.patch("/{staff_id}/shift", response_model=StaffResponse)
+def set_shift(
+    staff_id: int,
+    req: ShiftUpdateRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Set/clear a staff member's shift timings and notify them."""
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    staff = db.query(Staff).filter(Staff.id == staff_id).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Both provided, or both cleared — never a half-set shift.
+    if bool(req.shift_start) != bool(req.shift_end):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide both shift start and end (or clear both).",
+        )
+
+    staff.shift_start = req.shift_start
+    staff.shift_end = req.shift_end
+    db.commit()
+    db.refresh(staff)
+
+    # Notify the staff that their shift changed.
+    if staff.shift_start and staff.shift_end:
+        body = f"Your shift is now {staff.shift_start}–{staff.shift_end}."
+    else:
+        body = "Your shift timings were cleared."
+    create_notice(
+        db,
+        audience="staff",
+        type="shift_changed",
+        title="Shift timings updated",
+        body=body,
+        court_id=staff.court_id,
+        staff_id=staff.id,
+        recipient_staff_id=staff.id,
+    )
+
     return staff

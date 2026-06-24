@@ -10,6 +10,21 @@ router = APIRouter()
 # court_id = 0 means manager (gets all events)
 _clients: dict[int, list[asyncio.Queue]] = {}
 
+# Main event loop — set in main.py lifespan. Lets sync route handlers (which run
+# in a worker thread) push SSE events safely onto the async loop.
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def fire_notify(event: dict) -> None:
+    """Thread-safe fire-and-forget SSE notify from a sync handler."""
+    global _main_loop
+    try:
+        if _main_loop is None or not _main_loop.is_running():
+            return
+        asyncio.run_coroutine_threadsafe(notify_clients(event), _main_loop)
+    except Exception as e:
+        print(f"[SSE] fire_notify failed: {e}")
+
 
 async def notify_clients(event: dict):
     court_id = event.get("court_id")

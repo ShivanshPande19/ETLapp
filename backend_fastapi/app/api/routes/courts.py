@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ...schemas.court import CourtsResponse, CourtCreate, CourtLocationUpdate
+from ...schemas.court import CourtsResponse, CourtCreate, CourtLocationUpdate, CourtSettingsUpdate
 from ...services.court_service import get_all_courts
 from ...models.sale import Court
 from ...database import get_db
@@ -24,6 +24,7 @@ def _court_out(court: Court) -> dict:
         "longitude": court.longitude,
         "geofence_radius": court.geofence_radius,
         "address": court.address,
+        "day_cutoff_hour": court.day_cutoff_hour or 0,
         "has_geofence": has_geo,
     }
 
@@ -69,6 +70,7 @@ def create_court(
         longitude=data.longitude,
         geofence_radius=data.geofence_radius or 150,
         address=(data.address or data.location),
+        day_cutoff_hour=data.day_cutoff_hour or 0,
     )
     db.add(court)
     db.commit()
@@ -101,6 +103,32 @@ def set_court_location(
     if data.address is not None:
         court.address = data.address
 
+    db.commit()
+    db.refresh(court)
+
+    return _court_out(court)
+
+
+@router.patch("/{court_id}/settings")
+def set_court_settings(
+    court_id: int,
+    data: CourtSettingsUpdate,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """ETL manager: set a court's overnight business-day cutoff hour.
+
+    0 = normal court (business day == calendar day). For an overnight court
+    (e.g. 2pm→2am) set ~5 so a post-midnight check-out counts on the day the
+    shift started."""
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    court = db.query(Court).filter(Court.id == court_id).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found.")
+
+    court.day_cutoff_hour = data.day_cutoff_hour
     db.commit()
     db.refresh(court)
 

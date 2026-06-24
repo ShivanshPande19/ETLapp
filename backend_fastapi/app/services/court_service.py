@@ -8,7 +8,7 @@ def get_all_courts(db: Session) -> CourtsResponse:
     result = db.execute(
         text(
             "SELECT id, court_uid, name, is_active, latitude, longitude, "
-            "geofence_radius, address FROM courts"
+            "geofence_radius, address, day_cutoff_hour FROM courts"
         )
     ).mappings().all()
 
@@ -29,6 +29,7 @@ def get_all_courts(db: Session) -> CourtsResponse:
                 longitude=lng,
                 geofence_radius=row["geofence_radius"],
                 address=row["address"],
+                day_cutoff_hour=row["day_cutoff_hour"] or 0,
                 has_geofence=has_geo,
             )
         )

@@ -308,11 +308,14 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                         controller: _searchCtrl,
                         textInputAction: TextInputAction.search,
                         onSubmitted: (_) => _search(),
+                        cursorColor: _black,
                         style: GoogleFonts.inter(fontSize: 14, color: _black),
                         decoration: InputDecoration(
                           hintText: 'Search e.g. Sector 50, Noida',
                           hintStyle:
                               GoogleFonts.inter(fontSize: 14, color: _grey),
+                          filled: true,
+                          fillColor: _white,
                           prefixIcon: _searching
                               ? const Padding(
                                   padding: EdgeInsets.all(12),
