@@ -133,6 +133,41 @@ def ensure_staff_columns() -> None:
         print(f"[MIGRATION] ensure_staff_columns skipped: {e}")
 
 
+def ensure_court_columns() -> None:
+    """Add geofencing columns (latitude, longitude, geofence_radius, address)
+    to an existing `courts` table. create_all never ALTERs existing tables, so
+    courts created before the geofencing feature need these added at boot.
+    Best-effort + idempotent. Existing rows get NULL (no data loss) and simply
+    skip geofencing until a manager sets a location."""
+    if _is_sqlite:
+        needed = {
+            "latitude": "FLOAT",
+            "longitude": "FLOAT",
+            "geofence_radius": "INTEGER",
+            "address": "VARCHAR",
+        }
+    else:
+        needed = {
+            "latitude": "DOUBLE PRECISION",
+            "longitude": "DOUBLE PRECISION",
+            "geofence_radius": "INTEGER",
+            "address": "VARCHAR",
+        }
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "courts" not in insp.get_table_names():
+                return  # create_all will build it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("courts")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE courts ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:  # never block startup on a best-effort migration
+        print(f"[MIGRATION] ensure_court_columns skipped: {e}")
+
+
 def ensure_hk_columns() -> None:
     """Add `done_by_name` to existing `hk_tasks` and `hk_recurring` tables
     (create_all never ALTERs existing tables). Best-effort + idempotent."""

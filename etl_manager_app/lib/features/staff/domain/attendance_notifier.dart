@@ -127,6 +127,7 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
     required double lat,
     required double lng,
     required String imagePath,
+    double? accuracy,
   }) async {
     state = state.copyWith(status: AttendanceStatus.loading);
     try {
@@ -134,6 +135,7 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
       final formData = FormData.fromMap({
         'lat': lat,
         'lng': lng,
+        if (accuracy != null) 'accuracy': accuracy,
         'photo': await MultipartFile.fromFile(imagePath, filename: 'checkin.jpg'),
       });
 

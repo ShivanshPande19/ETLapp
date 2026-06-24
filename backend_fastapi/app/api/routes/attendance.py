@@ -12,9 +12,15 @@ import uuid
 from app.database import get_db
 from app.models.attendance import Attendance
 from app.models.staff import Staff
+from app.models.sale import Court
 from app.schemas.attendance import AttendanceStatusOut
 from app.core.config import settings
 from app.core.query_utils import day_range
+from app.core.geo import (
+    distance_meters,
+    MAX_ACCURACY_BUFFER_M,
+    DEFAULT_GEOFENCE_RADIUS_M,
+)
 from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -85,6 +91,41 @@ def _resolve_staff(user: CurrentUser, db: Session) -> Staff:
     return staff
 
 
+def _enforce_geofence(
+    db: Session, staff: Staff, lat: float, lng: float, accuracy: Optional[float]
+) -> None:
+    """Block attendance if the staff is outside their court's geofence.
+
+    Skipped silently when:
+      • the staff has no court linked, or
+      • the court has no location set (legacy courts) — until a manager sets a
+        location via the map, geofencing simply doesn't apply.
+
+    A small buffer (capped) based on the device-reported GPS accuracy is added
+    to the allowed radius so a poor fix doesn't reject a genuine staff member.
+    """
+    if not staff.court_id:
+        return
+
+    court = db.query(Court).filter(Court.id == staff.court_id).first()
+    if not court or court.latitude is None or court.longitude is None:
+        return  # no geofence configured for this court → allow
+
+    radius = court.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M
+    buffer = min(accuracy or 0.0, MAX_ACCURACY_BUFFER_M)
+    distance = distance_meters(lat, lng, court.latitude, court.longitude)
+
+    if distance > radius + buffer:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"You are about {int(round(distance))} m away from "
+                f"{court.name}. You must be within {radius} m of the court to "
+                f"mark attendance."
+            ),
+        )
+
+
 def _todays_record(db: Session, staff_id: int) -> Optional[Attendance]:
     _start, _end = day_range(date.today())
     return (
@@ -134,6 +175,35 @@ def attendance_today(
     return _status_from_record(_todays_record(db, staff.id))
 
 
+@router.get("/geofence")
+def my_geofence(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Return the logged-in staff's court geofence so the client can pre-check
+    location before opening the camera. `has_geofence=false` means no
+    restriction applies (legacy court / no location set)."""
+    staff = _resolve_staff(user, db)
+
+    court = (
+        db.query(Court).filter(Court.id == staff.court_id).first()
+        if staff.court_id
+        else None
+    )
+    if not court or court.latitude is None or court.longitude is None:
+        return {"has_geofence": False}
+
+    return {
+        "has_geofence": True,
+        "court_id": court.id,
+        "court_name": court.name,
+        "latitude": court.latitude,
+        "longitude": court.longitude,
+        "geofence_radius": court.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M,
+        "accuracy_buffer": MAX_ACCURACY_BUFFER_M,
+    }
+
+
 @router.post(
     "/check-in",
     response_model=AttendanceStatusOut,
@@ -142,6 +212,7 @@ def attendance_today(
 async def mark_attendance(
     lat: float = Form(...),
     lng: float = Form(...),
+    accuracy: Optional[float] = Form(None),
     photo: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -155,6 +226,9 @@ async def mark_attendance(
             status_code=409,
             detail="You have already checked in today.",
         )
+
+    # ✅ Geofence: must be within the assigned court's radius (if configured).
+    _enforce_geofence(db, staff, lat, lng, accuracy)
 
     file_path = await _save_selfie(photo, "in")
     real_address = await get_address_from_coords(lat, lng)
