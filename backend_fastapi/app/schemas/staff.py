@@ -1,5 +1,5 @@
 # backend_fastapi/app/schemas/staff.py
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 
 class StaffCreate(BaseModel):
@@ -16,6 +16,8 @@ class StaffResponse(BaseModel):
     court_id: Optional[int]
     phone: Optional[str] = None
     photo_url: Optional[str] = None
+    shift_start: Optional[str] = None
+    shift_end: Optional[str] = None
     is_active: bool
 
     class Config:
@@ -26,3 +28,9 @@ class StaffListResponse(BaseModel):
 
 class CourtAssignRequest(BaseModel):
     court_id: int
+
+
+class ShiftUpdateRequest(BaseModel):
+    # "HH:MM" 24h strings, or null to clear the shift.
+    shift_start: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    shift_end: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")

@@ -1,6 +1,6 @@
 # app/models/attendance.py
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, ForeignKey
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -15,6 +15,11 @@ class Attendance(Base):
     # 🔗 Nullable rakha hai taaki ETL aur Outlet dono staff chal jayein
     outlet_id = Column(Integer, ForeignKey("outlets.id", ondelete="CASCADE"), nullable=True)
     court_id = Column(Integer, ForeignKey("courts.id", ondelete="CASCADE"), nullable=True)
+
+    # 🗓 Business day this attendance belongs to (handles overnight courts where
+    # check-out happens after midnight). Computed from the court's day_cutoff_hour
+    # at check-in time. Used for "one check-in per day" and roster grouping.
+    business_date = Column(Date, nullable=True, index=True)
     
     # --- Check-in Details ---
     check_in_time = Column(DateTime(timezone=True), server_default=func.now())

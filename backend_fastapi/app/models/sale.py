@@ -42,6 +42,13 @@ class Court(Base):
     # Human-readable address picked from the map (for display only).
     address = Column(String, nullable=True)
 
+    # ── Overnight business-day handling ────────────────────────────────────────
+    # The hour (0-11, local IST) before which activity still belongs to the
+    # PREVIOUS calendar day. 0 (default) = normal court: business day == calendar
+    # day. For a court that runs e.g. 2pm→2am, set this to ~5 so a 2am check-out
+    # still counts on the day the shift started.
+    day_cutoff_hour = Column(Integer, default=0)
+
     outlets = relationship("Outlet", back_populates="court", cascade="all, delete-orphan")
 
 

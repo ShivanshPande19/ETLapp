@@ -15,12 +15,20 @@ from app.models.staff import Staff
 from app.models.sale import Court
 from app.schemas.attendance import AttendanceStatusOut
 from app.core.config import settings
-from app.core.query_utils import day_range
+from app.core.query_utils import (
+    day_range,
+    now_ist,
+    current_business_date,
+    business_date_for,
+    to_ist,
+    scheduled_shift_end_utc,
+)
 from app.core.geo import (
     distance_meters,
     MAX_ACCURACY_BUFFER_M,
     DEFAULT_GEOFENCE_RADIUS_M,
 )
+from app.services.notice_service import create_notice
 from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -126,12 +134,43 @@ def _enforce_geofence(
         )
 
 
-def _todays_record(db: Session, staff_id: int) -> Optional[Attendance]:
-    _start, _end = day_range(date.today())
+def _staff_court(db: Session, staff: Staff) -> Optional[Court]:
+    if not staff.court_id:
+        return None
+    return db.query(Court).filter(Court.id == staff.court_id).first()
+
+
+def _staff_business_date(db: Session, staff: Staff):
+    """Current business date for this staff, honouring the court's overnight
+    cutoff hour (0 = normal calendar day)."""
+    court = _staff_court(db, staff)
+    cutoff = (court.day_cutoff_hour or 0) if court else 0
+    return current_business_date(cutoff)
+
+
+def _todays_record(db: Session, staff_id: int, biz_date) -> Optional[Attendance]:
+    """The staff's attendance row for the given business date.
+
+    Falls back to a legacy calendar-day match for rows created before the
+    business_date column existed (those were backfilled, but be defensive)."""
+    rec = (
+        db.query(Attendance)
+        .filter(
+            Attendance.staff_id == staff_id,
+            Attendance.business_date == biz_date,
+        )
+        .order_by(Attendance.check_in_time.desc())
+        .first()
+    )
+    if rec:
+        return rec
+    # Legacy fallback: rows with no business_date — match by calendar day.
+    _start, _end = day_range(biz_date)
     return (
         db.query(Attendance)
         .filter(
             Attendance.staff_id == staff_id,
+            Attendance.business_date.is_(None),
             Attendance.check_in_time >= _start,
             Attendance.check_in_time < _end,
         )
@@ -172,7 +211,8 @@ def attendance_today(
     """Logged-in staff's attendance status for today (used by the home screen
     to persist state across app restarts)."""
     staff = _resolve_staff(user, db)
-    return _status_from_record(_todays_record(db, staff.id))
+    biz_date = _staff_business_date(db, staff)
+    return _status_from_record(_todays_record(db, staff.id, biz_date))
 
 
 @router.get("/geofence")
@@ -218,9 +258,10 @@ async def mark_attendance(
     user: CurrentUser = Depends(get_current_user),
 ):
     staff = _resolve_staff(user, db)
+    biz_date = _staff_business_date(db, staff)
 
-    # ✅ One check-in per day — block duplicates.
-    existing = _todays_record(db, staff.id)
+    # ✅ One check-in per business day — block duplicates.
+    existing = _todays_record(db, staff.id, biz_date)
     if existing:
         raise HTTPException(
             status_code=409,
@@ -237,6 +278,7 @@ async def mark_attendance(
         staff_id=staff.id,
         outlet_id=staff.outlet_id,
         court_id=staff.court_id,
+        business_date=biz_date,
         check_in_lat=lat,
         check_in_lng=lng,
         check_in_address=real_address,
@@ -259,7 +301,8 @@ async def check_out(
 ):
     staff = _resolve_staff(user, db)
 
-    rec = _todays_record(db, staff.id)
+    biz_date = _staff_business_date(db, staff)
+    rec = _todays_record(db, staff.id, biz_date)
     if rec is None:
         raise HTTPException(
             status_code=400,
@@ -274,7 +317,8 @@ async def check_out(
     photo_path = await _save_selfie(photo, "out") if photo is not None else None
     real_address = await get_address_from_coords(lat, lng)
 
-    rec.check_out_time = datetime.utcnow()
+    checkout_at = datetime.utcnow()
+    rec.check_out_time = checkout_at
     rec.check_out_lat = lat
     rec.check_out_lng = lng
     rec.check_out_address = real_address
@@ -283,4 +327,65 @@ async def check_out(
     db.commit()
     db.refresh(rec)
 
+    # ⏰ Early-logout detection: did they check out before their shift ended?
+    # Early *login* is fine — only an early check-out raises a notice.
+    _maybe_flag_early_logout(db, staff, rec, checkout_at)
+
     return _status_from_record(rec)
+
+
+# Grace window (minutes) before scheduled end that still counts as on-time.
+_EARLY_LOGOUT_GRACE_MIN = 5
+
+
+def _maybe_flag_early_logout(
+    db: Session, staff: Staff, rec: Attendance, checkout_utc: datetime
+) -> None:
+    """Notify the ETL manager (notices section) + the staff if check-out
+    happened before the scheduled shift end (overnight-aware)."""
+    biz_date = rec.business_date
+    if biz_date is None or not staff.shift_end:
+        return  # no shift / no business date → nothing to compare against
+
+    scheduled_end = scheduled_shift_end_utc(biz_date, staff.shift_start, staff.shift_end)
+    if scheduled_end is None:
+        return
+
+    from datetime import timedelta
+
+    threshold = scheduled_end - timedelta(minutes=_EARLY_LOGOUT_GRACE_MIN)
+    if checkout_utc >= threshold:
+        return  # on-time (or late) — all good
+
+    # How early, in minutes (for a human-friendly message).
+    early_min = int(round((scheduled_end - checkout_utc).total_seconds() / 60))
+    out_local = to_ist(checkout_utc).strftime("%I:%M %p").lstrip("0")
+
+    # Manager notice (read/unread in Settings → Notices), court-scoped.
+    create_notice(
+        db,
+        audience="manager",
+        type="early_logout",
+        title=f"{staff.name} logged out early",
+        body=(
+            f"{staff.name} checked out at {out_local}, about {early_min} min "
+            f"before the {staff.shift_end} shift end."
+        ),
+        court_id=staff.court_id,
+        staff_id=staff.id,
+    )
+
+    # Staff notice.
+    create_notice(
+        db,
+        audience="staff",
+        type="early_logout",
+        title="Early check-out recorded",
+        body=(
+            f"You checked out about {early_min} min before your shift end "
+            f"({staff.shift_end}). Your manager has been notified."
+        ),
+        court_id=staff.court_id,
+        staff_id=staff.id,
+        recipient_staff_id=staff.id,
+    )

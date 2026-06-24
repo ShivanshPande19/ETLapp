@@ -13,6 +13,7 @@ class Court(BaseModel):
     longitude: Optional[float] = None
     geofence_radius: Optional[int] = None
     address: Optional[str] = None
+    day_cutoff_hour: Optional[int] = 0
     # Convenience flag for the client: is geofencing configured for this court?
     has_geofence: bool = False
 
@@ -32,6 +33,7 @@ class CourtCreate(BaseModel):
     longitude: Optional[float] = None
     geofence_radius: Optional[int] = Field(default=None, ge=20, le=2000)
     address: Optional[str] = None
+    day_cutoff_hour: Optional[int] = Field(default=0, ge=0, le=11)
 
 
 class CourtLocationUpdate(BaseModel):
@@ -41,3 +43,8 @@ class CourtLocationUpdate(BaseModel):
     longitude: float
     geofence_radius: int = Field(default=150, ge=20, le=2000)
     address: Optional[str] = None
+
+
+class CourtSettingsUpdate(BaseModel):
+    """Update non-location court settings (overnight business-day cutoff)."""
+    day_cutoff_hour: int = Field(ge=0, le=11)

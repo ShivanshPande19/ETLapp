@@ -246,6 +246,176 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
   }
 
   Widget _buildStaffBody() {
+    return Column(
+      children: [
+        _buildCutoffHeader(),
+        Expanded(child: _buildStaffList()),
+      ],
+    );
+  }
+
+  Widget _buildCutoffHeader() {
+    final courtsAsync = ref.watch(courtsNotifierProvider);
+    final court = courtsAsync.maybeWhen(
+      data: (list) {
+        for (final c in list) {
+          if (c.id == widget.courtId) return c;
+        }
+        return null;
+      },
+      orElse: () => null,
+    );
+    final cutoff = court?.dayCutoffHour ?? 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+      child: GestureDetector(
+        onTap: court == null ? null : () => _showCutoffSheet(cutoff),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF7F7F7),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE5E5E5)),
+          ),
+          child: Row(
+            children: [
+              Icon(cutoff == 0 ? Icons.wb_sunny_rounded : Icons.nightlight_round,
+                  size: 16, color: _black),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Business day ends',
+                        style: GoogleFonts.inter(
+                            fontSize: 11.5,
+                            color: _grey,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 1),
+                    Text(_cutoffLabel(cutoff),
+                        style: GoogleFonts.inter(
+                            fontSize: 13.5,
+                            color: _black,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.expand_more_rounded, size: 20, color: _grey),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _cutoffLabel(int h) {
+    if (h == 0) return 'Midnight · normal court';
+    return '$h:00 AM · overnight court';
+  }
+
+  void _showCutoffSheet(int current) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+        decoration: const BoxDecoration(
+          color: _white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E5E5),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Business day ends at',
+                style: GoogleFonts.antonSc(fontSize: 20, color: _black)),
+            const SizedBox(height: 4),
+            Text(
+              'For overnight courts that close after midnight, pick the hour '
+              'their day rolls over so a late check-out counts on the right day.',
+              style: GoogleFonts.inter(fontSize: 12, color: _grey),
+            ),
+            const SizedBox(height: 14),
+            ...[0, 2, 3, 4, 5, 6].map((h) {
+              final selected = h == current;
+              return GestureDetector(
+                onTap: () async {
+                  Navigator.pop(context);
+                  final ok = await ref
+                      .read(courtsNotifierProvider.notifier)
+                      .updateCourtSettings(
+                        courtId: widget.courtId,
+                        dayCutoffHour: h,
+                      )
+                      .then((_) => true)
+                      .catchError((_) => false);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(ok == true
+                            ? 'Business day updated'
+                            : 'Could not update'),
+                        behavior: SnackBarBehavior.floating,
+                        backgroundColor: _black,
+                      ),
+                    );
+                  }
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                  decoration: BoxDecoration(
+                    color: selected ? _black : const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selected ? _black : const Color(0xFFE5E5E5),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        h == 0 ? Icons.wb_sunny_rounded : Icons.nightlight_round,
+                        size: 16,
+                        color: selected ? _white : _grey,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _cutoffLabel(h),
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? _white : _black,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (selected)
+                        const Icon(Icons.check_rounded,
+                            size: 18, color: _white),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStaffList() {
     final state = ref.watch(staffNotifierProvider);
     if (state.isLoading) {
       return const SkeletonList(dark: false, count: 5, tileHeight: 76);
@@ -260,7 +430,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     }
     return ListView.separated(
       padding: EdgeInsets.fromLTRB(
-        20, 16, 20, MediaQuery.of(context).padding.bottom + 100,
+        20, 12, 20, MediaQuery.of(context).padding.bottom + 100,
       ),
       itemCount: state.staffList.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -268,6 +438,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
         staff: state.staffList[i],
         onRemove: () => _confirmRemove(context, state.staffList[i]),
         onReassign: () => _showReassignSheet(context, state.staffList[i]),
+        onShift: () => _showShiftSheet(context, state.staffList[i]),
       ),
     );
   }
@@ -740,6 +911,274 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     if (img != null) onPicked(File(img.path));
   }
 
+  // ── Shift timings ───────────────────────────────────────────────────────────
+
+  static String _fmtTod(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  static TimeOfDay? _parseTod(String? s) {
+    if (s == null || s.isEmpty || !s.contains(':')) return null;
+    final p = s.split(':');
+    final h = int.tryParse(p[0]);
+    final m = int.tryParse(p[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  void _showShiftSheet(BuildContext context, StaffModel staff) {
+    HapticFeedback.selectionClick();
+    TimeOfDay? start = _parseTod(staff.shiftStart);
+    TimeOfDay? end = _parseTod(staff.shiftEnd);
+    bool loading = false;
+
+    Future<TimeOfDay?> pick(TimeOfDay? initial) => showTimePicker(
+          context: context,
+          initialTime: initial ?? const TimeOfDay(hour: 9, minute: 0),
+        );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final overnight = start != null &&
+              end != null &&
+              (end!.hour * 60 + end!.minute) <= (start!.hour * 60 + start!.minute);
+          return Container(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
+            decoration: const BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5E5E5),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Shift Timings',
+                  style: GoogleFonts.antonSc(
+                    fontSize: 22,
+                    color: _black,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  staff.name,
+                  style: GoogleFonts.inter(fontSize: 13, color: _grey),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _TimePickField(
+                        label: 'Start',
+                        value: start == null ? null : _fmtTod(start!),
+                        onTap: () async {
+                          final t = await pick(start);
+                          if (t != null) setSheet(() => start = t);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _TimePickField(
+                        label: 'End',
+                        value: end == null ? null : _fmtTod(end!),
+                        onTap: () async {
+                          final t = await pick(end);
+                          if (t != null) setSheet(() => end = t);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                if (overnight) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(Icons.nightlight_round,
+                          size: 14, color: _red),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Overnight shift — ends next day after midnight.',
+                          style: GoogleFonts.inter(fontSize: 11.5, color: _grey),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: GestureDetector(
+                    onTap: loading
+                        ? null
+                        : () async {
+                            if (start == null || end == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Pick both start and end times'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                              return;
+                            }
+                            final s = _fmtTod(start!);
+                            final e = _fmtTod(end!);
+                            final ok = await _confirmShift(context, staff.name,
+                                s, e, overnight);
+                            if (ok != true) return;
+                            setSheet(() => loading = true);
+                            final saved = await ref
+                                .read(staffNotifierProvider.notifier)
+                                .setShift(
+                                  staffId: staff.id,
+                                  courtId: widget.courtId,
+                                  shiftStart: s,
+                                  shiftEnd: e,
+                                );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(saved
+                                      ? 'Shift set $s – $e. Staff notified.'
+                                      : 'Could not update shift'),
+                                  backgroundColor: saved ? _black : _red,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      decoration: BoxDecoration(
+                        color: _black,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Center(
+                        child: loading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: _white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                'Save Shift',
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _white,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (staff.hasShift) ...[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: TextButton(
+                      onPressed: loading
+                          ? null
+                          : () async {
+                              setSheet(() => loading = true);
+                              final saved = await ref
+                                  .read(staffNotifierProvider.notifier)
+                                  .setShift(
+                                    staffId: staff.id,
+                                    courtId: widget.courtId,
+                                    shiftStart: null,
+                                    shiftEnd: null,
+                                  );
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(saved
+                                        ? 'Shift cleared'
+                                        : 'Could not clear shift'),
+                                    behavior: SnackBarBehavior.floating,
+                                    backgroundColor: _black,
+                                  ),
+                                );
+                              }
+                            },
+                      child: Text(
+                        'Clear shift',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _red,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<bool?> _confirmShift(
+    BuildContext context,
+    String name,
+    String start,
+    String end,
+    bool overnight,
+  ) {
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.5),
+      builder: (_) => AlertDialog(
+        backgroundColor: _white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Confirm shift?',
+            style: GoogleFonts.antonSc(fontSize: 20, color: _black)),
+        content: Text(
+          '$name\'s shift will be set to $start – $end'
+          '${overnight ? ' (overnight)' : ''}. They will be notified.',
+          style: GoogleFonts.inter(fontSize: 14, color: _grey, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600, color: _grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Confirm',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700, color: _black)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _confirmRemove(BuildContext context, StaffModel staff) {
     showDialog(
       context: context,
@@ -895,10 +1334,12 @@ class _StaffCard extends StatelessWidget {
   final StaffModel staff;
   final VoidCallback onRemove;
   final VoidCallback onReassign;
+  final VoidCallback onShift;
   const _StaffCard({
     required this.staff,
     required this.onRemove,
     required this.onReassign,
+    required this.onShift,
   });
 
   @override
@@ -969,9 +1410,46 @@ class _StaffCard extends StatelessWidget {
                     style: GoogleFonts.inter(fontSize: 11.5, color: _grey),
                   ),
                 ),
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.schedule_rounded,
+                      size: 12,
+                      color: staff.hasShift ? _red : _grey,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      staff.shiftLabel,
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        color: staff.hasShift ? _black : _grey,
+                        fontWeight:
+                            staff.hasShift ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
+        GestureDetector(
+          onTap: onShift,
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: _red.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _red.withOpacity(0.2)),
+            ),
+            child: const Icon(Icons.schedule_rounded, size: 16, color: _red),
+          ),
+        ),
+        const SizedBox(width: 8),
         GestureDetector(
           onTap: onReassign,
           child: Container(
@@ -1006,6 +1484,59 @@ class _StaffCard extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _TimePickField extends StatelessWidget {
+  final String label;
+  final String? value;
+  final VoidCallback onTap;
+  const _TimePickField({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _grey,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE5E5E5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.access_time_rounded, size: 18, color: _grey),
+                  const SizedBox(width: 8),
+                  Text(
+                    value ?? '--:--',
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: value == null ? _grey : _black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
 }
 
 class _EmptyState extends StatelessWidget {

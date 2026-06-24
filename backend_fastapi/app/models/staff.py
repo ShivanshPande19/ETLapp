@@ -22,6 +22,12 @@ class Staff(Base):
     # ✅ Contact + profile photo (collected at onboarding)
     phone           = Column(String,  nullable=True)
     photo_url       = Column(String,  nullable=True)
-    
+
+    # ✅ Shift timings set by the ETL manager (stored as "HH:MM", 24h, local
+    # IST). Nullable = no shift assigned yet. If shift_end <= shift_start the
+    # shift is treated as overnight (crosses midnight).
+    shift_start     = Column(String,  nullable=True)
+    shift_end       = Column(String,  nullable=True)
+
     is_active       = Column(Boolean, nullable=False, default=True)
     created_at      = Column(DateTime, server_default=func.now())

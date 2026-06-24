@@ -12,6 +12,7 @@ class Court {
   final int? geofenceRadius;
   final String? address;
   final bool hasGeofence;
+  final int dayCutoffHour;
 
   Court({
     required this.id,
@@ -23,6 +24,7 @@ class Court {
     this.geofenceRadius,
     this.address,
     this.hasGeofence = false,
+    this.dayCutoffHour = 0,
   });
 
   factory Court.fromJson(Map<String, dynamic> json) {
@@ -56,6 +58,7 @@ class Court {
       geofenceRadius: toI(json['geofence_radius']),
       address: json['address'] as String?,
       hasGeofence: json['has_geofence'] == true || (lat != null && lng != null),
+      dayCutoffHour: toI(json['day_cutoff_hour']) ?? 0,
     );
   }
 }
@@ -132,6 +135,18 @@ class CourtsRepository {
         if (address != null && address.trim().isNotEmpty)
           'address': address.trim(),
       },
+    );
+    return Court.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// ETL manager: set a court's overnight business-day cutoff hour (0-11).
+  Future<Court> updateCourtSettings({
+    required int courtId,
+    required int dayCutoffHour,
+  }) async {
+    final response = await _dio.patch(
+      '/courts/$courtId/settings',
+      data: {'day_cutoff_hour': dayCutoffHour},
     );
     return Court.fromJson(response.data as Map<String, dynamic>);
   }

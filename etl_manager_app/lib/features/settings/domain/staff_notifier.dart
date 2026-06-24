@@ -87,6 +87,26 @@ class StaffNotifier extends Notifier<StaffState> {
     }
   }
 
+  /// ETL manager: set (or clear) a staff member's shift timings.
+  /// Pass null for both to clear. Refreshes the court list on success.
+  Future<bool> setShift({
+    required int staffId,
+    required int courtId,
+    String? shiftStart,
+    String? shiftEnd,
+  }) async {
+    try {
+      await _dio.patch(
+        '/staff/$staffId/shift',
+        data: {'shift_start': shiftStart, 'shift_end': shiftEnd},
+      );
+      await fetchByCourtId(courtId);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ── Outlet staff (managed by the outlet manager for their own outlet) ───────
 
   Future<void> fetchByOutletId(int outletId) async {
