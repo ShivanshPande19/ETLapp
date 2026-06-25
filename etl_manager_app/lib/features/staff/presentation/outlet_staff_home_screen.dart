@@ -395,6 +395,7 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
     }
 
     final accuracy = (result['accuracy'] as num?)?.toDouble();
+    final isMocked = result['is_mocked'] == true;
     await ref
         .read(attendanceNotifierProvider.notifier)
         .markAttendance(
@@ -402,6 +403,7 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
           lng: lng,
           imagePath: imagePath,
           accuracy: accuracy,
+          isMocked: isMocked,
         );
   }
 
@@ -419,9 +421,17 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
       return;
     }
 
+    final accuracy = (result['accuracy'] as num?)?.toDouble();
+    final isMocked = result['is_mocked'] == true;
     await ref
         .read(attendanceNotifierProvider.notifier)
-        .checkOut(lat: lat, lng: lng, imagePath: imagePath);
+        .checkOut(
+          lat: lat,
+          lng: lng,
+          imagePath: imagePath,
+          accuracy: accuracy,
+          isMocked: isMocked,
+        );
   }
 
   void _toast(String msg, {bool isError = false}) {

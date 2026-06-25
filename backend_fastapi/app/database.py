@@ -67,6 +67,8 @@ def ensure_attendance_columns() -> None:
             "check_out_address": "VARCHAR",
             "check_out_photo_url": "VARCHAR",
             "business_date": "DATE",
+            "early_checkout": "BOOLEAN",
+            "auto_closed": "BOOLEAN",
         }
     else:
         types = {
@@ -76,6 +78,8 @@ def ensure_attendance_columns() -> None:
             "check_out_address": "VARCHAR",
             "check_out_photo_url": "VARCHAR",
             "business_date": "DATE",
+            "early_checkout": "BOOLEAN",
+            "auto_closed": "BOOLEAN",
         }
     try:
         with engine.begin() as conn:
@@ -98,8 +102,28 @@ def ensure_attendance_columns() -> None:
                         + "WHERE business_date IS NULL AND check_in_time IS NOT NULL"
                     )
                 )
+            # Default the new boolean flags on existing rows.
+            for _flag in ("early_checkout", "auto_closed"):
+                if _flag not in existing:
+                    conn.execute(
+                        text(f"UPDATE attendance SET {_flag} = 0 WHERE {_flag} IS NULL")
+                    )
     except Exception as e:  # never block startup on a best-effort migration
         print(f"[MIGRATION] ensure_attendance_columns skipped: {e}")
+
+    # Best-effort: prevent duplicate check-ins for the same staff+business day
+    # (defends against a double-submit race). NULL business_date rows are
+    # treated as distinct on both dialects, so legacy rows are unaffected.
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_staff_bizdate "
+                    "ON attendance (staff_id, business_date)"
+                )
+            )
+    except Exception as e:
+        print(f"[MIGRATION] attendance unique index skipped: {e}")
 
 
 def ensure_outlet_columns() -> None:

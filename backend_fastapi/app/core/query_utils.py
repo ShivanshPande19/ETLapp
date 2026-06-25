@@ -89,3 +89,25 @@ def scheduled_shift_end_utc(
 
     end_ist = datetime.combine(end_day, end_t, tzinfo=IST)
     return end_ist.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def scheduled_shift_start_utc(
+    biz_date: date, shift_start: Optional[str]
+) -> Optional[datetime]:
+    """Naive-UTC datetime when a staff's shift is scheduled to start on a given
+    business date. Returns None if shift_start isn't set."""
+    start_t = parse_hhmm(shift_start)
+    if start_t is None:
+        return None
+    start_ist = datetime.combine(biz_date, start_t, tzinfo=IST)
+    return start_ist.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def business_day_end_utc(biz_date: date, cutoff_hour: int = 0) -> datetime:
+    """Naive-UTC moment a business day rolls over.
+
+    cutoff 0 → next calendar midnight IST. cutoff h → next day at h:00 IST.
+    Used as a fallback auto-close time when a staff has no shift end set.
+    """
+    end_ist = datetime.combine(biz_date + timedelta(days=1), time(hour=cutoff_hour), tzinfo=IST)
+    return end_ist.astimezone(timezone.utc).replace(tzinfo=None)

@@ -2,6 +2,7 @@
 
 from datetime import date
 from typing import Optional
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 from ..models.staff import Staff
 from ..models.attendance import Attendance
@@ -21,12 +22,19 @@ def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterRe
         Staff.is_active == True
     ).all()
 
-    # 2. Aaj ki attendance nikalo us outlet ki (portable day-range; Postgres-safe)
+    # 2. Aaj ki attendance nikalo us outlet ki — business_date pe match karo
+    # (overnight-safe), legacy null rows ke liye calendar-day fallback.
     _start, _end = day_range(target_date)
     attendances = db.query(Attendance).filter(
         Attendance.outlet_id == outlet_id,
-        Attendance.check_in_time >= _start,
-        Attendance.check_in_time < _end,
+        or_(
+            Attendance.business_date == target_date,
+            and_(
+                Attendance.business_date.is_(None),
+                Attendance.check_in_time >= _start,
+                Attendance.check_in_time < _end,
+            ),
+        ),
     ).all()
 
     # Dictionary banalo taaki fast search ho sake {staff_id: attendance_record}
@@ -82,8 +90,14 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
     _start, _end = day_range(target_date)
     attendances = db.query(Attendance).filter(
         Attendance.court_id == court.id,
-        Attendance.check_in_time >= _start,
-        Attendance.check_in_time < _end,
+        or_(
+            Attendance.business_date == target_date,
+            and_(
+                Attendance.business_date.is_(None),
+                Attendance.check_in_time >= _start,
+                Attendance.check_in_time < _end,
+            ),
+        ),
     ).all()
     attendance_map = {a.staff_id: a for a in attendances}
 

@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import httpx
 import os
 import uuid
@@ -22,6 +23,7 @@ from app.core.query_utils import (
     business_date_for,
     to_ist,
     scheduled_shift_end_utc,
+    scheduled_shift_start_utc,
 )
 from app.core.geo import (
     distance_meters,
@@ -29,6 +31,7 @@ from app.core.geo import (
     DEFAULT_GEOFENCE_RADIUS_M,
 )
 from app.services.notice_service import create_notice
+from app.services.attendance_service import build_staff_calendar, build_court_calendars
 from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -42,6 +45,19 @@ _EXT_BY_TYPE = {
     "image/webp": "webp",
 }
 _MAX_PHOTO_BYTES = 5 * 1024 * 1024  # 5 MB
+
+# How early (minutes) before their shift start a staff may check in.
+_EARLY_CHECKIN_WINDOW_MIN = 60
+
+
+def _reject_if_mocked(is_mocked: Optional[bool]) -> None:
+    """Block attendance marked with a mock/spoofed GPS location (Android can
+    report this; iOS always returns false)."""
+    if is_mocked:
+        raise HTTPException(
+            status_code=403,
+            detail="Mock location detected. Turn off any fake-GPS app and try again.",
+        )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -197,6 +213,8 @@ def _status_from_record(rec: Optional[Attendance]) -> AttendanceStatusOut:
         checked_out=rec.check_out_time is not None,
         check_out_time=rec.check_out_time,
         check_out_address=rec.check_out_address,
+        early_checkout=bool(rec.early_checkout),
+        auto_closed=bool(rec.auto_closed),
         work_duration_minutes=duration,
     )
 
@@ -244,6 +262,46 @@ def my_geofence(
     }
 
 
+def _parse_month(month: Optional[str]) -> tuple[int, int]:
+    """Parse 'YYYY-MM'; default to the current IST month."""
+    if month:
+        try:
+            y, m = month.split("-")
+            yi, mi = int(y), int(m)
+            if 1 <= mi <= 12:
+                return yi, mi
+        except (ValueError, AttributeError):
+            pass
+    today = now_ist().date()
+    return today.year, today.month
+
+
+@router.get("/calendar")
+def my_calendar(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Logged-in staff's own month calendar (present/early/auto/absent)."""
+    staff = _resolve_staff(user, db)
+    y, m = _parse_month(month)
+    return build_staff_calendar(db, staff, y, m)
+
+
+@router.get("/calendar/court")
+def court_calendar(
+    month: Optional[str] = None,
+    court_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """ETL manager: court-wise calendar for every ETL staff."""
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    y, m = _parse_month(month)
+    return build_court_calendars(db, y, m, court_id=court_id)
+
+
 @router.post(
     "/check-in",
     response_model=AttendanceStatusOut,
@@ -253,11 +311,21 @@ async def mark_attendance(
     lat: float = Form(...),
     lng: float = Form(...),
     accuracy: Optional[float] = Form(None),
+    is_mocked: Optional[bool] = Form(None),
     photo: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
     staff = _resolve_staff(user, db)
+
+    # ✅ Shift is mandatory — staff can't mark attendance until the manager
+    # has assigned their shift timings.
+    if not staff.shift_start or not staff.shift_end:
+        raise HTTPException(
+            status_code=403,
+            detail="Your shift timings haven't been set yet. Please ask your manager.",
+        )
+
     biz_date = _staff_business_date(db, staff)
 
     # ✅ One check-in per business day — block duplicates.
@@ -267,6 +335,25 @@ async def mark_attendance(
             status_code=409,
             detail="You have already checked in today.",
         )
+
+    # 🚫 Mock/spoofed GPS.
+    _reject_if_mocked(is_mocked)
+
+    # ⏰ Can't check in too early (more than the early window before shift start).
+    start_utc = scheduled_shift_start_utc(biz_date, staff.shift_start)
+    if start_utc is not None:
+        from datetime import timedelta
+
+        earliest = start_utc - timedelta(minutes=_EARLY_CHECKIN_WINDOW_MIN)
+        if datetime.utcnow() < earliest:
+            earliest_local = to_ist(earliest).strftime("%I:%M %p").lstrip("0")
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Too early to check in. Your shift starts at "
+                    f"{staff.shift_start} — you can check in from {earliest_local}."
+                ),
+            )
 
     # ✅ Geofence: must be within the assigned court's radius (if configured).
     _enforce_geofence(db, staff, lat, lng, accuracy)
@@ -285,7 +372,15 @@ async def mark_attendance(
         check_in_photo_url=file_path,
     )
     db.add(new_record)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Unique (staff_id, business_date) tripped by a concurrent check-in.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="You have already checked in today.",
+        )
     db.refresh(new_record)
 
     return _status_from_record(new_record)
@@ -295,6 +390,8 @@ async def mark_attendance(
 async def check_out(
     lat: float = Form(...),
     lng: float = Form(...),
+    accuracy: Optional[float] = Form(None),
+    is_mocked: Optional[bool] = Form(None),
     photo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -314,6 +411,12 @@ async def check_out(
             detail="You have already checked out today.",
         )
 
+    # 🚫 Mock/spoofed GPS.
+    _reject_if_mocked(is_mocked)
+
+    # ✅ Geofence on check-out too — must be at the court to clock out.
+    _enforce_geofence(db, staff, lat, lng, accuracy)
+
     photo_path = await _save_selfie(photo, "out") if photo is not None else None
     real_address = await get_address_from_coords(lat, lng)
 
@@ -324,12 +427,15 @@ async def check_out(
     rec.check_out_address = real_address
     rec.check_out_photo_url = photo_path
 
+    # ⏰ Early-logout detection: did they check out before their shift ended?
+    # Early *login* is fine — only an early check-out raises a notice.
+    rec.early_checkout = _is_early_checkout(staff, rec, checkout_at)
+
     db.commit()
     db.refresh(rec)
 
-    # ⏰ Early-logout detection: did they check out before their shift ended?
-    # Early *login* is fine — only an early check-out raises a notice.
-    _maybe_flag_early_logout(db, staff, rec, checkout_at)
+    if rec.early_checkout:
+        _notify_early_logout(db, staff, rec, checkout_at)
 
     return _status_from_record(rec)
 
@@ -338,24 +444,25 @@ async def check_out(
 _EARLY_LOGOUT_GRACE_MIN = 5
 
 
-def _maybe_flag_early_logout(
-    db: Session, staff: Staff, rec: Attendance, checkout_utc: datetime
-) -> None:
-    """Notify the ETL manager (notices section) + the staff if check-out
-    happened before the scheduled shift end (overnight-aware)."""
-    biz_date = rec.business_date
-    if biz_date is None or not staff.shift_end:
-        return  # no shift / no business date → nothing to compare against
-
-    scheduled_end = scheduled_shift_end_utc(biz_date, staff.shift_start, staff.shift_end)
+def _is_early_checkout(staff: Staff, rec: Attendance, checkout_utc: datetime) -> bool:
+    """True if check-out happened before the scheduled shift end (overnight-aware)."""
+    if rec.business_date is None or not staff.shift_end:
+        return False
+    scheduled_end = scheduled_shift_end_utc(rec.business_date, staff.shift_start, staff.shift_end)
     if scheduled_end is None:
-        return
-
+        return False
     from datetime import timedelta
 
-    threshold = scheduled_end - timedelta(minutes=_EARLY_LOGOUT_GRACE_MIN)
-    if checkout_utc >= threshold:
-        return  # on-time (or late) — all good
+    return checkout_utc < scheduled_end - timedelta(minutes=_EARLY_LOGOUT_GRACE_MIN)
+
+
+def _notify_early_logout(
+    db: Session, staff: Staff, rec: Attendance, checkout_utc: datetime
+) -> None:
+    """Notify the ETL manager (notices section) + the staff of an early check-out."""
+    scheduled_end = scheduled_shift_end_utc(rec.business_date, staff.shift_start, staff.shift_end)
+    if scheduled_end is None:
+        return
 
     # How early, in minutes (for a human-friendly message).
     early_min = int(round((scheduled_end - checkout_utc).total_seconds() / 60))

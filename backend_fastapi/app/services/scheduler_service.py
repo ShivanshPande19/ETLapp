@@ -63,6 +63,111 @@ async def auto_close_expired_tickets():
         db.close()
 
 
+async def auto_close_forgotten_attendance():
+    """Auto-close attendance where staff forgot to check out.
+
+    For every open record (checked in, never checked out) whose BUSINESS DAY
+    has already rolled over, set the check-out to the scheduled shift end (or
+    the business-day boundary if no shift), flag it auto_closed, and notify both
+    the manager and the staff. Overnight-court aware via each court's cutoff.
+    """
+    from ..models.attendance import Attendance
+    from ..models.staff import Staff
+    from ..models.sale import Court
+    from ..core.query_utils import (
+        current_business_date,
+        business_date_for,
+        now_ist,
+        to_ist,
+        scheduled_shift_end_utc,
+        business_day_end_utc,
+    )
+    from .notice_service import create_notice
+
+    db: Session = SessionLocal()
+    try:
+        open_recs = db.query(Attendance).filter(
+            Attendance.check_in_time.isnot(None),
+            Attendance.check_out_time.is_(None),
+        ).all()
+
+        court_cutoffs: dict[int, int] = {}
+
+        def cutoff_for(court_id):
+            if not court_id:
+                return 0
+            if court_id not in court_cutoffs:
+                c = db.query(Court).filter(Court.id == court_id).first()
+                court_cutoffs[court_id] = (c.day_cutoff_hour or 0) if c else 0
+            return court_cutoffs[court_id]
+
+        closed = []
+        for rec in open_recs:
+            cutoff = cutoff_for(rec.court_id)
+            biz = rec.business_date
+            if biz is None and rec.check_in_time is not None:
+                biz = business_date_for(to_ist(rec.check_in_time), cutoff)
+            if biz is None:
+                continue
+
+            # Only close once the business day is fully over.
+            if current_business_date(cutoff) <= biz:
+                continue
+
+            staff = db.query(Staff).filter(Staff.id == rec.staff_id).first()
+            close_at = None
+            if staff is not None:
+                close_at = scheduled_shift_end_utc(biz, staff.shift_start, staff.shift_end)
+            if close_at is None:
+                close_at = business_day_end_utc(biz, cutoff)
+
+            rec.check_out_time = close_at
+            rec.auto_closed = True
+            rec.check_out_address = "Auto-closed (no check-out)"
+            closed.append((rec, staff, close_at))
+
+        if closed:
+            db.commit()
+            for rec, staff, close_at in closed:
+                name = staff.name if staff else "Staff"
+                out_local = to_ist(close_at).strftime("%I:%M %p").lstrip("0")
+                try:
+                    create_notice(
+                        db,
+                        audience="manager",
+                        type="missed_checkout",
+                        title=f"{name} forgot to check out",
+                        body=(
+                            f"{name} didn't check out. The system auto-closed "
+                            f"their shift at {out_local}."
+                        ),
+                        court_id=rec.court_id,
+                        staff_id=rec.staff_id,
+                    )
+                    if staff is not None:
+                        create_notice(
+                            db,
+                            audience="staff",
+                            type="missed_checkout",
+                            title="You forgot to check out",
+                            body=(
+                                f"Your shift was auto-closed at {out_local}. "
+                                f"Please remember to check out next time."
+                            ),
+                            court_id=rec.court_id,
+                            staff_id=rec.staff_id,
+                            recipient_staff_id=rec.staff_id,
+                        )
+                except Exception as ne:
+                    print(f"[AUTO_CLOSE_ATT] notice failed: {ne}")
+            print(f"[AUTO_CLOSE_ATT] Auto-closed {len(closed)} forgotten check-out(s).")
+    except Exception as e:
+        db.rollback()
+        print(f"[AUTO_CLOSE_ATT] Error: {e}")
+    finally:
+        db.close()
+
+
 def start_scheduler():
     if scheduler.running:
         return
@@ -79,6 +184,14 @@ def start_scheduler():
         auto_close_expired_tickets,
         trigger="cron", minute=0,
         id="maintenance_auto_close", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+
+    # ✅ Hourly attendance auto-close for forgotten check-outs
+    scheduler.add_job(
+        auto_close_forgotten_attendance,
+        trigger="cron", minute=10,
+        id="attendance_auto_close", replace_existing=True,
         max_instances=1, coalesce=True,
     )
 

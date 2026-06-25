@@ -198,6 +198,21 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
       return;
     }
 
+    // 🚫 Mock / fake-GPS gate.
+    if (_currentPosition?.isMocked == true) {
+      HapticFeedback.heavyImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Mock location detected. Turn off any fake-GPS app and try again.',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isCapturing = true);
     HapticFeedback.heavyImpact();
 
@@ -211,6 +226,7 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
           'latitude': _currentPosition?.latitude,
           'longitude': _currentPosition?.longitude,
           'accuracy': _currentPosition?.accuracy,
+          'is_mocked': _currentPosition?.isMocked ?? false,
         });
       }
     } catch (e) {

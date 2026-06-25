@@ -29,6 +29,10 @@ class AttendanceStatusOut(BaseModel):
     check_out_time: Optional[datetime] = None
     check_out_address: Optional[str] = None
 
+    # Status flags for the UI / calendar.
+    early_checkout: bool = False
+    auto_closed: bool = False
+
     # Minutes between check-in and check-out (null until checked out).
     work_duration_minutes: Optional[int] = None
 
