@@ -168,6 +168,8 @@ class _OutletStaffManagementScreenState
                                     staff: state.staffList[i],
                                     onRemove: () =>
                                         _confirmRemove(state.staffList[i]),
+                                    onShift: () =>
+                                        _showShiftSheet(state.staffList[i]),
                                   ),
                                 ),
                 ),
@@ -473,6 +475,252 @@ class _OutletStaffManagementScreenState
     );
   }
 
+  // ── Shift timings ───────────────────────────────────────────────────────
+
+  static String _fmtTod(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  static TimeOfDay? _parseTod(String? s) {
+    if (s == null || s.isEmpty || !s.contains(':')) return null;
+    final p = s.split(':');
+    final h = int.tryParse(p[0]);
+    final m = int.tryParse(p[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  void _showShiftSheet(StaffModel staff) {
+    HapticFeedback.selectionClick();
+    TimeOfDay? start = _parseTod(staff.shiftStart);
+    TimeOfDay? end = _parseTod(staff.shiftEnd);
+    bool loading = false;
+
+    Future<TimeOfDay?> pick(TimeOfDay? initial) => showTimePicker(
+          context: context,
+          initialTime: initial ?? const TimeOfDay(hour: 9, minute: 0),
+        );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final overnight = start != null &&
+              end != null &&
+              (end!.hour * 60 + end!.minute) <=
+                  (start!.hour * 60 + start!.minute);
+          return Container(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
+            decoration: const BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5E5E5),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text('Shift Timings',
+                    style: GoogleFonts.antonSc(
+                        fontSize: 22, color: _black, letterSpacing: -0.3)),
+                const SizedBox(height: 3),
+                Text(staff.name,
+                    style: GoogleFonts.inter(fontSize: 13, color: _grey)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _TimePickField(
+                        label: 'Start',
+                        value: start == null ? null : _fmtTod(start!),
+                        onTap: () async {
+                          final t = await pick(start);
+                          if (t != null) setSheet(() => start = t);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _TimePickField(
+                        label: 'End',
+                        value: end == null ? null : _fmtTod(end!),
+                        onTap: () async {
+                          final t = await pick(end);
+                          if (t != null) setSheet(() => end = t);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                if (overnight) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(Icons.nightlight_round, size: 14, color: _red),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Overnight shift — ends next day after midnight.',
+                          style:
+                              GoogleFonts.inter(fontSize: 11.5, color: _grey),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: GestureDetector(
+                    onTap: loading
+                        ? null
+                        : () async {
+                            if (start == null || end == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Pick both start and end times'),
+                                ),
+                              );
+                              return;
+                            }
+                            final sStr = _fmtTod(start!);
+                            final eStr = _fmtTod(end!);
+                            final ok = await _confirmShift(
+                                staff.name, sStr, eStr, overnight);
+                            if (ok != true) return;
+                            setSheet(() => loading = true);
+                            final saved = await ref
+                                .read(staffNotifierProvider.notifier)
+                                .setShift(
+                                  staffId: staff.id,
+                                  outletId: widget.outletId,
+                                  shiftStart: sStr,
+                                  shiftEnd: eStr,
+                                );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(saved
+                                      ? 'Shift set $sStr – $eStr. Staff notified.'
+                                      : 'Could not update shift'),
+                                  backgroundColor: saved ? _black : _danger,
+                                ),
+                              );
+                            }
+                          },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      decoration: BoxDecoration(
+                        color: _black,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Center(
+                        child: loading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    color: _white, strokeWidth: 2),
+                              )
+                            : Text('Save Shift',
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _white,
+                                )),
+                      ),
+                    ),
+                  ),
+                ),
+                if (staff.hasShift) ...[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: TextButton(
+                      onPressed: loading
+                          ? null
+                          : () async {
+                              setSheet(() => loading = true);
+                              final saved = await ref
+                                  .read(staffNotifierProvider.notifier)
+                                  .setShift(
+                                    staffId: staff.id,
+                                    outletId: widget.outletId,
+                                    shiftStart: null,
+                                    shiftEnd: null,
+                                  );
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(saved
+                                        ? 'Shift cleared'
+                                        : 'Could not clear shift'),
+                                  ),
+                                );
+                              }
+                            },
+                      child: Text('Clear shift',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _red,
+                          )),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<bool?> _confirmShift(
+      String name, String start, String end, bool overnight) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Confirm shift?',
+            style: GoogleFonts.antonSc(fontSize: 20, color: _black)),
+        content: Text(
+          "$name's shift will be set to $start – $end"
+          "${overnight ? ' (overnight)' : ''}. They will be notified.",
+          style: GoogleFonts.inter(fontSize: 14, color: _grey, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600, color: _grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Confirm',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700, color: _black)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _confirmRemove(StaffModel staff) {
     showDialog(
       context: context,
@@ -512,7 +760,12 @@ class _OutletStaffManagementScreenState
 class _StaffCard extends StatelessWidget {
   final StaffModel staff;
   final VoidCallback onRemove;
-  const _StaffCard({required this.staff, required this.onRemove});
+  final VoidCallback onShift;
+  const _StaffCard({
+    required this.staff,
+    required this.onRemove,
+    required this.onShift,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -579,9 +832,44 @@ class _StaffCard extends StatelessWidget {
                         style:
                             GoogleFonts.inter(fontSize: 11.5, color: _grey)),
                   ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.schedule_rounded,
+                          size: 12, color: staff.hasShift ? _red : _grey),
+                      const SizedBox(width: 4),
+                      Text(
+                        staff.shiftLabel,
+                        style: GoogleFonts.inter(
+                          fontSize: 11.5,
+                          color: staff.hasShift ? _black : _grey,
+                          fontWeight: staff.hasShift
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
+          GestureDetector(
+            onTap: onShift,
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: _red.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _red.withOpacity(0.2)),
+              ),
+              child: const Icon(Icons.schedule_rounded, size: 16, color: _red),
+            ),
+          ),
+          const SizedBox(width: 8),
           GestureDetector(
             onTap: onRemove,
             child: Container(
@@ -600,6 +888,59 @@ class _StaffCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TimePickField extends StatelessWidget {
+  final String label;
+  final String? value;
+  final VoidCallback onTap;
+  const _TimePickField({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _grey,
+                letterSpacing: 0.3,
+              )),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE5E5E5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.access_time_rounded,
+                      size: 18, color: _grey),
+                  const SizedBox(width: 8),
+                  Text(
+                    value ?? '--:--',
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: value == null ? _grey : _black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
 }
 
 class _Field extends StatelessWidget {

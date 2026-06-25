@@ -17,6 +17,7 @@ import 'outlet_staff_management_screen.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
 import '../../attendance_calendar/presentation/manager_attendance_screen.dart';
+import '../../attendance_calendar/presentation/outlet_attendance_screen.dart';
 
 const _bg = Color(0xFF080808);
 const _white = Color(0xFFFFFFFF);
@@ -455,6 +456,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                       builder: (_) =>
                                           OutletStaffManagementScreen(
                                         outletId: auth.outletId ?? 0,
+                                        outletName: outletName,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                _GroupDivider(),
+                                Consumer(
+                                  builder: (context, ref, _) {
+                                    final unread = ref
+                                            .watch(unreadCountProvider)
+                                            .value ??
+                                        0;
+                                    return _NavTile(
+                                      icon: Icons.notifications_rounded,
+                                      label: 'Notices',
+                                      subtitle: unread > 0
+                                          ? '$unread unread'
+                                          : 'Early logouts & alerts',
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const NoticesScreen(),
+                                          ),
+                                        ).then((_) => ref.invalidate(
+                                            unreadCountProvider));
+                                      },
+                                    );
+                                  },
+                                ),
+                                _GroupDivider(),
+                                _NavTile(
+                                  icon: Icons.event_available_rounded,
+                                  label: 'Staff Attendance',
+                                  subtitle: 'Monthly calendar · your outlet',
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => OutletAttendanceScreen(
                                         outletName: outletName,
                                       ),
                                     ),

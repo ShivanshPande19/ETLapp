@@ -31,6 +31,10 @@ class Notice(Base):
     # Court this notice belongs to (manager scoping / future per-court managers).
     court_id = Column(Integer, ForeignKey("courts.id", ondelete="CASCADE"), nullable=True, index=True)
 
+    # Outlet this notice belongs to (set for outlet-manager notices so the
+    # outlet manager sees their outlet's notices; null for court/ETL notices).
+    outlet_id = Column(Integer, ForeignKey("outlets.id", ondelete="CASCADE"), nullable=True, index=True)
+
     # The staff this notice is ABOUT (subject) — e.g. who logged out early.
     staff_id = Column(Integer, ForeignKey("staff.id", ondelete="SET NULL"), nullable=True)
 

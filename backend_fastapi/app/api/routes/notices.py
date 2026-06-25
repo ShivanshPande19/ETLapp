@@ -16,16 +16,22 @@ router = APIRouter()
 def _scoped_query(db: Session, user: CurrentUser):
     """Notices visible to the current user.
 
-    • ETL manager → audience="manager" notices. Today a single manager owns all
-      courts, so no court filter is applied. When per-court managers are added,
-      filter here by the courts assigned to `user` (court_id is already stored
-      on every notice) — a one-line change.
+    • ETL manager   → court-level manager notices (outlet_id IS NULL).
+    • Outlet manager → manager notices for THEIR outlet (outlet_id == their outlet).
     • ETL/outlet staff → their own audience="staff" notices.
     • Others → nothing.
     """
     if user.is_etl_manager:
-        return db.query(Notice).filter(Notice.audience == "manager")
-    if user.is_etl_staff or user.is_outlet_user:
+        return db.query(Notice).filter(
+            Notice.audience == "manager",
+            Notice.outlet_id.is_(None),
+        )
+    if user.role == "outlet_manager" and user.outlet_id is not None:
+        return db.query(Notice).filter(
+            Notice.audience == "manager",
+            Notice.outlet_id == user.outlet_id,
+        )
+    if user.is_etl_staff or user.role == "outlet_staff":
         return db.query(Notice).filter(
             Notice.audience == "staff",
             Notice.recipient_staff_id == user.id,

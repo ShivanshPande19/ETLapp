@@ -13,7 +13,7 @@ import uuid
 from app.database import get_db
 from app.models.attendance import Attendance
 from app.models.staff import Staff
-from app.models.sale import Court
+from app.models.sale import Court, Outlet
 from app.schemas.attendance import AttendanceStatusOut
 from app.core.config import settings
 from app.core.query_utils import (
@@ -31,7 +31,7 @@ from app.core.geo import (
     DEFAULT_GEOFENCE_RADIUS_M,
 )
 from app.services.notice_service import create_notice
-from app.services.attendance_service import build_staff_calendar, build_court_calendars
+from app.services.attendance_service import build_staff_calendar, build_court_calendars, build_outlet_calendars
 from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -128,12 +128,9 @@ def _enforce_geofence(
     A small buffer (capped) based on the device-reported GPS accuracy is added
     to the allowed radius so a poor fix doesn't reject a genuine staff member.
     """
-    if not staff.court_id:
-        return
-
-    court = db.query(Court).filter(Court.id == staff.court_id).first()
+    court = _staff_court(db, staff)
     if not court or court.latitude is None or court.longitude is None:
-        return  # no geofence configured for this court → allow
+        return  # no court / no geofence configured → allow
 
     radius = court.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M
     buffer = min(accuracy or 0.0, MAX_ACCURACY_BUFFER_M)
@@ -151,9 +148,20 @@ def _enforce_geofence(
 
 
 def _staff_court(db: Session, staff: Staff) -> Optional[Court]:
-    if not staff.court_id:
-        return None
-    return db.query(Court).filter(Court.id == staff.court_id).first()
+    """The court a staff belongs to.
+
+    • ETL staff are linked directly via `court_id`.
+    • Outlet staff are linked via their outlet → that outlet's court, so they
+      automatically inherit the court's geofence + business-day cutoff (no
+      separate geofence needed for outlets).
+    """
+    if staff.court_id:
+        return db.query(Court).filter(Court.id == staff.court_id).first()
+    if staff.outlet_id:
+        outlet = db.query(Outlet).filter(Outlet.id == staff.outlet_id).first()
+        if outlet and outlet.court_id:
+            return db.query(Court).filter(Court.id == outlet.court_id).first()
+    return None
 
 
 def _staff_business_date(db: Session, staff: Staff):
@@ -243,11 +251,7 @@ def my_geofence(
     restriction applies (legacy court / no location set)."""
     staff = _resolve_staff(user, db)
 
-    court = (
-        db.query(Court).filter(Court.id == staff.court_id).first()
-        if staff.court_id
-        else None
-    )
+    court = _staff_court(db, staff)
     if not court or court.latitude is None or court.longitude is None:
         return {"has_geofence": False}
 
@@ -300,6 +304,19 @@ def court_calendar(
         raise HTTPException(status_code=403, detail="ETL manager access required.")
     y, m = _parse_month(month)
     return build_court_calendars(db, y, m, court_id=court_id)
+
+
+@router.get("/calendar/outlet")
+def outlet_calendar(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Outlet manager: month calendar for every staff in their own outlet."""
+    if user.role != "outlet_manager" or user.outlet_id is None:
+        raise HTTPException(status_code=403, detail="Outlet manager access required.")
+    y, m = _parse_month(month)
+    return build_outlet_calendars(db, y, m, user.outlet_id)
 
 
 @router.post(
@@ -361,10 +378,11 @@ async def mark_attendance(
     file_path = await _save_selfie(photo, "in")
     real_address = await get_address_from_coords(lat, lng)
 
+    _court = _staff_court(db, staff)
     new_record = Attendance(
         staff_id=staff.id,
         outlet_id=staff.outlet_id,
-        court_id=staff.court_id,
+        court_id=(_court.id if _court else staff.court_id),
         business_date=biz_date,
         check_in_lat=lat,
         check_in_lng=lng,
@@ -468,7 +486,14 @@ def _notify_early_logout(
     early_min = int(round((scheduled_end - checkout_utc).total_seconds() / 60))
     out_local = to_ist(checkout_utc).strftime("%I:%M %p").lstrip("0")
 
-    # Manager notice (read/unread in Settings → Notices), court-scoped.
+    # Route to the right manager: outlet staff → their outlet manager;
+    # ETL staff → the court (ETL manager).
+    if staff.outlet_id and not staff.court_id:
+        mgr_court_id, mgr_outlet_id = None, staff.outlet_id
+    else:
+        mgr_court_id, mgr_outlet_id = staff.court_id, None
+
+    # Manager notice (read/unread in Settings → Notices).
     create_notice(
         db,
         audience="manager",
@@ -478,7 +503,8 @@ def _notify_early_logout(
             f"{staff.name} checked out at {out_local}, about {early_min} min "
             f"before the {staff.shift_end} shift end."
         ),
-        court_id=staff.court_id,
+        court_id=mgr_court_id,
+        outlet_id=mgr_outlet_id,
         staff_id=staff.id,
     )
 
@@ -493,6 +519,7 @@ def _notify_early_logout(
             f"({staff.shift_end}). Your manager has been notified."
         ),
         court_id=staff.court_id,
+        outlet_id=staff.outlet_id,
         staff_id=staff.id,
         recipient_staff_id=staff.id,
     )

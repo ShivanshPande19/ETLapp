@@ -131,6 +131,11 @@ async def auto_close_forgotten_attendance():
             for rec, staff, close_at in closed:
                 name = staff.name if staff else "Staff"
                 out_local = to_ist(close_at).strftime("%I:%M %p").lstrip("0")
+                # Route to outlet manager (outlet staff) or court/ETL manager.
+                if staff and staff.outlet_id and not staff.court_id:
+                    mgr_court_id, mgr_outlet_id = None, staff.outlet_id
+                else:
+                    mgr_court_id, mgr_outlet_id = rec.court_id, None
                 try:
                     create_notice(
                         db,
@@ -141,7 +146,8 @@ async def auto_close_forgotten_attendance():
                             f"{name} didn't check out. The system auto-closed "
                             f"their shift at {out_local}."
                         ),
-                        court_id=rec.court_id,
+                        court_id=mgr_court_id,
+                        outlet_id=mgr_outlet_id,
                         staff_id=rec.staff_id,
                     )
                     if staff is not None:
@@ -154,7 +160,8 @@ async def auto_close_forgotten_attendance():
                                 f"Your shift was auto-closed at {out_local}. "
                                 f"Please remember to check out next time."
                             ),
-                            court_id=rec.court_id,
+                            court_id=staff.court_id,
+                            outlet_id=staff.outlet_id,
                             staff_id=rec.staff_id,
                             recipient_staff_id=rec.staff_id,
                         )

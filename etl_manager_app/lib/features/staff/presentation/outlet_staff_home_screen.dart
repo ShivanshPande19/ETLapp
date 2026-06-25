@@ -13,6 +13,9 @@ import '../domain/attendance_notifier.dart';
 // ✅ IMPORT FOR REAL DATABASE FEEDBACKS
 import '../../feedbacks/domain/feedback_notifier.dart';
 import '../../home/presentation/home_providers.dart';
+import '../../notices/domain/notices_notifier.dart';
+import '../../notices/presentation/notices_screen.dart';
+import '../../attendance_calendar/presentation/staff_calendar_screen.dart';
 
 // ─── Premium Palette ─────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -156,7 +159,40 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                         ),
                       ],
                     ),
-                    _ProfileButton(firstName: firstName),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _HeaderIconButton(
+                          icon: Icons.calendar_month_rounded,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const StaffCalendarScreen(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Consumer(
+                          builder: (context, ref, _) {
+                            final unread =
+                                ref.watch(unreadCountProvider).value ?? 0;
+                            return _HeaderIconButton(
+                              icon: Icons.notifications_none_rounded,
+                              badge: unread,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const NoticesScreen(),
+                                ),
+                              ).then(
+                                  (_) => ref.invalidate(unreadCountProvider)),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 10),
+                        _ProfileButton(firstName: firstName),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -951,6 +987,64 @@ class _ShiftTimeBlock extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final int badge;
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    this.badge = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _white.withOpacity(0.08),
+              shape: BoxShape.circle,
+              border: Border.all(color: _white.withOpacity(0.15)),
+            ),
+            child: Icon(icon, size: 20, color: _white.withOpacity(0.9)),
+          ),
+          if (badge > 0)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                decoration: BoxDecoration(
+                  color: _danger,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _bg, width: 1.5),
+                ),
+                child: Center(
+                  child: Text(
+                    badge > 9 ? '9+' : '$badge',
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      height: 1,
+                      color: _white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
