@@ -67,8 +67,8 @@ def ensure_attendance_columns() -> None:
             "check_out_address": "VARCHAR",
             "check_out_photo_url": "VARCHAR",
             "business_date": "DATE",
-            "early_checkout": "BOOLEAN",
-            "auto_closed": "BOOLEAN",
+            "early_checkout": "BOOLEAN DEFAULT 0",
+            "auto_closed": "BOOLEAN DEFAULT 0",
         }
     else:
         types = {
@@ -78,8 +78,8 @@ def ensure_attendance_columns() -> None:
             "check_out_address": "VARCHAR",
             "check_out_photo_url": "VARCHAR",
             "business_date": "DATE",
-            "early_checkout": "BOOLEAN",
-            "auto_closed": "BOOLEAN",
+            "early_checkout": "BOOLEAN DEFAULT FALSE",
+            "auto_closed": "BOOLEAN DEFAULT FALSE",
         }
     try:
         with engine.begin() as conn:
@@ -87,14 +87,30 @@ def ensure_attendance_columns() -> None:
             if "attendance" not in insp.get_table_names():
                 return  # create_all will build it fresh with all columns
             existing = {c["name"] for c in insp.get_columns("attendance")}
-            for col, col_type in types.items():
-                if col not in existing:
-                    conn.execute(
-                        text(f"ALTER TABLE attendance ADD COLUMN {col} {col_type}")
-                    )
-            # Backfill business_date for existing rows from the check-in date so
-            # historical attendance still groups correctly (best-effort).
-            if "business_date" not in existing:
+    except Exception as e:
+        print(f"[MIGRATION] ensure_attendance_columns inspect skipped: {e}")
+        return
+
+    # Add each missing column in its OWN transaction, so one failure can never
+    # roll back the others. Booleans carry a DEFAULT so existing rows backfill
+    # via the DDL itself (no separate UPDATE — that previously broke on Postgres
+    # because `SET bool_col = 0` is invalid there and rolled back the ALTER).
+    for col, col_type in types.items():
+        if col in existing:
+            continue
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(f"ALTER TABLE attendance ADD COLUMN {col} {col_type}")
+                )
+        except Exception as e:
+            print(f"[MIGRATION] add attendance.{col} skipped: {e}")
+
+    # Backfill business_date for existing rows from the check-in date so
+    # historical attendance still groups correctly (best-effort, dialect-safe).
+    if "business_date" not in existing:
+        try:
+            with engine.begin() as conn:
                 conn.execute(
                     text(
                         "UPDATE attendance SET business_date = "
@@ -102,14 +118,8 @@ def ensure_attendance_columns() -> None:
                         + "WHERE business_date IS NULL AND check_in_time IS NOT NULL"
                     )
                 )
-            # Default the new boolean flags on existing rows.
-            for _flag in ("early_checkout", "auto_closed"):
-                if _flag not in existing:
-                    conn.execute(
-                        text(f"UPDATE attendance SET {_flag} = 0 WHERE {_flag} IS NULL")
-                    )
-    except Exception as e:  # never block startup on a best-effort migration
-        print(f"[MIGRATION] ensure_attendance_columns skipped: {e}")
+        except Exception as e:
+            print(f"[MIGRATION] backfill business_date skipped: {e}")
 
     # Best-effort: prevent duplicate check-ins for the same staff+business day
     # (defends against a double-submit race). NULL business_date rows are
