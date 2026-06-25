@@ -17,6 +17,7 @@ import 'outlet_staff_management_screen.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
 import '../../attendance_calendar/presentation/manager_attendance_screen.dart';
+import '../../attendance_calendar/presentation/outlet_attendance_screen.dart';
 
 const _bg = Color(0xFF080808);
 const _white = Color(0xFFFFFFFF);
@@ -485,6 +486,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                       },
                                     );
                                   },
+                                ),
+                                _GroupDivider(),
+                                _NavTile(
+                                  icon: Icons.event_available_rounded,
+                                  label: 'Staff Attendance',
+                                  subtitle: 'Monthly calendar · your outlet',
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => OutletAttendanceScreen(
+                                        outletName: outletName,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                                 _GroupDivider(),
                                 _InfoTile(

@@ -23,6 +23,16 @@ class CalendarRepository {
         .map((e) => CourtCalendar.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  /// Outlet manager: their own outlet's staff calendars.
+  Future<List<StaffCalendar>> outletCalendar(String month) async {
+    final res = await _dio.get('/attendance/calendar/outlet',
+        queryParameters: {'month': month});
+    final data = res.data as Map<String, dynamic>;
+    return (data['staff'] as List? ?? [])
+        .map((e) => StaffCalendar.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 }
 
 final calendarRepositoryProvider = Provider<CalendarRepository>((ref) {
@@ -39,4 +49,10 @@ final myCalendarProvider = FutureProvider.autoDispose
 final courtCalendarProvider = FutureProvider.autoDispose
     .family<List<CourtCalendar>, String>((ref, month) async {
   return ref.watch(calendarRepositoryProvider).courtCalendar(month);
+});
+
+/// Outlet-manager's own outlet staff calendars for a given "YYYY-MM".
+final outletCalendarProvider = FutureProvider.autoDispose
+    .family<List<StaffCalendar>, String>((ref, month) async {
+  return ref.watch(calendarRepositoryProvider).outletCalendar(month);
 });

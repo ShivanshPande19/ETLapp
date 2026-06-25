@@ -31,7 +31,7 @@ from app.core.geo import (
     DEFAULT_GEOFENCE_RADIUS_M,
 )
 from app.services.notice_service import create_notice
-from app.services.attendance_service import build_staff_calendar, build_court_calendars
+from app.services.attendance_service import build_staff_calendar, build_court_calendars, build_outlet_calendars
 from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -304,6 +304,19 @@ def court_calendar(
         raise HTTPException(status_code=403, detail="ETL manager access required.")
     y, m = _parse_month(month)
     return build_court_calendars(db, y, m, court_id=court_id)
+
+
+@router.get("/calendar/outlet")
+def outlet_calendar(
+    month: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Outlet manager: month calendar for every staff in their own outlet."""
+    if user.role != "outlet_manager" or user.outlet_id is None:
+        raise HTTPException(status_code=403, detail="Outlet manager access required.")
+    y, m = _parse_month(month)
+    return build_outlet_calendars(db, y, m, user.outlet_id)
 
 
 @router.post(
