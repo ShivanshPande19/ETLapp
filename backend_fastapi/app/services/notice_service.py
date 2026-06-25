@@ -21,6 +21,7 @@ def create_notice(
     title: str,
     body: Optional[str] = None,
     court_id: Optional[int] = None,
+    outlet_id: Optional[int] = None,           # set => belongs to an outlet manager
     staff_id: Optional[int] = None,            # subject (who it's about)
     recipient_staff_id: Optional[int] = None,  # for audience="staff"
 ) -> Notice:
@@ -30,6 +31,7 @@ def create_notice(
         title=title,
         body=body,
         court_id=court_id,
+        outlet_id=outlet_id,
         staff_id=staff_id,
         recipient_staff_id=recipient_staff_id,
         is_read=False,
@@ -44,6 +46,7 @@ def create_notice(
         {
             "type": "notice_update",
             "court_id": court_id or 0,
+            "outlet_id": outlet_id,
             "audience": audience,
             "recipient_staff_id": recipient_staff_id,
         }

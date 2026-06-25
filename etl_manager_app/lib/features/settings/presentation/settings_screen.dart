@@ -461,6 +461,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                   ),
                                 ),
                                 _GroupDivider(),
+                                Consumer(
+                                  builder: (context, ref, _) {
+                                    final unread = ref
+                                            .watch(unreadCountProvider)
+                                            .value ??
+                                        0;
+                                    return _NavTile(
+                                      icon: Icons.notifications_rounded,
+                                      label: 'Notices',
+                                      subtitle: unread > 0
+                                          ? '$unread unread'
+                                          : 'Early logouts & alerts',
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const NoticesScreen(),
+                                          ),
+                                        ).then((_) => ref.invalidate(
+                                            unreadCountProvider));
+                                      },
+                                    );
+                                  },
+                                ),
+                                _GroupDivider(),
                                 _InfoTile(
                                   icon: Icons.storefront_rounded,
                                   label: 'Outlet',

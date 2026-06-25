@@ -179,6 +179,25 @@ def ensure_staff_columns() -> None:
         print(f"[MIGRATION] ensure_staff_columns skipped: {e}")
 
 
+def ensure_notice_columns() -> None:
+    """Add `outlet_id` to an existing `notices` table (created before outlet
+    notice routing). Best-effort + idempotent."""
+    needed = {"outlet_id": "INTEGER"}
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "notices" not in insp.get_table_names():
+                return  # create_all builds it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("notices")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE notices ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:
+        print(f"[MIGRATION] ensure_notice_columns skipped: {e}")
+
+
 def ensure_court_columns() -> None:
     """Add geofencing columns (latitude, longitude, geofence_radius, address)
     to an existing `courts` table. create_all never ALTERs existing tables, so

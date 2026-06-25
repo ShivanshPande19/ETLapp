@@ -179,12 +179,22 @@ def set_shift(
     user: CurrentUser = Depends(get_current_user),
 ):
     """Set/clear a staff member's shift timings and notify them."""
-    if not user.is_etl_manager:
-        raise HTTPException(status_code=403, detail="ETL manager access required.")
-
     staff = db.query(Staff).filter(Staff.id == staff_id).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Authorization: ETL manager can set any; an outlet manager only for their
+    # own outlet's staff.
+    if user.is_etl_manager:
+        pass
+    elif user.role == "outlet_manager" and user.outlet_id is not None:
+        if staff.outlet_id != user.outlet_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only set shifts for your own outlet's staff.",
+            )
+    else:
+        raise HTTPException(status_code=403, detail="Manager access required.")
 
     # Both provided, or both cleared — never a half-set shift.
     if bool(req.shift_start) != bool(req.shift_end):
@@ -210,6 +220,7 @@ def set_shift(
         title="Shift timings updated",
         body=body,
         court_id=staff.court_id,
+        outlet_id=staff.outlet_id,
         staff_id=staff.id,
         recipient_staff_id=staff.id,
     )
