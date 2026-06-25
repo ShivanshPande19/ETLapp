@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/auth_repository.dart';
 import '../../../core/utils/token_storage.dart';
+import '../../notices/domain/notices_notifier.dart';
 
 enum AuthStatus { unknown, idle, loading, success, error }
 
@@ -125,6 +126,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> login(String email, String password) async {
     state = state.copyWith(status: AuthStatus.loading);
+    // Drop any previous user's cached, user-scoped data so a freshly logged-in
+    // account never sees the prior session's notices.
+    _clearUserScopedProviders();
     try {
       final data = await ref
           .read(authRepositoryProvider)
@@ -175,7 +179,16 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> logout() async {
     await ref.read(authRepositoryProvider).logout();
+    _clearUserScopedProviders();
     state = const AuthState(status: AuthStatus.idle);
+  }
+
+  /// Reset providers that hold data scoped to the logged-in user, so switching
+  /// accounts in the same app session never shows the previous user's data
+  /// (these providers are keep-alive and aren't disposed on logout).
+  void _clearUserScopedProviders() {
+    ref.invalidate(noticesNotifierProvider);
+    ref.invalidate(unreadCountProvider);
   }
 }
 

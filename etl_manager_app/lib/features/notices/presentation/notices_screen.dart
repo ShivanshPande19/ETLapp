@@ -14,11 +14,26 @@ const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
 const _red = Color(0xFFD02128);
 
-class NoticesScreen extends ConsumerWidget {
+class NoticesScreen extends ConsumerStatefulWidget {
   const NoticesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NoticesScreen> createState() => _NoticesScreenState();
+}
+
+class _NoticesScreenState extends ConsumerState<NoticesScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Always refetch with the CURRENT user's token on open — guards against
+    // showing a previous session's cached notices (provider is keep-alive).
+    Future.microtask(
+      () => ref.read(noticesNotifierProvider.notifier).fetch(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(noticesNotifierProvider);
 
     return Scaffold(
