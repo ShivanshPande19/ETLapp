@@ -49,7 +49,11 @@ class StaffRosterItem(BaseModel):
     status: str  # "present" or "absent"
     check_in_time: Optional[datetime] = None
     check_out_time: Optional[datetime] = None
-    selfie_url: Optional[str] = None
+    selfie_url: Optional[str] = None  # = check-in photo (kept for back-compat)
+    check_in_photo_url: Optional[str] = None
+    check_out_photo_url: Optional[str] = None
+    early_checkout: bool = False
+    auto_closed: bool = False
 
     @field_serializer("check_in_time", "check_out_time")
     def _ser_dt(self, dt: Optional[datetime], _info) -> Optional[str]:

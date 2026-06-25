@@ -55,11 +55,19 @@ def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterRe
             chk_in = record.check_in_time
             chk_out = record.check_out_time
             selfie = record.check_in_photo_url
+            in_photo = record.check_in_photo_url
+            out_photo = record.check_out_photo_url
+            early = bool(record.early_checkout)
+            auto = bool(record.auto_closed)
         else:
             status = "absent"
             chk_in = None
             chk_out = None
             selfie = None
+            in_photo = None
+            out_photo = None
+            early = False
+            auto = False
 
         roster_list.append(StaffRosterItem(
             staff_id=staff.id,
@@ -67,7 +75,11 @@ def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterRe
             status=status,
             check_in_time=chk_in,
             check_out_time=chk_out,
-            selfie_url=selfie
+            selfie_url=selfie,
+            check_in_photo_url=in_photo,
+            check_out_photo_url=out_photo,
+            early_checkout=early,
+            auto_closed=auto,
         ))
 
     return RosterResponse(
@@ -111,11 +123,19 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
             chk_in = record.check_in_time
             chk_out = record.check_out_time
             selfie = record.check_in_photo_url
+            in_photo = record.check_in_photo_url
+            out_photo = record.check_out_photo_url
+            early = bool(record.early_checkout)
+            auto = bool(record.auto_closed)
         else:
             status = "absent"
             chk_in = None
             chk_out = None
             selfie = None
+            in_photo = None
+            out_photo = None
+            early = False
+            auto = False
 
         roster_list.append(StaffRosterItem(
             staff_id=staff.id,
@@ -124,6 +144,10 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
             check_in_time=chk_in,
             check_out_time=chk_out,
             selfie_url=selfie,
+            check_in_photo_url=in_photo,
+            check_out_photo_url=out_photo,
+            early_checkout=early,
+            auto_closed=auto,
         ))
 
     # Present staff pehle, phir naam se sort (frontend ke liye consistent order)

@@ -323,9 +323,12 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
     Map<String, dynamic> court,
   ) {
     HapticFeedback.selectionClick();
-    final selfieUrl = _fullSelfieUrl(s['selfie_url']);
+    final inPhoto = _fullSelfieUrl(s['check_in_photo_url'] ?? s['selfie_url']);
+    final outPhoto = _fullSelfieUrl(s['check_out_photo_url']);
     final checkIn = _formatTime(s['check_in_time']?.toString());
     final checkOut = _formatTime(s['check_out_time']?.toString());
+    final autoClosed = s['auto_closed'] == true;
+    final earlyOut = s['early_checkout'] == true;
 
     showModalBottomSheet(
       context: context,
@@ -351,32 +354,6 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
                 ),
               ),
               const SizedBox(height: 24),
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _ok.withOpacity(0.3), width: 3),
-                ),
-                child: ClipOval(
-                  child: selfieUrl != null
-                      ? Image.network(
-                          selfieUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.person_rounded,
-                            size: 56,
-                            color: _grey,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.person_rounded,
-                          size: 56,
-                          color: _grey,
-                        ),
-                ),
-              ),
-              const SizedBox(height: 16),
               Text(
                 (s['name'] ?? 'Unknown').toString(),
                 style: GoogleFonts.inter(
@@ -394,24 +371,31 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
                   color: _grey,
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 22),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: _DetailTile(
-                      icon: Icons.login_rounded,
+                    child: _AttendancePhoto(
+                      photoUrl: inPhoto,
                       label: 'Checked In',
-                      value: checkIn.isEmpty ? '--' : checkIn,
-                      color: _ok,
+                      time: checkIn.isEmpty ? '--' : checkIn,
+                      accent: _ok,
                     ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
-                    child: _DetailTile(
-                      icon: Icons.logout_rounded,
+                    child: _AttendancePhoto(
+                      photoUrl: outPhoto,
                       label: 'Checked Out',
-                      value: checkOut.isEmpty ? 'On shift' : checkOut,
-                      color: checkOut.isEmpty ? _grey : _blue,
+                      time: checkOut.isEmpty ? 'On shift' : checkOut,
+                      accent: checkOut.isEmpty ? _grey : _blue,
+                      note: autoClosed
+                          ? 'Auto-closed'
+                          : (earlyOut ? 'Early' : null),
+                      noteColor: autoClosed
+                          ? const Color(0xFFEA580C)
+                          : const Color(0xFFE5A000),
                     ),
                   ),
                 ],
@@ -985,6 +969,166 @@ class _StaffCard extends StatelessWidget {
 }
 
 // ─── Detail tile (bottom sheet) ─────────────────────────────────────────────
+
+class _AttendancePhoto extends StatelessWidget {
+  final String? photoUrl;
+  final String label;
+  final String time;
+  final Color accent;
+  final String? note;
+  final Color? noteColor;
+
+  const _AttendancePhoto({
+    required this.photoUrl,
+    required this.label,
+    required this.time,
+    required this.accent,
+    this.note,
+    this.noteColor,
+  });
+
+  void _openFull(BuildContext context) {
+    if (photoUrl == null) return;
+    HapticFeedback.selectionClick();
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              child: Center(
+                child: Image.network(photoUrl!, fit: BoxFit.contain),
+              ),
+            ),
+            Positioned(
+              top: 50,
+              right: 20,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const CircleAvatar(
+                  backgroundColor: Colors.white24,
+                  child: Icon(Icons.close_rounded, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: () => _openFull(context),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF2F2F2),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: accent.withOpacity(0.35), width: 2),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: photoUrl != null
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(
+                          photoUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(Icons.broken_image_rounded,
+                                size: 36, color: _grey),
+                          ),
+                        ),
+                        Positioned(
+                          right: 6,
+                          bottom: 6,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.45),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.open_in_full_rounded,
+                                size: 13, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.no_photography_rounded,
+                              size: 30, color: _grey.withOpacity(0.6)),
+                          const SizedBox(height: 4),
+                          Text('No photo',
+                              style: GoogleFonts.inter(
+                                  fontSize: 11, color: _grey)),
+                        ],
+                      ),
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: _grey,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          time,
+          style: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: _black,
+          ),
+        ),
+        if (note != null) ...[
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: (noteColor ?? _grey).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              note!,
+              style: GoogleFonts.inter(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: noteColor ?? _grey,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 
 class _DetailTile extends StatelessWidget {
   final IconData icon;
