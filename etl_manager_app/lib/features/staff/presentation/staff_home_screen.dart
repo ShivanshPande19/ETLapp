@@ -18,6 +18,7 @@ import '../../feedbacks/presentation/staff_court_feedback_screen.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
+import '../../attendance_calendar/presentation/staff_calendar_screen.dart';
 
 // ✅ Real court name from DB
 import '../../courts/domain/courts_notifier.dart';
@@ -218,6 +219,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
       return;
     }
     final accuracy = (result['accuracy'] as num?)?.toDouble();
+    final isMocked = result['is_mocked'] == true;
     await ref
         .read(attendanceNotifierProvider.notifier)
         .markAttendance(
@@ -225,6 +227,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
           lng: lng,
           imagePath: imagePath,
           accuracy: accuracy,
+          isMocked: isMocked,
         );
   }
 
@@ -240,9 +243,17 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
       _toast('Could not capture location. Try again.', isError: true);
       return;
     }
+    final accuracy = (result['accuracy'] as num?)?.toDouble();
+    final isMocked = result['is_mocked'] == true;
     await ref
         .read(attendanceNotifierProvider.notifier)
-        .checkOut(lat: lat, lng: lng, imagePath: imagePath);
+        .checkOut(
+          lat: lat,
+          lng: lng,
+          imagePath: imagePath,
+          accuracy: accuracy,
+          isMocked: isMocked,
+        );
   }
 
   void _toast(String msg, {bool isError = false}) {
@@ -340,6 +351,31 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              GestureDetector(
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const StaffCalendarScreen(),
+                                  ),
+                                ),
+                                child: Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: _white.withOpacity(0.08),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _white.withOpacity(0.15),
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    Icons.calendar_month_rounded,
+                                    size: 19,
+                                    color: _white.withOpacity(0.9),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
                               Consumer(
                                 builder: (context, ref, _) {
                                   final unread =

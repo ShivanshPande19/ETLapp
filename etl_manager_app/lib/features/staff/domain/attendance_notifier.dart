@@ -128,6 +128,7 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
     required double lng,
     required String imagePath,
     double? accuracy,
+    bool? isMocked,
   }) async {
     state = state.copyWith(status: AttendanceStatus.loading);
     try {
@@ -136,6 +137,7 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
         'lat': lat,
         'lng': lng,
         if (accuracy != null) 'accuracy': accuracy,
+        if (isMocked != null) 'is_mocked': isMocked,
         'photo': await MultipartFile.fromFile(imagePath, filename: 'checkin.jpg'),
       });
 
@@ -161,11 +163,15 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
     required double lat,
     required double lng,
     String? imagePath,
+    double? accuracy,
+    bool? isMocked,
   }) async {
     state = state.copyWith(status: AttendanceStatus.loading);
     try {
       final dio = ref.read(dioProvider);
       final map = <String, dynamic>{'lat': lat, 'lng': lng};
+      if (accuracy != null) map['accuracy'] = accuracy;
+      if (isMocked != null) map['is_mocked'] = isMocked;
       if (imagePath != null) {
         map['photo'] = await MultipartFile.fromFile(
           imagePath,

@@ -1,6 +1,6 @@
 # app/models/attendance.py
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, ForeignKey
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -39,3 +39,9 @@ class Attendance(Base):
     check_out_lng = Column(Float, nullable=True)
     check_out_address = Column(String, nullable=True)
     check_out_photo_url = Column(String, nullable=True)
+
+    # --- Status flags (for calendar colouring & notices) ---
+    # Set when the staff manually checks out before their scheduled shift end.
+    early_checkout = Column(Boolean, nullable=False, default=False)
+    # Set when the system auto-closes a forgotten check-out at end of business day.
+    auto_closed = Column(Boolean, nullable=False, default=False)
