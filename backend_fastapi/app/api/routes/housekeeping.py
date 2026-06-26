@@ -382,3 +382,71 @@ def _add_recurring(
     )
     db.add(row)
     db.commit()
+
+
+
+# ─── Per-court checklist CONFIG (manager builder) ────────────────────────────
+# Additive: these power the checklist builder. The legacy status/submit
+# endpoints above are untouched until the staff/manager screens are wired to
+# the config (next phase).
+
+from ...services.housekeeping_config_service import (
+    get_court_config,
+    save_court_config,
+    default_template,
+)
+
+
+class TaskDefIn(BaseModel):
+    key: Optional[str] = None
+    title: str
+    icon: Optional[str] = None
+    interval_days: Optional[int] = None
+
+
+class ShiftConfigIn(BaseModel):
+    key: Optional[str] = None
+    name: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    tasks: List[TaskDefIn] = []
+
+
+class ChecklistConfigIn(BaseModel):
+    shifts: List[ShiftConfigIn] = []
+    weekly: List[TaskDefIn] = []
+    monthly: List[TaskDefIn] = []
+
+
+@router.get("/config")
+def get_checklist_config(
+    court_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Full checklist config for a court (seeds the legacy default if none).
+    Readable by any authenticated user (staff render their checklist from it)."""
+    return get_court_config(db, court_id)
+
+
+@router.get("/config/template")
+def get_checklist_template(user: CurrentUser = Depends(get_current_user)):
+    """A fresh editable template to pre-fill the builder for a NEW court."""
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    return default_template()
+
+
+@router.put("/config")
+def put_checklist_config(
+    court_id: int,
+    body: ChecklistConfigIn,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """ETL manager: replace a court's checklist config (shifts + tasks)."""
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    if not body.shifts:
+        raise HTTPException(status_code=400, detail="At least one shift is required.")
+    return save_court_config(db, court_id, body.model_dump())
