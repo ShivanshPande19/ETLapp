@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...models.housekeeping import HkTask, HkRecurring
+from ...models.sale import Court
 from ...core.uploads import save_upload_image
+from ...services.housekeeping_config_service import get_court_config
 from ..deps import CurrentUser, get_current_user
 from .events import notify_clients
 
@@ -69,6 +71,9 @@ class RecurringTaskRequest(BaseModel):
     court_id:  int
     photo_url: Optional[str] = None
     done_by:   Optional[int] = None
+    # Which recurring task (config key). If omitted, the court's first
+    # weekly/monthly task is used (legacy: flagswash / fireaudit).
+    task_id:   Optional[str] = None
 
 
 # ─── SSE helper ───────────────────────────────────────────────────────────────
@@ -91,40 +96,48 @@ def _fire_notify(event: dict) -> None:
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _shift_status(db: Session, court_id: int, shift: str, date: str) -> dict:
+def _shift_status(db: Session, court_id: int, shift_def: dict, date: str) -> dict:
+    """Build a shift's status from its CONFIGURED tasks merged with completions.
+    `shift_def` = {key, name, start_time, end_time, tasks:[{key,title,icon}]}."""
+    shift_key = shift_def["key"]
     rows = (
         db.query(HkTask)
         .filter(
             HkTask.court_id == court_id,
-            HkTask.shift    == shift,
+            HkTask.shift    == shift_key,
             HkTask.date     == date,
         )
-        .order_by(HkTask.id)
         .all()
     )
+    by_task = {r.task_id: r for r in rows}
 
-    tasks = [
-        {
-            "task_id":      r.task_id,
-            "task_title":   r.task_title or r.task_id,
-            "is_done":      r.is_done,
-            "photo_url":    r.photo_url,
-            "done_at":      r.done_at,
-            "done_by_name": r.done_by_name,
-        }
-        for r in rows
-    ]
+    cfg_tasks = shift_def.get("tasks", [])
+    tasks = []
+    for t in cfg_tasks:
+        r = by_task.get(t["key"])
+        tasks.append({
+            "task_id":      t["key"],
+            "task_title":   t.get("title") or (r.task_title if r else t["key"]),
+            "icon":         t.get("icon"),
+            "is_done":      bool(r.is_done) if r else False,
+            "photo_url":    r.photo_url if r else None,
+            "done_at":      r.done_at if r else None,
+            "done_by_name": r.done_by_name if r else None,
+        })
 
     done      = sum(1 for t in tasks if t["is_done"])
-    total     = TASKS_PER_SHIFT
+    total     = len(cfg_tasks)
     submitted = (done == total) and (total > 0)
 
     return {
-        "shift":     shift,
-        "total":     total,
-        "done":      done,
-        "submitted": submitted,
-        "tasks":     tasks,
+        "shift":      shift_key,
+        "shift_name": shift_def.get("name") or shift_key,
+        "start_time": shift_def.get("start_time"),
+        "end_time":   shift_def.get("end_time"),
+        "total":      total,
+        "done":       done,
+        "submitted":  submitted,
+        "tasks":      tasks,
     }
 
 
@@ -158,6 +171,8 @@ def _recurring_status(
     task_type: str,
     task_id: str,
     interval_days: int,
+    title: Optional[str] = None,
+    icon: Optional[str] = None,
 ) -> dict:
     row       = _get_latest_recurring(db, court_id, task_type, task_id)
     last_done = _parse_done_at(row)
@@ -168,6 +183,10 @@ def _recurring_status(
 
     return {
         "court_id":     court_id,
+        "task_id":      task_id,
+        "title":        title or task_id,
+        "icon":         icon,
+        "interval_days": interval_days,
         "last_done_at": last_done.isoformat() if last_done else None,
         "next_due_at":  next_due.isoformat()  if next_due  else None,
         "photo_url":    row.photo_url if row else None,
@@ -247,28 +266,40 @@ def submit_shift(
 @router.get("/status")
 def get_status(
     date: Optional[str] = None,
+    court_id: Optional[int] = None,
     db:   Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
     target = date or datetime.now().strftime("%Y-%m-%d")
 
-    courts = [
-        {
-            "court_id": cid,
-            "date":     target,
-            "shifts":   [_shift_status(db, cid, s, target) for s in _SHIFTS],
-        }
-        for cid in _COURTS
-    ]
+    # Config-driven: real active courts (optionally one), each with its own
+    # configured shifts + tasks (legacy default is seeded if a court has none).
+    court_q = db.query(Court).filter(Court.is_active == 1)
+    if court_id is not None:
+        court_q = court_q.filter(Court.id == court_id)
+    court_rows = court_q.order_by(Court.id).all()
 
-    weekly_tasks  = [
-        _recurring_status(db, cid, "weekly",  _WEEKLY_ID,  7)
-        for cid in _COURTS
-    ]
-    monthly_tasks = [
-        _recurring_status(db, cid, "monthly", _MONTHLY_ID, 30)
-        for cid in _COURTS
-    ]
+    courts = []
+    weekly_tasks = []
+    monthly_tasks = []
+    for c in court_rows:
+        cfg = get_court_config(db, c.id)
+        courts.append({
+            "court_id": c.id,
+            "court_name": c.name,
+            "date":     target,
+            "shifts":   [_shift_status(db, c.id, sh, target) for sh in cfg["shifts"]],
+        })
+        for w in cfg["weekly"]:
+            weekly_tasks.append(_recurring_status(
+                db, c.id, "weekly", w["key"], w.get("interval_days") or 7,
+                title=w.get("title"), icon=w.get("icon"),
+            ))
+        for m in cfg["monthly"]:
+            monthly_tasks.append(_recurring_status(
+                db, c.id, "monthly", m["key"], m.get("interval_days") or 30,
+                title=m.get("title"), icon=m.get("icon"),
+            ))
 
     return {
         "date":          target,
@@ -278,18 +309,38 @@ def get_status(
     }
 
 
+def _resolve_recurring_def(db: Session, court_id: int, scope: str, task_id: Optional[str]):
+    """Find the config def for a weekly/monthly task (by key, or the court's
+    first one as the legacy default). Returns the dict or None."""
+    cfg = get_court_config(db, court_id)
+    items = cfg["weekly"] if scope == "weekly" else cfg["monthly"]
+    if not items:
+        return None
+    if task_id:
+        for it in items:
+            if it["key"] == task_id:
+                return it
+    return items[0]
+
+
 @router.patch("/weekly", status_code=status.HTTP_200_OK)
 def mark_weekly_done(
     body: RecurringTaskRequest,
     db:   Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    row       = _get_latest_recurring(db, body.court_id, "weekly", _WEEKLY_ID)
+    item = _resolve_recurring_def(db, body.court_id, "weekly", body.task_id)
+    if item is None:
+        raise HTTPException(status_code=400, detail="No weekly task configured for this court.")
+    task_key = item["key"]
+    interval = item.get("interval_days") or 7
+
+    row       = _get_latest_recurring(db, body.court_id, "weekly", task_key)
     last_done = _parse_done_at(row)
     now       = datetime.now()
 
     if last_done:
-        next_due = last_done + timedelta(days=7)
+        next_due = last_done + timedelta(days=interval)
         if now < next_due:
             remaining = (next_due - now).days + (
                 1 if (next_due - now).seconds > 0 else 0
@@ -298,13 +349,13 @@ def mark_weekly_done(
                 status_code=400,
                 detail={
                     "code":           "COOLDOWN_ACTIVE",
-                    "message":        f"Weekly task available again in {remaining} days.",
+                    "message":        f"Task available again in {remaining} days.",
                     "remaining_days": remaining,
                     "next_due_at":    next_due.isoformat(),
                 },
             )
 
-    _add_recurring(db, body, "weekly", _WEEKLY_ID, done_by_name=user.name)
+    _add_recurring(db, body, "weekly", task_key, done_by_name=user.name)
 
     # ✅ SSE notify
     _fire_notify({
@@ -316,7 +367,7 @@ def mark_weekly_done(
 
     return {
         "status":   "ok",
-        "task":     "flags_washing",
+        "task":     task_key,
         "court_id": body.court_id,
     }
 
@@ -327,12 +378,18 @@ def mark_monthly_done(
     db:   Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    row       = _get_latest_recurring(db, body.court_id, "monthly", _MONTHLY_ID)
+    item = _resolve_recurring_def(db, body.court_id, "monthly", body.task_id)
+    if item is None:
+        raise HTTPException(status_code=400, detail="No monthly task configured for this court.")
+    task_key = item["key"]
+    interval = item.get("interval_days") or 30
+
+    row       = _get_latest_recurring(db, body.court_id, "monthly", task_key)
     last_done = _parse_done_at(row)
     now       = datetime.now()
 
     if last_done:
-        next_due = last_done + timedelta(days=30)
+        next_due = last_done + timedelta(days=interval)
         if now < next_due:
             remaining = (next_due - now).days + (
                 1 if (next_due - now).seconds > 0 else 0
@@ -341,13 +398,13 @@ def mark_monthly_done(
                 status_code=400,
                 detail={
                     "code":           "COOLDOWN_ACTIVE",
-                    "message":        f"Monthly task available again in {remaining} days.",
+                    "message":        f"Task available again in {remaining} days.",
                     "remaining_days": remaining,
                     "next_due_at":    next_due.isoformat(),
                 },
             )
 
-    _add_recurring(db, body, "monthly", _MONTHLY_ID, done_by_name=user.name)
+    _add_recurring(db, body, "monthly", task_key, done_by_name=user.name)
 
     # ✅ SSE notify
     _fire_notify({
@@ -359,7 +416,7 @@ def mark_monthly_done(
 
     return {
         "status":   "ok",
-        "task":     "fire_safety_audit",
+        "task":     task_key,
         "court_id": body.court_id,
     }
 
