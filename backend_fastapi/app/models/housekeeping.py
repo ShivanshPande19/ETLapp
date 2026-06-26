@@ -4,7 +4,7 @@
 # Imported in main.py so Base.metadata.create_all() picks them up on startup.
 # ─────────────────────────────────────────────────────────────────────────────
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, func
 from sqlalchemy.orm import declarative_mixin
 
 from ..database import Base          # your existing Base from app/database.py
@@ -54,3 +54,45 @@ class HkRecurring(Base):
     done_by    = Column(Integer,  nullable=True)    # staff user id
     done_by_name = Column(String, nullable=True)    # staff who completed it
     created_at = Column(DateTime, server_default=func.now())
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-court housekeeping CONFIG (the manager-built checklist).
+# These define WHAT shifts/tasks exist for a court; the HkTask/HkRecurring
+# tables above record completions against them (keyed by the stable `key`s).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class HkShift(Base):
+    """A configurable shift for a court (name + timings). `key` is stable and
+    used as `HkTask.shift`, so renaming the display `name` never orphans past
+    completions."""
+    __tablename__ = "hk_shift"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    court_id   = Column(Integer, ForeignKey("courts.id", ondelete="CASCADE"), nullable=False, index=True)
+    key        = Column(String, nullable=False)        # stable: 'morning' | 'shift_ab12cd'
+    name       = Column(String, nullable=False)        # display: 'Morning'
+    start_time = Column(String, nullable=True)         # "HH:MM" 24h
+    end_time   = Column(String, nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class HkTaskDef(Base):
+    """A configurable task. scope='daily' tasks belong to a shift (shift_key);
+    scope='weekly'/'monthly' are court-level recurring tasks. `key` is stable
+    and used as HkTask.task_id / HkRecurring.task_id."""
+    __tablename__ = "hk_taskdef"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    court_id      = Column(Integer, ForeignKey("courts.id", ondelete="CASCADE"), nullable=False, index=True)
+    scope         = Column(String, nullable=False)     # daily | weekly | monthly
+    shift_key     = Column(String, nullable=True, index=True)  # set for scope='daily'
+    key           = Column(String, nullable=False)     # stable: 'floorclean' | 'task_ab12cd'
+    title         = Column(String, nullable=False)
+    icon          = Column(String, nullable=True)      # icon name (Flutter maps it)
+    interval_days = Column(Integer, nullable=True)     # weekly=7, monthly=30 (configurable)
+    sort_order    = Column(Integer, nullable=False, default=0)
+    created_at    = Column(DateTime, server_default=func.now())
