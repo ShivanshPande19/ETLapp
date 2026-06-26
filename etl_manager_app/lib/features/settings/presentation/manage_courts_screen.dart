@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../../courts/data/courts_repository.dart';
 import '../../courts/presentation/location_picker_screen.dart';
+import '../../housekeeping_config/presentation/checklist_builder_screen.dart';
 import 'staff_management_screen.dart';
 
 const _bg = Color(0xFF080808);
@@ -285,6 +286,33 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                                       ],
                                     ),
                                   ),
+                                  GestureDetector(
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ChecklistBuilderScreen(
+                                          courtId: court.id,
+                                          courtName: court.name,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: _black.withOpacity(0.05),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                            color: const Color(0xFFE5E5E5)),
+                                      ),
+                                      child: const Icon(
+                                        Icons.checklist_rounded,
+                                        size: 17,
+                                        color: _black,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
                                   Icon(
                                     Icons.chevron_right_rounded,
                                     size: 20,
@@ -459,7 +487,7 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                             if (name.isEmpty) return;
                             setSheet(() => loading = true);
                             try {
-                              await ref
+                              final court = await ref
                                   .read(courtsNotifierProvider.notifier)
                                   .createCourt(
                                     name: name,
@@ -475,6 +503,17 @@ class _ManageCourtsScreenState extends ConsumerState<ManageCourtsScreen> {
                                     content: Text('Court "$name" created'),
                                     behavior: SnackBarBehavior.floating,
                                     backgroundColor: _black,
+                                  ),
+                                );
+                                // Jump straight into the checklist builder for
+                                // the new court (pre-filled with the template).
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ChecklistBuilderScreen(
+                                      courtId: court.id,
+                                      courtName: court.name,
+                                    ),
                                   ),
                                 );
                               }
