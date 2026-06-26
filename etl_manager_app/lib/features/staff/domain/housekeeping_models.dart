@@ -1,136 +1,129 @@
 // lib/features/staff/domain/housekeeping_models.dart
+//
+// Config-driven housekeeping models (Phase 3b).
+//
+// A court's checklist is no longer hardcoded (morning/day/night + fixed tasks).
+// Every shift, its timings, its tasks, and the weekly/monthly recurring tasks
+// are defined per-court by the manager in the checklist builder and returned by
+// the backend (GET /housekeeping/status & /housekeeping/config). These models
+// parse that dynamic config + completion status.
 
 import 'package:flutter/material.dart';
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ─── Icon registry ─────────────────────────────────────────────────────────
+// Backend stores an icon *name* string (chosen in the builder). We map it to a
+// Material IconData here. Mirrors kHkIcons in the checklist builder.
 
-enum Shift { morning, day, night }
+const Map<String, IconData> kHkIconMap = {
+  'cleaning_services': Icons.cleaning_services_rounded,
+  'chair': Icons.chair_rounded,
+  'delete_forever': Icons.delete_forever_rounded,
+  'restaurant': Icons.restaurant_rounded,
+  'delete_outline': Icons.delete_outline_rounded,
+  'pest_control': Icons.pest_control_rounded,
+  'flag': Icons.flag_rounded,
+  'fire_extinguisher': Icons.fire_extinguisher_rounded,
+  'water_drop': Icons.water_drop_rounded,
+  'soap': Icons.soap_rounded,
+  'wash': Icons.wash_rounded,
+  'sanitizer': Icons.sanitizer_rounded,
+  'kitchen': Icons.kitchen_rounded,
+  'countertops': Icons.countertops_rounded,
+  'window': Icons.window_rounded,
+  'light': Icons.light_rounded,
+  'ac_unit': Icons.ac_unit_rounded,
+  'checklist': Icons.checklist_rounded,
+  'inventory': Icons.inventory_2_rounded,
+  'plumbing': Icons.plumbing_rounded,
+};
 
-enum TaskCat { cleaning, pest, laundry, audit }
+IconData hkIconFor(String? name) => kHkIconMap[name] ?? Icons.task_alt_rounded;
 
-enum TaskFreq { daily, weekly, monthly }
+// ─── Accent palette (per-task colour, derived from icon) ─────────────────────
 
-enum TaskSt { pending, done, overdue }
+const Color hkAccentBlue = Color(0xFF60A5FA);
+const Color hkAccentWarn = Color(0xFFE5A000);
+const Color hkAccentPurple = Color(0xFFA78BFA);
+const Color hkAccentDanger = Color(0xFFFF4444);
+const Color hkAccentGreen = Color(0xFF22C55E);
 
-// ─── UI Task Definition ───────────────────────────────────────────────────────
+const Map<String, Color> _hkColorMap = {
+  'pest_control': hkAccentWarn,
+  'delete_outline': hkAccentWarn,
+  'delete_forever': hkAccentBlue,
+  'flag': hkAccentPurple,
+  'water_drop': hkAccentPurple,
+  'wash': hkAccentPurple,
+  'soap': hkAccentPurple,
+  'sanitizer': hkAccentPurple,
+  'fire_extinguisher': hkAccentDanger,
+  'ac_unit': hkAccentBlue,
+};
 
-class HkTask {
-  final String id;
-  final String title;
-  final TaskCat category;
-  final IconData icon;
-  final TaskFreq frequency;
+Color hkAccentFor(String? icon, {Color fallback = hkAccentBlue}) =>
+    _hkColorMap[icon] ?? fallback;
 
-  const HkTask({
-    required this.id,
-    required this.title,
-    required this.category,
-    required this.icon,
-    this.frequency = TaskFreq.daily,
-  });
+// ─── Task kinds ──────────────────────────────────────────────────────────────
+
+enum HkTaskKind { daily, weekly, monthly }
+
+// Legacy fallback — used only as a display default when a shift reports 0 tasks.
+const int kTasksPerShift = 6;
+
+// ─── Time helpers (configured "HH:MM" timings) ───────────────────────────────
+
+int? hkHhmmToMin(String? s) {
+  if (s == null) return null;
+  final parts = s.trim().split(':');
+  if (parts.length < 2) return null;
+  final h = int.tryParse(parts[0]);
+  final m = int.tryParse(parts[1]);
+  if (h == null || m == null) return null;
+  return (h % 24) * 60 + (m % 60);
 }
 
-// ─── UI Display Record ────────────────────────────────────────────────────────
-
-class CourtTaskRecord {
-  final HkTask task;
-  final TaskSt status;
-  final String? doneBy;
-  final DateTime? doneAt;
-  final bool hasPhoto;
-  final String? photoUrl;
-
-  const CourtTaskRecord({
-    required this.task,
-    required this.status,
-    this.doneBy,
-    this.doneAt,
-    this.hasPhoto = false,
-    this.photoUrl,
-  });
+/// Is a shift active *right now* given its configured start/end ("HH:MM")?
+/// Handles overnight shifts (end < start). Missing timings → always active.
+bool hkShiftActiveNow(String? start, String? end, [DateTime? nowOverride]) {
+  final now = nowOverride ?? DateTime.now();
+  final cur = now.hour * 60 + now.minute;
+  final s = hkHhmmToMin(start);
+  final e = hkHhmmToMin(end);
+  if (s == null || e == null) return true;
+  if (s == e) return true; // 24h shift
+  if (s < e) return cur >= s && cur < e;
+  return cur >= s || cur < e; // overnight
 }
 
-// ─── Task Definitions ─────────────────────────────────────────────────────────
+/// "06:00" → "6:00 AM". Falls back to the raw string / "--".
+String hkFmt12(String? hhmm) {
+  final m = hkHhmmToMin(hhmm);
+  if (m == null) return hhmm ?? '--';
+  final h24 = m ~/ 60;
+  final min = m % 60;
+  final ampm = h24 < 12 ? 'AM' : 'PM';
+  var h12 = h24 % 12;
+  if (h12 == 0) h12 = 12;
+  return '$h12:${min.toString().padLeft(2, '0')} $ampm';
+}
 
-const kDailyTasks = [
-  HkTask(
-    id: 'floorclean',
-    title: 'Floor Cleaning',
-    category: TaskCat.cleaning,
-    icon: Icons.cleaning_services_rounded,
-  ),
-  HkTask(
-    id: 'tablechairclean',
-    title: 'Table & Chair Clean',
-    category: TaskCat.cleaning,
-    icon: Icons.chair_rounded,
-  ),
-  HkTask(
-    id: 'binclean',
-    title: 'Bins Cleaning (outside)',
-    category: TaskCat.cleaning,
-    icon: Icons.delete_forever_rounded,
-  ),
-  HkTask(
-    id: 'trayclean',
-    title: 'Tray Cleaning',
-    category: TaskCat.cleaning,
-    icon: Icons.restaurant_rounded,
-  ),
-  HkTask(
-    id: 'binempty',
-    title: 'Garbage Bin Empty',
-    category: TaskCat.cleaning,
-    icon: Icons.delete_outline_rounded,
-  ),
-  HkTask(
-    id: 'pestspray',
-    title: 'Pest Spray',
-    category: TaskCat.pest,
-    icon: Icons.pest_control_rounded,
-  ),
-];
+String hkRange12(String? start, String? end) {
+  if (start == null && end == null) return 'Any time';
+  return '${hkFmt12(start)} – ${hkFmt12(end)}';
+}
 
-const kTasksPerShift = 6;
+/// A sensible icon for a shift based on its start hour.
+IconData hkShiftIcon(String? start) {
+  final m = hkHhmmToMin(start);
+  if (m == null) return Icons.schedule_rounded;
+  final h = m ~/ 60;
+  if (h >= 5 && h < 12) return Icons.wb_sunny_rounded;
+  if (h >= 12 && h < 17) return Icons.light_mode_rounded;
+  if (h >= 17 && h < 21) return Icons.wb_twilight_rounded;
+  return Icons.nights_stay_rounded;
+}
 
-const kFlags = HkTask(
-  id: 'flagswash',
-  title: 'Flags Washing',
-  category: TaskCat.laundry,
-  icon: Icons.flag_rounded,
-  frequency: TaskFreq.weekly,
-);
-
-const kFire = HkTask(
-  id: 'fireaudit',
-  title: 'Fire Safety Audit',
-  category: TaskCat.audit,
-  icon: Icons.fire_extinguisher_rounded,
-  frequency: TaskFreq.monthly,
-);
-
-// ─── Color Helpers ────────────────────────────────────────────────────────────
-
-Color catColor(TaskCat c) => switch (c) {
-  TaskCat.cleaning => const Color(0xFF60A5FA),
-  TaskCat.pest => const Color(0xFFE5A000),
-  TaskCat.laundry => const Color(0xFFA855F7),
-  TaskCat.audit => const Color(0xFFFF4444),
-};
-
-Color stColor(TaskSt s) => switch (s) {
-  TaskSt.done => const Color(0xFF22C55E),
-  TaskSt.pending => const Color(0xFFE5A000),
-  TaskSt.overdue => const Color(0xFFFF4444),
-};
-
-String stLabel(TaskSt s) => switch (s) {
-  TaskSt.done => 'Done',
-  TaskSt.pending => 'Pending',
-  TaskSt.overdue => 'Overdue',
-};
-
-// ─── Submit Request Models ────────────────────────────────────────────────────
+// ─── Submit request models ────────────────────────────────────────────────────
 
 class TaskSubmitItem {
   final String taskId;
@@ -158,14 +151,14 @@ class TaskSubmitItem {
 
 class ShiftSubmitRequest {
   final int courtId;
-  final Shift shift;
+  final String shiftKey; // stable config key (was the Shift enum)
   final String date;
   final List<TaskSubmitItem> tasks;
   final int? submittedBy;
 
   const ShiftSubmitRequest({
     required this.courtId,
-    required this.shift,
+    required this.shiftKey,
     required this.date,
     required this.tasks,
     this.submittedBy,
@@ -173,18 +166,19 @@ class ShiftSubmitRequest {
 
   Map<String, dynamic> toJson() => {
     'court_id': courtId,
-    'shift': shift.name,
+    'shift': shiftKey,
     'date': date,
     'tasks': tasks.map((t) => t.toJson()).toList(),
     'submitted_by': submittedBy,
   };
 }
 
-// ─── API Response Models ──────────────────────────────────────────────────────
+// ─── API response models ──────────────────────────────────────────────────────
 
 class TaskStatusItem {
   final String taskId;
   final String taskTitle;
+  final String? icon; // icon name from config
   final bool isDone;
   final String? photoUrl;
   final DateTime? doneAt;
@@ -193,6 +187,7 @@ class TaskStatusItem {
   const TaskStatusItem({
     required this.taskId,
     required this.taskTitle,
+    this.icon,
     required this.isDone,
     this.photoUrl,
     this.doneAt,
@@ -202,6 +197,7 @@ class TaskStatusItem {
   factory TaskStatusItem.fromJson(Map<String, dynamic> j) => TaskStatusItem(
     taskId: j['task_id'] as String? ?? '',
     taskTitle: j['task_title'] as String? ?? '',
+    icon: j['icon'] as String?,
     isDone: j['is_done'] as bool? ?? false,
     photoUrl: j['photo_url'] as String?,
     doneByName: j['done_by_name'] as String?,
@@ -212,14 +208,20 @@ class TaskStatusItem {
 }
 
 class ShiftStatus {
-  final Shift shift;
+  final String shiftKey; // stable config key
+  final String shiftName; // display name
+  final String? startTime; // "HH:MM"
+  final String? endTime; // "HH:MM"
   final int total;
   final int done;
   final bool submitted;
   final List<TaskStatusItem> tasks;
 
   const ShiftStatus({
-    required this.shift,
+    required this.shiftKey,
+    required this.shiftName,
+    this.startTime,
+    this.endTime,
     required this.total,
     required this.done,
     required this.submitted,
@@ -228,34 +230,43 @@ class ShiftStatus {
 
   double get pct => total == 0 ? 0.0 : done / total;
 
-  factory ShiftStatus.fromJson(Map<String, dynamic> j) => ShiftStatus(
-    shift: Shift.values.firstWhere(
-      (s) =>
-          s.name.toLowerCase() == (j['shift'] as String? ?? '').toLowerCase(),
-      orElse: () => Shift.morning,
-    ),
-    total: j['total'] as int? ?? 0,
-    done: j['done'] as int? ?? 0,
-    submitted: j['submitted'] as bool? ?? false,
-    tasks: (j['tasks'] as List? ?? [])
-        .map((t) => TaskStatusItem.fromJson(t as Map<String, dynamic>))
-        .toList(),
-  );
+  bool get isActiveNow => hkShiftActiveNow(startTime, endTime);
+
+  String get timeRange => hkRange12(startTime, endTime);
+
+  factory ShiftStatus.fromJson(Map<String, dynamic> j) {
+    final key = j['shift'] as String? ?? '';
+    return ShiftStatus(
+      shiftKey: key,
+      shiftName: (j['shift_name'] as String?) ?? key,
+      startTime: j['start_time'] as String?,
+      endTime: j['end_time'] as String?,
+      total: j['total'] as int? ?? 0,
+      done: j['done'] as int? ?? 0,
+      submitted: j['submitted'] as bool? ?? false,
+      tasks: (j['tasks'] as List? ?? [])
+          .map((t) => TaskStatusItem.fromJson(t as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 }
 
 class CourtDayStatus {
   final int courtId;
+  final String courtName;
   final String date;
   final List<ShiftStatus> shifts;
 
   const CourtDayStatus({
     required this.courtId,
+    this.courtName = '',
     required this.date,
     required this.shifts,
   });
 
   factory CourtDayStatus.fromJson(Map<String, dynamic> j) => CourtDayStatus(
     courtId: j['court_id'] as int? ?? 0,
+    courtName: j['court_name'] as String? ?? '',
     date: j['date'] as String? ?? '',
     shifts: (j['shifts'] as List? ?? [])
         .map((s) => ShiftStatus.fromJson(s as Map<String, dynamic>))
@@ -263,18 +274,28 @@ class CourtDayStatus {
   );
 }
 
-// ─── Weekly Task Status ───────────────────────────────────────────────────────
+// ─── Recurring (weekly / monthly) task status ────────────────────────────────
+// Unified model — weekly and monthly have an identical shape, differing only by
+// interval_days (configurable per court).
 
-class WeeklyTaskStatus {
+class RecurringTaskStatus {
   final int courtId;
+  final String taskId;
+  final String title;
+  final String? icon;
+  final int intervalDays;
   final DateTime? lastDoneAt;
   final DateTime? nextDueAt;
   final String? photoUrl;
   final String? doneByName;
   final bool isOverdue;
 
-  const WeeklyTaskStatus({
+  const RecurringTaskStatus({
     required this.courtId,
+    this.taskId = '',
+    this.title = '',
+    this.icon,
+    this.intervalDays = 7,
     this.lastDoneAt,
     this.nextDueAt,
     this.photoUrl,
@@ -282,11 +303,9 @@ class WeeklyTaskStatus {
     required this.isOverdue,
   });
 
-  // ✅ Cooldown active — next_due_at is in future
   bool get isCooldownActive =>
       nextDueAt != null && DateTime.now().isBefore(nextDueAt!);
 
-  // ✅ Days remaining until task is available again
   int get remainingDays {
     if (nextDueAt == null) return 0;
     final diff = nextDueAt!.difference(DateTime.now());
@@ -294,8 +313,15 @@ class WeeklyTaskStatus {
     return diff.inDays + (diff.inHours.remainder(24) > 0 ? 1 : 0);
   }
 
-  factory WeeklyTaskStatus.fromJson(Map<String, dynamic> j) => WeeklyTaskStatus(
+  factory RecurringTaskStatus.fromJson(
+    Map<String, dynamic> j, {
+    int defaultInterval = 7,
+  }) => RecurringTaskStatus(
     courtId: j['court_id'] as int? ?? 0,
+    taskId: j['task_id'] as String? ?? '',
+    title: j['title'] as String? ?? '',
+    icon: j['icon'] as String?,
+    intervalDays: j['interval_days'] as int? ?? defaultInterval,
     lastDoneAt: j['last_done_at'] != null
         ? DateTime.tryParse(j['last_done_at'] as String)
         : null,
@@ -306,61 +332,34 @@ class WeeklyTaskStatus {
     doneByName: j['done_by_name'] as String?,
     isOverdue: j['is_overdue'] as bool? ?? false,
   );
+
+  RecurringTaskStatus copyWith({
+    DateTime? lastDoneAt,
+    DateTime? nextDueAt,
+    String? photoUrl,
+    String? doneByName,
+    bool? isOverdue,
+  }) => RecurringTaskStatus(
+    courtId: courtId,
+    taskId: taskId,
+    title: title,
+    icon: icon,
+    intervalDays: intervalDays,
+    lastDoneAt: lastDoneAt ?? this.lastDoneAt,
+    nextDueAt: nextDueAt ?? this.nextDueAt,
+    photoUrl: photoUrl ?? this.photoUrl,
+    doneByName: doneByName ?? this.doneByName,
+    isOverdue: isOverdue ?? this.isOverdue,
+  );
 }
 
-// ─── Monthly Task Status ──────────────────────────────────────────────────────
-
-class MonthlyTaskStatus {
-  final int courtId;
-  final DateTime? lastDoneAt;
-  final DateTime? nextDueAt;
-  final String? photoUrl;
-  final String? doneByName;
-  final bool isOverdue;
-
-  const MonthlyTaskStatus({
-    required this.courtId,
-    this.lastDoneAt,
-    this.nextDueAt,
-    this.photoUrl,
-    this.doneByName,
-    required this.isOverdue,
-  });
-
-  // ✅ Cooldown active — next_due_at is in future
-  bool get isCooldownActive =>
-      nextDueAt != null && DateTime.now().isBefore(nextDueAt!);
-
-  // ✅ Days remaining until task is available again
-  int get remainingDays {
-    if (nextDueAt == null) return 0;
-    final diff = nextDueAt!.difference(DateTime.now());
-    if (diff.isNegative) return 0;
-    return diff.inDays + (diff.inHours.remainder(24) > 0 ? 1 : 0);
-  }
-
-  factory MonthlyTaskStatus.fromJson(Map<String, dynamic> j) =>
-      MonthlyTaskStatus(
-        courtId: j['court_id'] as int? ?? 0,
-        lastDoneAt: j['last_done_at'] != null
-            ? DateTime.tryParse(j['last_done_at'] as String)
-            : null,
-        nextDueAt: j['next_due_at'] != null
-            ? DateTime.tryParse(j['next_due_at'] as String)
-            : null,
-        photoUrl: j['photo_url'] as String?,
-        doneByName: j['done_by_name'] as String?,
-        isOverdue: j['is_overdue'] as bool? ?? false,
-      );
-}
-
-// ─── Full Status Response ─────────────────────────────────────────────────────
+// ─── Full status response ─────────────────────────────────────────────────────
 
 class FullStatusResponse {
   final String date;
   final List<CourtDayStatus> courts;
-  final List<WeeklyTaskStatus> weeklyTasks;
-  final List<MonthlyTaskStatus> monthlyTasks;
+  final List<RecurringTaskStatus> weeklyTasks;
+  final List<RecurringTaskStatus> monthlyTasks;
 
   const FullStatusResponse({
     required this.date,
@@ -376,10 +375,29 @@ class FullStatusResponse {
             .map((c) => CourtDayStatus.fromJson(c as Map<String, dynamic>))
             .toList(),
         weeklyTasks: (j['weekly_tasks'] as List? ?? [])
-            .map((w) => WeeklyTaskStatus.fromJson(w as Map<String, dynamic>))
+            .map((w) => RecurringTaskStatus.fromJson(
+                  w as Map<String, dynamic>,
+                  defaultInterval: 7,
+                ))
             .toList(),
         monthlyTasks: (j['monthly_tasks'] as List? ?? [])
-            .map((m) => MonthlyTaskStatus.fromJson(m as Map<String, dynamic>))
+            .map((m) => RecurringTaskStatus.fromJson(
+                  m as Map<String, dynamic>,
+                  defaultInterval: 30,
+                ))
             .toList(),
       );
+
+  CourtDayStatus? courtById(int courtId) {
+    for (final c in courts) {
+      if (c.courtId == courtId) return c;
+    }
+    return null;
+  }
+
+  List<RecurringTaskStatus> weeklyFor(int courtId) =>
+      weeklyTasks.where((w) => w.courtId == courtId).toList();
+
+  List<RecurringTaskStatus> monthlyFor(int courtId) =>
+      monthlyTasks.where((m) => m.courtId == courtId).toList();
 }

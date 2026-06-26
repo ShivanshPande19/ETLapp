@@ -1,6 +1,13 @@
 // lib/features/staff/presentation/staff_checklist_screen.dart
+//
+// Config-driven staff checklist (Phase 3b).
+//
+// Shifts (names + timings), daily tasks, and weekly/monthly recurring tasks are
+// all loaded dynamically from the court's configuration. The active shift is
+// auto-selected from the configured timings. Nothing is hardcoded.
 
 import 'dart:io';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,10 +19,7 @@ import '../data/housekeeping_repository.dart';
 import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
 
-// ✅ NEW IMPORT: DB se real court name laane ke liye
-import '../../courts/domain/courts_notifier.dart';
-
-// ✅ Read-only status for a specific (past) date — used by the date browser.
+// Read-only status for a specific (past) date — used by the date browser.
 final _dayStatusProvider = FutureProvider.autoDispose
     .family<hk.FullStatusResponse?, String>((ref, date) async {
       return ref.read(housekeepingRepoProvider).getFullStatus(date: date);
@@ -35,112 +39,40 @@ const _light = Color(0xFFF2F2F2);
 const _success = Color(0xFF22C55E);
 const _warning = Color(0xFFE5A000);
 const _danger = Color(0xFFFF4444);
-const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
 
-// ─── Task definitions ─────────────────────────────────────────────────────────
+// ─── Runtime task descriptor (built from config) ─────────────────────────────
 
 class _TaskDef {
   final String id;
   final String title;
   final IconData icon;
   final Color color;
-  final List<hk.Shift> shifts;
+  final hk.HkTaskKind kind;
   const _TaskDef({
     required this.id,
     required this.title,
     required this.icon,
     required this.color,
-    this.shifts = const [],
+    this.kind = hk.HkTaskKind.daily,
   });
 }
 
-const _kDailyTasks = [
-  _TaskDef(
-    id: 'floorclean',
-    title: 'Floor Cleaning',
-    icon: Icons.cleaning_services_rounded,
-    color: _blue,
-  ),
-  _TaskDef(
-    id: 'tablechairclean',
-    title: 'Table & Chair Clean',
-    icon: Icons.chair_rounded,
-    color: _blue,
-  ),
-  _TaskDef(
-    id: 'binclean',
-    title: 'Bins Cleaning (outside)',
-    icon: Icons.delete_forever_rounded,
-    color: _blue,
-  ),
-  _TaskDef(
-    id: 'trayclean',
-    title: 'Tray Cleaning',
-    icon: Icons.restaurant_rounded,
-    color: _blue,
-  ),
-  _TaskDef(
-    id: 'binempty',
-    title: 'Garbage Bin Empty',
-    icon: Icons.delete_outline_rounded,
-    color: _warning,
-    shifts: [hk.Shift.night],
-  ),
-  _TaskDef(
-    id: 'pestspray',
-    title: 'Pest Spray',
-    icon: Icons.pest_control_rounded,
-    color: _warning,
-    shifts: [hk.Shift.morning, hk.Shift.night],
-  ),
-];
-
-const _kWeeklyTask = _TaskDef(
-  id: 'flagswash',
-  title: 'Flags Washing',
-  icon: Icons.flag_rounded,
-  color: _purple,
+_TaskDef _dailyDef(hk.TaskStatusItem t) => _TaskDef(
+  id: t.taskId,
+  title: t.taskTitle,
+  icon: hk.hkIconFor(t.icon),
+  color: hk.hkAccentFor(t.icon),
+  kind: hk.HkTaskKind.daily,
 );
 
-const _kMonthlyTask = _TaskDef(
-  id: 'fireaudit',
-  title: 'Fire Safety Audit',
-  icon: Icons.fire_extinguisher_rounded,
-  color: _danger,
+_TaskDef _recurDef(hk.RecurringTaskStatus r, hk.HkTaskKind kind) => _TaskDef(
+  id: r.taskId,
+  title: r.title,
+  icon: hk.hkIconFor(r.icon),
+  color: kind == hk.HkTaskKind.weekly ? _purple : _danger,
+  kind: kind,
 );
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _shiftLabel(hk.Shift s) => const {
-  hk.Shift.morning: 'Morning',
-  hk.Shift.day: 'Day',
-  hk.Shift.night: 'Night',
-}[s]!;
-
-IconData _shiftIcon(hk.Shift s) => switch (s) {
-  hk.Shift.morning => Icons.wb_sunny_rounded,
-  hk.Shift.day => Icons.light_mode_rounded,
-  hk.Shift.night => Icons.nights_stay_rounded,
-};
-
-bool _isShiftTimeActive(hk.Shift shift) {
-  final h = TimeOfDay.now().hour;
-  switch (shift) {
-    case hk.Shift.morning:
-      return h >= 6 && h < 12;
-    case hk.Shift.day:
-      return h >= 12 && h < 16;
-    case hk.Shift.night:
-      return h >= 16 && h < 24;
-  }
-}
-
-String _shiftTimeRange(hk.Shift shift) => const {
-  hk.Shift.morning: '6:00 AM – 12:00 PM',
-  hk.Shift.day: '12:00 PM – 4:00 PM',
-  hk.Shift.night: '4:00 PM – 12:00 AM',
-}[shift]!;
 
 // ─── Date helpers (date browser) ──────────────────────────────────────────────
 
@@ -180,7 +112,6 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
 
-  // ✅ Date browser — defaults to today; can navigate to past dates (read-only).
   DateTime _selectedDate = DateTime.now();
 
   bool get _isToday => _isSameDay(_selectedDate, DateTime.now());
@@ -205,13 +136,9 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     super.dispose();
   }
 
-  List<_TaskDef> _tasksForShift(hk.Shift shift) => _kDailyTasks
-      .where((t) => t.shifts.isEmpty || t.shifts.contains(shift))
-      .toList();
-
   // ── Shift not active dialog ───────────────────────────────────────────────
 
-  void _showShiftNotActiveDialog(hk.Shift shift) {
+  void _showShiftNotActiveDialog(String shiftName, String range) {
     showDialog(
       context: context,
       useRootNavigator: true,
@@ -255,7 +182,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
               ),
               const SizedBox(height: 10),
               Text(
-                '${_shiftLabel(shift)} shift tasks can only be\ncompleted during its active hours.',
+                '$shiftName shift tasks can only be\ncompleted during its active hours.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   fontSize: 13,
@@ -284,7 +211,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '${_shiftLabel(shift)}  •  ${_shiftTimeRange(shift)}',
+                      '$shiftName  •  $range',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -323,12 +250,13 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     );
   }
 
-  // ✅ NEW: Cooldown dialog for weekly/monthly tasks ─────────────────────────
+  // ── Cooldown dialog for weekly/monthly tasks ──────────────────────────────
 
   void _showCooldownDialog({
     required String taskTitle,
     required int remainingDays,
     required bool isWeekly,
+    required int intervalDays,
   }) {
     showDialog(
       context: context,
@@ -347,7 +275,6 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ── Countdown ring ───────────────────────────────────────
               Container(
                 width: 72,
                 height: 72,
@@ -418,9 +345,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        isWeekly
-                            ? 'Weekly tasks reset every 7 days after completion.'
-                            : 'Monthly tasks reset every 30 days after completion.',
+                        '${isWeekly ? 'Weekly' : 'Monthly'} tasks reset every $intervalDays days after completion.',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: _grey,
@@ -464,44 +389,37 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
   Future<void> _handleTaskTap(_TaskDef task) async {
     final hkState = ref.read(housekeepingNotifierProvider);
-    if (hkState.isTaskLoading(task.id)) return;
 
     HapticFeedback.mediumImpact();
 
-    // ✅ Weekly cooldown check
-    if (task.id == 'flagswash' && hkState.isWeeklyCooldown) {
-      _showCooldownDialog(
-        taskTitle: task.title,
-        remainingDays: hkState.weeklyRemainingDays,
-        isWeekly: true,
-      );
-      return;
-    }
-
-    // ✅ Monthly cooldown check
-    if (task.id == 'fireaudit' && hkState.isMonthlyCooldown) {
-      _showCooldownDialog(
-        taskTitle: task.title,
-        remainingDays: hkState.monthlyRemainingDays,
-        isWeekly: false,
-      );
-      return;
-    }
-
-    // Already locked (daily task already done)
-    if (hkState.isTaskLocked(task.id)) return;
-
-    if (!_isShiftTimeActive(hkState.shift)) {
-      _showShiftNotActiveDialog(hkState.shift);
-      return;
+    // Recurring (weekly/monthly) — cooldown gated, no shift-hours requirement.
+    if (task.kind != hk.HkTaskKind.daily) {
+      if (hkState.isRecurringLoading(task.id)) return;
+      final r = hkState.recurringById(task.id);
+      if (r != null && r.isCooldownActive) {
+        _showCooldownDialog(
+          taskTitle: task.title,
+          remainingDays: r.remainingDays,
+          isWeekly: task.kind == hk.HkTaskKind.weekly,
+          intervalDays: r.intervalDays,
+        );
+        return;
+      }
+    } else {
+      if (hkState.isTaskLoading(task.id)) return;
+      if (hkState.isTaskLocked(task.id)) return;
+      if (!hkState.currentShiftActive) {
+        final s = hkState.currentShift;
+        _showShiftNotActiveDialog(s?.shiftName ?? 'This', s?.timeRange ?? '');
+        return;
+      }
     }
 
     final proceed = await _showPhotoSourceSheet(task);
     if (proceed != ImageSource.camera || !mounted) return;
 
     final picker = ImagePicker();
-    // Camera ONLY — gallery is intentionally disabled so staff cannot submit
-    // old/fake photos. Every proof is a live capture, watermarked on upload.
+    // Camera ONLY — gallery disabled so staff cannot submit old/fake photos.
     final xFile = await picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 85,
@@ -515,7 +433,12 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
     final ok = await ref
         .read(housekeepingNotifierProvider.notifier)
-        .confirmTask(taskId: task.id, taskTitle: task.title, photo: photo);
+        .confirmTask(
+          taskId: task.id,
+          taskTitle: task.title,
+          photo: photo,
+          kind: task.kind,
+        );
 
     if (!mounted) return;
 
@@ -525,7 +448,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     } else {
       HapticFeedback.lightImpact();
       final err = ref.read(housekeepingNotifierProvider).error;
-      _showErrorSnackbar(err ?? 'Upload failed. Try again.');
+      if (err != null) _showErrorSnackbar(err);
     }
   }
 
@@ -620,13 +543,10 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     );
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   // ── Date browser controls ──────────────────────────────────────────────────
 
   void _changeDate(int deltaDays) {
     final next = _selectedDate.add(Duration(days: deltaDays));
-    // Block navigation into the future.
     if (next.isAfter(DateTime.now())) return;
     HapticFeedback.selectionClick();
     setState(() => _selectedDate = next);
@@ -664,12 +584,11 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
   // ── Read-only history list (for past dates) ────────────────────────────────
 
-  Widget _buildHistoryList(hk.Shift shift, double bottomPad) {
+  Widget _buildHistoryList(String? shiftKey, double bottomPad) {
     final hkState = ref.watch(housekeepingNotifierProvider);
     final courtId = hkState.courtId;
     final dateStr = _ymd(_selectedDate);
     final async = ref.watch(_dayStatusProvider(dateStr));
-    final dailyTasks = _tasksForShift(shift);
 
     return async.when(
       loading: () => const SkeletonList(
@@ -678,33 +597,32 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
         tileHeight: 64,
         padding: EdgeInsets.fromLTRB(20, 18, 20, 20),
       ),
-      error: (_, __) => _HistoryMessage(
+      error: (_, __) => const _HistoryMessage(
         icon: Icons.wifi_off_rounded,
         title: 'Could not load',
         subtitle: 'Switch dates and try again.',
       ),
       data: (status) {
-        // Map taskId -> status item for this court + shift + date.
-        final Map<String, hk.TaskStatusItem> items = {};
+        // Find this court + shift for the selected date.
+        hk.ShiftStatus? sh;
         if (status != null && courtId != null) {
-          for (final court in status.courts) {
-            if (court.courtId != courtId) continue;
-            for (final sh in court.shifts) {
-              if (sh.shift != shift) continue;
-              for (final t in sh.tasks) {
-                items[t.taskId] = t;
-              }
-            }
-          }
+          final court = status.courtById(courtId);
+          sh = court?.shifts.firstWhereOrNull((s) => s.shiftKey == shiftKey);
         }
+        final tasks = sh?.tasks ?? const <hk.TaskStatusItem>[];
+        final doneCount = tasks.where((t) => t.isDone).length;
 
-        final doneCount =
-            dailyTasks.where((t) => items[t.id]?.isDone == true).length;
+        if (tasks.isEmpty) {
+          return const _HistoryMessage(
+            icon: Icons.event_busy_rounded,
+            title: 'No records',
+            subtitle: 'No checklist data for this day.',
+          );
+        }
 
         return ListView(
           padding: EdgeInsets.fromLTRB(20, 18, 20, bottomPad),
           children: [
-            // Summary banner
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
@@ -727,30 +645,26 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                     ),
                   ),
                   Text(
-                    '$doneCount / ${dailyTasks.length}',
+                    '$doneCount / ${tasks.length}',
                     style: GoogleFonts.inter(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w800,
-                      color: doneCount == dailyTasks.length
-                          ? _success
-                          : _black,
+                      color: doneCount == tasks.length ? _success : _black,
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-
-            ...dailyTasks.asMap().entries.map((e) {
-              final item = items[e.value.id];
+            ...tasks.map((t) {
+              final def = _dailyDef(t);
               return _HistoryTaskTile(
-                taskDef: e.value,
-                isDone: item?.isDone == true,
-                photoUrl: item?.photoUrl,
-                doneByName: item?.doneByName,
+                taskDef: def,
+                isDone: t.isDone,
+                photoUrl: t.photoUrl,
+                doneByName: t.doneByName,
               );
             }),
-
             const SizedBox(height: 8),
             Center(
               child: Text(
@@ -767,28 +681,39 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
   @override
   Widget build(BuildContext context) {
     final hkState = ref.watch(housekeepingNotifierProvider);
-    final courtsAsync = ref.watch(courtsNotifierProvider);
-
-    final shift = hkState.shift;
-    final dailyTasks = _tasksForShift(shift);
-    final totalVisible = dailyTasks.length + 2;
-    final doneCount = hkState.lockedDoneCount;
-
-    // ✅ FIX: Dynamic Court Name Fetching
-    String courtLabel = 'Unassigned Court';
-    if (hkState.courtId != null) {
-      courtLabel = 'Court ${hkState.courtId}'; // Fallback
-      courtsAsync.whenData((courts) {
-        final match = courts.where((c) => c.id == hkState.courtId);
-        if (match.isNotEmpty) {
-          courtLabel = match.first.name;
-        }
-      });
-    }
 
     final navBarClearance = MediaQuery.of(context).padding.bottom + 92.0;
-    final shiftActive = _isShiftTimeActive(shift);
     final isToday = _isToday;
+
+    if (!hkState.isInitialized) {
+      return const Scaffold(
+        backgroundColor: _bg,
+        body: Center(
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child: CircularProgressIndicator(strokeWidth: 2.4, color: _white),
+          ),
+        ),
+      );
+    }
+
+    final shifts = hkState.shifts;
+    final hasShifts = shifts.isNotEmpty;
+    final currentShift = hkState.currentShift;
+    final shiftActive = currentShift?.isActiveNow ?? false;
+
+    final dailyTasks =
+        currentShift?.tasks.map(_dailyDef).toList() ?? const <_TaskDef>[];
+    final recurringCount = hkState.weekly.length + hkState.monthly.length;
+    final totalVisible = dailyTasks.length + recurringCount;
+    final doneCount = hkState.lockedDoneCount;
+
+    final courtLabel = hkState.courtName.isNotEmpty
+        ? hkState.courtName
+        : (hkState.courtId != null
+              ? 'Court ${hkState.courtId}'
+              : 'Unassigned Court');
 
     return Scaffold(
       backgroundColor: _bg,
@@ -868,70 +793,18 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
 
                     const SizedBox(height: 16),
 
-                    // ── Shift selector tabs ──────────────────────────
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF111111),
-                        borderRadius: BorderRadius.circular(12),
+                    // ── Dynamic shift selector ───────────────────────
+                    if (hasShifts)
+                      _ShiftSelector(
+                        shifts: shifts,
+                        currentKey: hkState.currentShiftKey,
+                        onSelect: (key) {
+                          HapticFeedback.selectionClick();
+                          ref
+                              .read(housekeepingNotifierProvider.notifier)
+                              .changeShift(key);
+                        },
                       ),
-                      child: Row(
-                        children: hk.Shift.values.map((s) {
-                          final selected = shift == s;
-                          final isActive = _isShiftTimeActive(s);
-                          return Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                ref
-                                    .read(housekeepingNotifierProvider.notifier)
-                                    .changeShift(s);
-                              },
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: selected ? _white : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(9),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      _shiftIcon(s),
-                                      size: 13,
-                                      color: selected ? _black : _grey,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      _shiftLabel(s),
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: selected ? _black : _grey,
-                                      ),
-                                    ),
-                                    if (!isActive) ...[
-                                      const SizedBox(width: 4),
-                                      Container(
-                                        width: 5,
-                                        height: 5,
-                                        decoration: BoxDecoration(
-                                          color: selected ? _danger : _faint,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
 
                     // ── Date browser ─────────────────────────────────
                     const SizedBox(height: 10),
@@ -945,7 +818,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                     ),
 
                     // ── Inactive warning banner (today only) ──────────
-                    if (isToday && !shiftActive) ...[
+                    if (isToday && hasShifts && !shiftActive) ...[
                       const SizedBox(height: 10),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -967,7 +840,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '${_shiftLabel(shift)} shift is not active  •  ${_shiftTimeRange(shift)}',
+                                '${currentShift?.shiftName ?? ''} shift is not active  •  ${currentShift?.timeRange ?? ''}',
                                 style: GoogleFonts.inter(
                                   fontSize: 11,
                                   color: _danger,
@@ -994,119 +867,248 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                       top: Radius.circular(28),
                     ),
                   ),
-                  child: isToday
-                      ? ListView(
-                    padding: EdgeInsets.fromLTRB(20, 20, 20, navBarClearance),
-                    children: [
-                      // Daily tasks
-                      ...dailyTasks.asMap().entries.map(
-                        (e) => _TaskTile(
-                          key: ValueKey('${shift.name}_${e.value.id}'),
-                          taskDef: e.value,
-                          index: e.key,
-                          isDone: hkState.isTaskDone(e.value.id),
-                          isLocked: hkState.isTaskLocked(e.value.id),
-                          isLoading: hkState.isTaskLoading(e.value.id),
-                          photo: hkState.taskPhoto(e.value.id),
-                          photoUrl: hkState.taskPhotoUrl(e.value.id),
-                          isShiftActive: shiftActive,
-                          cooldownDays: 0, // daily tasks have no cooldown
-                          doneByName: hkState.taskDoneBy(e.value.id),
-                          onTap: () => _handleTaskTap(e.value),
+                  child: !hasShifts
+                      ? const _HistoryMessage(
+                          icon: Icons.checklist_rtl_rounded,
+                          title: 'No checklist yet',
+                          subtitle:
+                              'This court has no housekeeping checklist configured.',
+                        )
+                      : isToday
+                      ? _buildTodayList(hkState, dailyTasks, navBarClearance)
+                      : _buildHistoryList(
+                          hkState.currentShiftKey,
+                          navBarClearance,
                         ),
-                      ),
-
-                      // Weekly
-                      const SizedBox(height: 4),
-                      const _SectionDivider(label: 'Weekly Task'),
-                      const SizedBox(height: 8),
-                      _TaskTile(
-                        key: ValueKey('${shift.name}_${_kWeeklyTask.id}'),
-                        taskDef: _kWeeklyTask,
-                        index: dailyTasks.length,
-                        isDone: hkState.isTaskDone(_kWeeklyTask.id),
-                        isLocked: hkState.isTaskLocked(_kWeeklyTask.id),
-                        isLoading: hkState.isTaskLoading(_kWeeklyTask.id),
-                        photo: hkState.taskPhoto(_kWeeklyTask.id),
-                        photoUrl: hkState.taskPhotoUrl(_kWeeklyTask.id),
-                        isShiftActive: shiftActive,
-                        cooldownDays: hkState.weeklyRemainingDays, // ✅
-                        doneByName: hkState.taskDoneBy(_kWeeklyTask.id),
-                        onTap: () => _handleTaskTap(_kWeeklyTask),
-                      ),
-
-                      // Monthly
-                      const SizedBox(height: 4),
-                      const _SectionDivider(label: 'Monthly Task'),
-                      const SizedBox(height: 8),
-                      _TaskTile(
-                        key: ValueKey('${shift.name}_${_kMonthlyTask.id}'),
-                        taskDef: _kMonthlyTask,
-                        index: dailyTasks.length + 1,
-                        isDone: hkState.isTaskDone(_kMonthlyTask.id),
-                        isLocked: hkState.isTaskLocked(_kMonthlyTask.id),
-                        isLoading: hkState.isTaskLoading(_kMonthlyTask.id),
-                        photo: hkState.taskPhoto(_kMonthlyTask.id),
-                        photoUrl: hkState.taskPhotoUrl(_kMonthlyTask.id),
-                        isShiftActive: shiftActive,
-                        cooldownDays: hkState.monthlyRemainingDays, // ✅
-                        doneByName: hkState.taskDoneBy(_kMonthlyTask.id),
-                        onTap: () => _handleTaskTap(_kMonthlyTask),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Error banner
-                      if (hkState.error != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _danger.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: _danger.withOpacity(0.2)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.error_outline_rounded,
-                                size: 16,
-                                color: _danger,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  hkState.error!,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    color: _danger,
-                                  ),
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => ref
-                                    .read(housekeepingNotifierProvider.notifier)
-                                    .clearError(),
-                                child: const Icon(
-                                  Icons.close_rounded,
-                                  size: 16,
-                                  color: _danger,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                      )
-                    : _buildHistoryList(shift, navBarClearance),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTodayList(
+    HousekeepingState hkState,
+    List<_TaskDef> dailyTasks,
+    double navBarClearance,
+  ) {
+    final shiftActive = hkState.currentShiftActive;
+
+    return ListView(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, navBarClearance),
+      children: [
+        // Daily tasks
+        ...dailyTasks.asMap().entries.map(
+          (e) => _TaskTile(
+            key: ValueKey('${hkState.currentShiftKey}_${e.value.id}'),
+            taskDef: e.value,
+            index: e.key,
+            isDone: hkState.isTaskDone(e.value.id),
+            isLocked: hkState.isTaskLocked(e.value.id),
+            isLoading: hkState.isTaskLoading(e.value.id),
+            photo: hkState.taskPhoto(e.value.id),
+            photoUrl: hkState.taskPhotoUrl(e.value.id),
+            isShiftActive: shiftActive,
+            cooldownDays: 0,
+            doneByName: hkState.taskDoneBy(e.value.id),
+            onTap: () => _handleTaskTap(e.value),
+          ),
+        ),
+
+        // Weekly tasks (dynamic, multiple)
+        if (hkState.weekly.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          const _SectionDivider(label: 'Weekly Tasks'),
+          const SizedBox(height: 8),
+          ...hkState.weekly.asMap().entries.map((e) {
+            final r = e.value;
+            final def = _recurDef(r, hk.HkTaskKind.weekly);
+            final cd = r.remainingDays;
+            return _TaskTile(
+              key: ValueKey('weekly_${r.taskId}'),
+              taskDef: def,
+              index: dailyTasks.length + e.key,
+              isDone: cd > 0,
+              isLocked: false,
+              isLoading: hkState.isRecurringLoading(r.taskId),
+              photo: null,
+              photoUrl: r.photoUrl,
+              isShiftActive: true,
+              cooldownDays: cd,
+              doneByName: r.doneByName,
+              onTap: () => _handleTaskTap(def),
+            );
+          }),
+        ],
+
+        // Monthly tasks (dynamic, multiple)
+        if (hkState.monthly.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          const _SectionDivider(label: 'Monthly Tasks'),
+          const SizedBox(height: 8),
+          ...hkState.monthly.asMap().entries.map((e) {
+            final r = e.value;
+            final def = _recurDef(r, hk.HkTaskKind.monthly);
+            final cd = r.remainingDays;
+            return _TaskTile(
+              key: ValueKey('monthly_${r.taskId}'),
+              taskDef: def,
+              index: dailyTasks.length + hkState.weekly.length + e.key,
+              isDone: cd > 0,
+              isLocked: false,
+              isLoading: hkState.isRecurringLoading(r.taskId),
+              photo: null,
+              photoUrl: r.photoUrl,
+              isShiftActive: true,
+              cooldownDays: cd,
+              doneByName: r.doneByName,
+              onTap: () => _handleTaskTap(def),
+            );
+          }),
+        ],
+
+        const SizedBox(height: 16),
+
+        if (hkState.error != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _danger.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _danger.withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  size: 16,
+                  color: _danger,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    hkState.error!,
+                    style: GoogleFonts.inter(fontSize: 13, color: _danger),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => ref
+                      .read(housekeepingNotifierProvider.notifier)
+                      .clearError(),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: _danger,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ─── Dynamic shift selector ──────────────────────────────────────────────────
+
+class _ShiftSelector extends StatelessWidget {
+  final List<hk.ShiftStatus> shifts;
+  final String? currentKey;
+  final ValueChanged<String> onSelect;
+
+  const _ShiftSelector({
+    required this.shifts,
+    required this.currentKey,
+    required this.onSelect,
+  });
+
+  Widget _tab(hk.ShiftStatus s, {required bool expanded}) {
+    final selected = s.shiftKey == currentKey;
+    final isActive = s.isActiveNow;
+    final child = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: EdgeInsets.symmetric(
+        vertical: 8,
+        horizontal: expanded ? 0 : 16,
+      ),
+      decoration: BoxDecoration(
+        color: selected ? _white : Colors.transparent,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            hk.hkShiftIcon(s.startTime),
+            size: 13,
+            color: selected ? _black : _grey,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              s.shiftName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected ? _black : _grey,
+              ),
+            ),
+          ),
+          if (!isActive) ...[
+            const SizedBox(width: 4),
+            Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(
+                color: selected ? _danger : _faint,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return GestureDetector(
+      onTap: () => onSelect(s.shiftKey),
+      behavior: HitTestBehavior.opaque,
+      child: child,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final useExpanded = shifts.length <= 3;
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: useExpanded
+          ? Row(
+              children: shifts
+                  .map((s) => Expanded(child: _tab(s, expanded: true)))
+                  .toList(),
+            )
+          : SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: shifts
+                    .map(
+                      (s) => Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: _tab(s, expanded: false),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
     );
   }
 }
@@ -1122,7 +1124,7 @@ class _TaskTile extends StatefulWidget {
   final File? photo;
   final String? photoUrl;
   final bool isShiftActive;
-  final int cooldownDays; // ✅ 0 = no cooldown, >0 = locked with countdown
+  final int cooldownDays; // 0 = no cooldown, >0 = locked with countdown
   final String? doneByName;
   final VoidCallback onTap;
 
@@ -1249,10 +1251,9 @@ class _TaskTileState extends State<_TaskTile>
   Widget build(BuildContext context) {
     final locked = widget.isLocked;
     final loading = widget.isLoading;
-    final onCooldown = widget.cooldownDays > 0; // ✅
+    final onCooldown = widget.cooldownDays > 0;
     final dimmed = !widget.isShiftActive && !locked && !onCooldown;
 
-    // ── Tile appearance ────────────────────────────────────────────────────
     final Color tileBg;
     final Color tileBorder;
     final Color iconBg;
@@ -1262,7 +1263,6 @@ class _TaskTileState extends State<_TaskTile>
     final Widget rightWidget;
 
     if (onCooldown) {
-      // ✅ Cooldown state — warning orange tint
       tileBg = _warning.withOpacity(0.06);
       tileBorder = _warning.withOpacity(0.22);
       iconBg = _warning.withOpacity(0.10);
@@ -1287,18 +1287,17 @@ class _TaskTileState extends State<_TaskTile>
         ),
       );
     } else if (locked) {
-      // Done & locked
       tileBg = _success.withOpacity(0.06);
       tileBorder = _success.withOpacity(0.25);
       iconBg = _success.withOpacity(0.12);
       iconColor = _success;
       titleColor = _success;
-      subtitle = (widget.doneByName != null && widget.doneByName!.trim().isNotEmpty)
+      subtitle =
+          (widget.doneByName != null && widget.doneByName!.trim().isNotEmpty)
           ? 'By ${widget.doneByName} · Saved ✓'
           : 'Saved ✓ — cannot be undone';
       rightWidget = _buildThumbnail();
     } else if (dimmed) {
-      // Outside shift hours
       tileBg = _light.withOpacity(0.5);
       tileBorder = _black.withOpacity(0.03);
       iconBg = widget.taskDef.color.withOpacity(0.05);
@@ -1311,7 +1310,6 @@ class _TaskTileState extends State<_TaskTile>
         color: _faint,
       );
     } else {
-      // Normal/available
       tileBg = _light;
       tileBorder = _black.withOpacity(0.06);
       iconBg = widget.taskDef.color.withOpacity(0.10);
@@ -1368,7 +1366,6 @@ class _TaskTileState extends State<_TaskTile>
             ),
             child: Row(
               children: [
-                // Left icon box
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   width: 38,
@@ -1395,10 +1392,7 @@ class _TaskTileState extends State<_TaskTile>
                           color: iconColor,
                         ),
                 ),
-
                 const SizedBox(width: 12),
-
-                // Title + subtitle
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1428,10 +1422,7 @@ class _TaskTileState extends State<_TaskTile>
                     ],
                   ),
                 ),
-
                 const SizedBox(width: 10),
-
-                // Right widget
                 rightWidget,
               ],
             ),
@@ -1446,7 +1437,7 @@ class _TaskTileState extends State<_TaskTile>
 
 class _PhotoPickerSheet extends StatefulWidget {
   final _TaskDef task;
-  const _PhotoPickerSheet({super.key, required this.task});
+  const _PhotoPickerSheet({required this.task});
 
   @override
   State<_PhotoPickerSheet> createState() => _PhotoPickerSheetState();
@@ -1924,7 +1915,6 @@ class _SectionDivider extends StatelessWidget {
   }
 }
 
-
 // ─── Date Nav Bar ─────────────────────────────────────────────────────────────
 
 class _DateNavBar extends StatelessWidget {
@@ -2072,7 +2062,10 @@ class _HistoryTaskTile extends StatelessWidget {
               height: 38,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: _success.withOpacity(0.3), width: 1.5),
+                border: Border.all(
+                  color: _success.withOpacity(0.3),
+                  width: 1.5,
+                ),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -2109,9 +2102,7 @@ class _HistoryTaskTile extends StatelessWidget {
       );
     } else {
       right = Icon(
-        isDone
-            ? Icons.verified_rounded
-            : Icons.remove_circle_outline_rounded,
+        isDone ? Icons.verified_rounded : Icons.remove_circle_outline_rounded,
         size: 18,
         color: isDone ? _success : _faint,
       );
@@ -2194,7 +2185,7 @@ class _HistoryMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 80),
+      padding: const EdgeInsets.only(top: 80, left: 32, right: 32),
       child: Column(
         children: [
           Icon(icon, size: 40, color: _grey),
@@ -2218,7 +2209,6 @@ class _HistoryMessage extends StatelessWidget {
     );
   }
 }
-
 
 // ─── Full-screen Photo Viewer (staff) ────────────────────────────────────────
 

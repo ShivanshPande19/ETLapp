@@ -16,11 +16,13 @@ class ShiftPillData {
   final String label;
   final int done;
   final int total;
+  final bool isActive;
 
   const ShiftPillData({
     required this.label,
     required this.done,
     required this.total,
+    this.isActive = false,
   });
 
   double get pct => total == 0 ? 0.0 : done / total;
@@ -29,22 +31,13 @@ class ShiftPillData {
 
 class CourtHkRow {
   final String courtName;
-  final ShiftPillData morning;
-  final ShiftPillData day;
-  final ShiftPillData night;
+  final List<ShiftPillData> shifts;
 
   const CourtHkRow({
     required this.courtName,
-    required this.morning,
-    required this.day,
-    required this.night,
+    required this.shifts,
   });
 }
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-ShiftPillData _emptyPill(String label) =>
-    ShiftPillData(label: label, done: 0, total: 0);
 
 // ─── Revenue Card — Yesterday, All Courts ─────────────────────────────────────
 
@@ -113,34 +106,20 @@ final homeHousekeepingProvider = FutureProvider.autoDispose<List<CourtHkRow>>((
     return status.courts
         .where((court) => courtNames.containsKey(court.courtId))
         .map((court) {
-          ShiftPillData morning = _emptyPill('M');
-          ShiftPillData day = _emptyPill('D');
-          ShiftPillData night = _emptyPill('N');
-
-          for (final s in court.shifts) {
-            final pill = ShiftPillData(
-              label: s.shift == Shift.morning
-                  ? 'M'
-                  : s.shift == Shift.day
-                  ? 'D'
-                  : 'N',
-              done: s.done,
-              total: s.total,
-            );
-            if (s.shift == Shift.morning) {
-              morning = pill;
-            } else if (s.shift == Shift.day) {
-              day = pill;
-            } else {
-              night = pill;
-            }
-          }
+          final shifts = court.shifts
+              .map(
+                (s) => ShiftPillData(
+                  label: s.shiftName,
+                  done: s.done,
+                  total: s.total,
+                  isActive: s.isActiveNow,
+                ),
+              )
+              .toList();
 
           return CourtHkRow(
             courtName: courtNames[court.courtId]!,
-            morning: morning,
-            day: day,
-            night: night,
+            shifts: shifts,
           );
         })
         .toList();

@@ -71,17 +71,12 @@ final _courtHkProvider = FutureProvider.autoDispose.family<List<_HkShift>, int>(
       final court = status.courts.where((c) => c.courtId == id).toList();
       if (court.isEmpty) return [];
       return court.first.shifts.map((s) {
-        final label = s.shift == Shift.morning
-            ? 'Morning'
-            : s.shift == Shift.day
-            ? 'Day'
-            : 'Night';
-        final time = s.shift == Shift.morning
-            ? '6 AM – 12 PM'
-            : s.shift == Shift.day
-            ? '12 PM – 4 PM'
-            : '4 PM – 11 PM';
-        return _HkShift(label: label, time: time, done: s.done, total: s.total);
+        return _HkShift(
+          label: s.shiftName,
+          time: s.timeRange,
+          done: s.done,
+          total: s.total,
+        );
       }).toList();
     } catch (_) {
       return [];
