@@ -1,8 +1,10 @@
 # app/services/scheduler_service.py
+import asyncio
 from datetime import date, datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
+from ..core.query_utils import now_ist
 from .petpooja_service import sync_all_active_outlets_by_fetch_date
 
 scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
@@ -11,10 +13,15 @@ VERIFICATION_WINDOW_HOURS = 24
 
 
 async def run_sync_job():
-    """Daily Petpooja deep sync."""
+    """Petpooja deep sync. Fetches a 3-day window ending on the IST date so the
+    just-ended business day (incl. its post-midnight bills, which Petpooja files
+    under the next calendar date) is captured completely."""
     db: Session = SessionLocal()
     try:
-        fetch_for_date = date.today()
+        # IST date, not the server's UTC date — at 3 AM IST the UTC date is
+        # still "yesterday", which would shrink the window and drop the
+        # after-midnight bills that belong to the business day being finalized.
+        fetch_for_date = now_ist().date()
         print(f"[AUTO SYNC] Starting Deep Sync for: {fetch_for_date}")
         result = await sync_all_active_outlets_by_fetch_date(
             db=db, fetch_for_date=fetch_for_date, force_refresh=True
@@ -181,7 +188,7 @@ def start_scheduler():
 
     scheduler.add_job(
         run_sync_job,
-        trigger="cron", hour=3, minute=0,
+        trigger="cron", hour="3,13,19", minute=0,
         id="daily_deep_sync", replace_existing=True,
         max_instances=1, coalesce=True,
     )
@@ -203,7 +210,20 @@ def start_scheduler():
     )
 
     scheduler.start()
-    print("[SCHEDULER] Started | Deep Sync 3:00 AM | Auto-close hourly")
+
+    # Immediate one-off sync on boot/redeploy so fresh data doesn't wait until
+    # the next cron tick. Runs on the already-running event loop (this is called
+    # from the async lifespan), non-blocking. Today's (in-progress) sales are
+    # never displayed — every sales range ends at "yesterday" — so this is safe.
+    try:
+        asyncio.get_running_loop().create_task(run_sync_job())
+        print("[SCHEDULER] Boot sync scheduled ✓")
+    except RuntimeError:
+        # No running loop (e.g. called outside async context) — skip; the cron
+        # jobs will still run on schedule.
+        pass
+
+    print("[SCHEDULER] Started | Deep Sync 3AM/1PM/7PM IST | Auto-close hourly")
 
 
 def stop_scheduler():

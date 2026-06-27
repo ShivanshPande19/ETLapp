@@ -3,6 +3,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from ..core.query_utils import now_ist
 from ..models.sale import Outlet, DailySaleCache
 from ..schemas.sale import (
     SalesSummaryResponse,
@@ -13,7 +14,10 @@ from ..schemas.sale import (
 
 
 def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str]) -> tuple[date, date]:
-    today = date.today()
+    # Use IST "today" (not the server's UTC date) so "yesterday"/week/month
+    # line up with the business day. The rest of the app (attendance, court
+    # cutoff, the Petpooja 4 AM buffer) is all IST-based; sales must match.
+    today = now_ist().date()
     yesterday = today - timedelta(days=1)
 
     clean_period = period.lower().replace("this_", "")
@@ -129,7 +133,7 @@ async def get_vendor_history(
     if not outlet:
         raise ValueError("Outlet not found")
 
-    today = date.today()
+    today = now_ist().date()
     history = []
 
     for i in range(7, 0, -1):
