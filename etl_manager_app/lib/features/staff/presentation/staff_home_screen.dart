@@ -10,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:collection/collection.dart';
+
 import '../../staff/domain/housekeeping_models.dart' as hk;
 import '../../staff/data/housekeeping_repository.dart';
 import '../domain/attendance_notifier.dart';
@@ -125,13 +127,6 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
   }
 
   String get _dateStr => _now.toIso8601String().substring(0, 10);
-
-  hk.Shift get _currentShift {
-    final h = _now.hour;
-    if (h >= 6 && h < 12) return hk.Shift.morning;
-    if (h >= 12 && h < 16) return hk.Shift.day;
-    return hk.Shift.night;
-  }
 
   Future<void> _refreshAll() async {
     HapticFeedback.mediumImpact();
@@ -561,7 +556,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                         // 1) Attendance hub
                         _SectionLabel(
                           title: "Today's Shift",
-                          trailing: _ShiftClock(shift: _currentShift, now: _now),
+                          trailing: _ShiftClock(now: _now),
                         ),
                         const SizedBox(height: 12),
                         _StaggerRow(
@@ -585,7 +580,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                             data: (data) {
                               final shiftData = _resolveShift(data);
                               return _HousekeepingCard(
-                                shift: _currentShift,
+                                shiftName: shiftData.shiftName,
                                 courtName: realCourtName,
                                 done: shiftData.done,
                                 total: shiftData.total == 0
@@ -634,33 +629,19 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
   }
 
   hk.ShiftStatus _resolveShift(hk.FullStatusResponse? data) {
-    if (data == null) {
-      return hk.ShiftStatus(
-        shift: _currentShift,
-        total: hk.kTasksPerShift,
-        done: 0,
-        submitted: false,
-        tasks: const [],
-      );
-    }
-    final courtData = data.courts.firstWhere(
-      (c) => c.courtId == widget.assignedCourt,
-      orElse: () => hk.CourtDayStatus(
-        courtId: widget.assignedCourt,
-        date: _dateStr,
-        shifts: const [],
-      ),
+    const empty = hk.ShiftStatus(
+      shiftKey: '',
+      shiftName: 'Shift',
+      total: 0,
+      done: 0,
+      submitted: false,
+      tasks: [],
     );
-    return courtData.shifts.firstWhere(
-      (s) => s.shift == _currentShift,
-      orElse: () => hk.ShiftStatus(
-        shift: _currentShift,
-        total: hk.kTasksPerShift,
-        done: 0,
-        submitted: false,
-        tasks: const [],
-      ),
-    );
+    if (data == null) return empty;
+    final court = data.courtById(widget.assignedCourt);
+    if (court == null || court.shifts.isEmpty) return empty;
+    final active = court.shifts.firstWhereOrNull((s) => s.isActiveNow);
+    return active ?? court.shifts.first;
   }
 
   Widget _buildAttendance(AttendanceState attendance) {
@@ -777,17 +758,19 @@ class _StaggerRow extends StatelessWidget {
 
 // ─── Shift clock pill (header trailing) ─────────────────────────────────────────
 class _ShiftClock extends StatelessWidget {
-  final hk.Shift shift;
   final DateTime now;
-  const _ShiftClock({required this.shift, required this.now});
+  const _ShiftClock({required this.now});
 
   @override
   Widget build(BuildContext context) {
-    final (label, icon) = switch (shift) {
-      hk.Shift.morning => ('Morning', Icons.wb_sunny_rounded),
-      hk.Shift.day => ('Day', Icons.light_mode_rounded),
-      hk.Shift.night => ('Night', Icons.nights_stay_rounded),
-    };
+    final h = now.hour;
+    final (label, icon) = h >= 5 && h < 12
+        ? ('Morning', Icons.wb_sunny_rounded)
+        : h >= 12 && h < 17
+        ? ('Day', Icons.light_mode_rounded)
+        : h >= 17 && h < 21
+        ? ('Evening', Icons.wb_twilight_rounded)
+        : ('Night', Icons.nights_stay_rounded);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -1211,13 +1194,13 @@ class _LiveShiftTimerState extends State<_LiveShiftTimer> {
 
 // ─── Housekeeping Card ────────────────────────────────────────────────────────
 class _HousekeepingCard extends StatefulWidget {
-  final hk.Shift shift;
+  final String shiftName;
   final String courtName;
   final int done, total;
   final VoidCallback onTap;
 
   const _HousekeepingCard({
-    required this.shift,
+    required this.shiftName,
     required this.courtName,
     required this.done,
     required this.total,
@@ -1230,12 +1213,6 @@ class _HousekeepingCard extends StatefulWidget {
 
 class _HousekeepingCardState extends State<_HousekeepingCard> {
   bool _pressed = false;
-
-  String _shiftLbl(hk.Shift s) => switch (s) {
-    hk.Shift.morning => 'Morning',
-    hk.Shift.day => 'Day',
-    hk.Shift.night => 'Night',
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -1300,7 +1277,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                           ),
                         ),
                         Text(
-                          '${widget.courtName} · ${_shiftLbl(widget.shift)} Shift',
+                          '${widget.courtName} · ${widget.shiftName} Shift',
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             color: _grey,

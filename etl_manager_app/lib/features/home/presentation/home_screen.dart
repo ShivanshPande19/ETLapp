@@ -1085,11 +1085,31 @@ class _CourtHkRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        _ShiftPill(pill: row.morning),
-        const SizedBox(width: 5),
-        _ShiftPill(pill: row.day),
-        const SizedBox(width: 5),
-        _ShiftPill(pill: row.night),
+        if (row.shifts.isEmpty)
+          Text(
+            'No checklist',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: _grey,
+              fontWeight: FontWeight.w500,
+            ),
+          )
+        else
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final p in row.shifts) ...[
+                    _ShiftPill(pill: p),
+                    const SizedBox(width: 5),
+                  ],
+                ],
+              ),
+            ),
+          ),
       ],
     ),
   );
@@ -1101,23 +1121,9 @@ class _ShiftPill extends StatelessWidget {
   final ShiftPillData pill;
   const _ShiftPill({required this.pill});
 
-  bool _isShiftTimeActive(String label) {
-    final h = TimeOfDay.now().hour;
-    switch (label.toUpperCase()) {
-      case 'M':
-        return h >= 6 && h < 12;
-      case 'D':
-        return h >= 12 && h < 16;
-      case 'N':
-        return h >= 16 && h < 24;
-      default:
-        return false;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final bool isActive = _isShiftTimeActive(pill.label);
+    final bool isActive = pill.isActive;
     final Color fg = !isActive
         ? _pillInactiveFg
         : pill.isComplete

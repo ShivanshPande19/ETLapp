@@ -41,6 +41,26 @@ String _fmt12(String? hhmm) {
   return '$h:${t.minute.toString().padLeft(2, '0')} $ap';
 }
 
+/// Clean drag proxy — kills the default dark Material box that appears behind a
+/// lifted item on the dark theme. Keeps a subtle scale lift; the card/row
+/// already has its own white background + border.
+Widget _dragProxy(Widget child, int index, Animation<double> animation) {
+  return AnimatedBuilder(
+    animation: animation,
+    builder: (context, _) {
+      final t = Curves.easeInOut.transform(animation.value.clamp(0.0, 1.0));
+      return Transform.scale(
+        scale: 1.0 + 0.03 * t,
+        child: Material(
+          color: Colors.transparent,
+          elevation: 0,
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
 // ─── Builder screen ─────────────────────────────────────────────────────────
 
 class ChecklistBuilderScreen extends ConsumerStatefulWidget {
@@ -260,6 +280,7 @@ class _ChecklistBuilderScreenState
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             buildDefaultDragHandles: false,
+            proxyDecorator: _dragProxy,
             itemCount: d.shifts.length,
             onReorder: (oldI, newI) {
               HapticFeedback.selectionClick();
@@ -775,6 +796,7 @@ class _ShiftEditorScreenState extends State<_ShiftEditorScreen> {
                   padding: EdgeInsets.fromLTRB(
                       20, 22, 20, MediaQuery.of(context).padding.bottom + 24),
                   buildDefaultDragHandles: false,
+                  proxyDecorator: _dragProxy,
                   header: _editorHeader(),
                   onReorder: (oldI, newI) {
                     HapticFeedback.selectionClick();

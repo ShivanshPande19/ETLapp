@@ -1,12 +1,17 @@
 // lib/features/housekeeping/presentation/manager_housekeeping_screen.dart
+//
+// Config-driven manager housekeeping monitor (Phase 3b).
+//
+// Renders each court's CONFIGURED shifts (names/timings), daily tasks, and any
+// number of weekly/monthly recurring tasks — all dynamic, nothing hardcoded.
 
 import 'dart:async';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// CHANGED: Importing the generic courts provider
 import '../../courts/domain/courts_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
@@ -21,59 +26,8 @@ const _border = Color(0xFF1A1A1A);
 const _ok = Color(0xFF22C55E);
 const _warn = Color(0xFFE5A000);
 const _danger = Color(0xFFFF4444);
-const _blue = Color(0xFF60A5FA);
 const _purple = Color(0xFFA78BFA);
 const _bg = Color(0xFF080808);
-
-enum _Cat { cleaning, pest, laundry, audit }
-
-class _TaskDef {
-  final String id, title;
-  final IconData icon;
-  final _Cat cat;
-  const _TaskDef(this.id, this.title, this.icon, this.cat);
-}
-
-const _kDailyTasks = [
-  _TaskDef(
-    'floorclean',
-    'Floor Cleaning',
-    Icons.cleaning_services_rounded,
-    _Cat.cleaning,
-  ),
-  _TaskDef(
-    'tablechairclean',
-    'Table & Chair Clean',
-    Icons.chair_rounded,
-    _Cat.cleaning,
-  ),
-  _TaskDef(
-    'binclean',
-    'Bins Cleaning (outside)',
-    Icons.delete_forever_rounded,
-    _Cat.cleaning,
-  ),
-  _TaskDef(
-    'trayclean',
-    'Tray Cleaning',
-    Icons.restaurant_rounded,
-    _Cat.cleaning,
-  ),
-  _TaskDef(
-    'binempty',
-    'Garbage Bin Empty',
-    Icons.delete_outline_rounded,
-    _Cat.cleaning,
-  ),
-  _TaskDef('pestspray', 'Pest Spray', Icons.pest_control_rounded, _Cat.pest),
-];
-
-Color _catColor(_Cat c) => switch (c) {
-  _Cat.cleaning => _blue,
-  _Cat.pest => _warn,
-  _Cat.laundry => _purple,
-  _Cat.audit => _danger,
-};
 
 final managerHkProvider = FutureProvider.autoDispose
     .family<hk.FullStatusResponse?, String>((ref, date) async {
@@ -91,9 +45,8 @@ class _ManagerHousekeepingScreenState
     extends ConsumerState<ManagerHousekeepingScreen>
     with TickerProviderStateMixin {
   DateTime _date = DateTime.now();
-  hk.Shift _shift = _autoShift();
-  int?
-  _court; // CHANGED: now nullable to select the first dynamic court if not set
+  String? _shiftKey; // selected shift (config key); auto-resolved if null
+  int? _court; // selected court id; auto-selects first if null
 
   late final AnimationController _fadeCtrl;
   late final AnimationController _listCtrl;
@@ -138,7 +91,7 @@ class _ManagerHousekeepingScreenState
 
   void _refresh() {
     ref.invalidate(managerHkProvider(_dateStr));
-    ref.invalidate(courtsNotifierProvider); // also refresh the courts
+    ref.invalidate(courtsNotifierProvider);
     _listCtrl
       ..reset()
       ..forward();
@@ -153,14 +106,32 @@ class _ManagerHousekeepingScreenState
     ),
   );
 
+  // Shifts for the currently selected court (from status data).
+  List<hk.ShiftStatus> _courtShifts(hk.FullStatusResponse? data) {
+    if (data == null || _court == null) return const [];
+    return data.courtById(_court!)?.shifts ?? const [];
+  }
+
+  // Valid selected shift key, falling back to the active/first shift.
+  String? _effectiveShiftKey(List<hk.ShiftStatus> shifts) {
+    if (shifts.isEmpty) return null;
+    if (_shiftKey != null && shifts.any((s) => s.shiftKey == _shiftKey)) {
+      return _shiftKey;
+    }
+    final active = shifts.firstWhereOrNull((s) => s.isActiveNow);
+    return (active ?? shifts.first).shiftKey;
+  }
+
   @override
   Widget build(BuildContext context) {
     final statusAsync = ref.watch(managerHkProvider(_dateStr));
-    final courtsAsync = ref.watch(
-      courtsNotifierProvider,
-    ); // CHANGED: Get courts
+    final courtsAsync = ref.watch(courtsNotifierProvider);
 
     final navClearance = MediaQuery.of(context).padding.bottom + 92.0;
+
+    final statusData = statusAsync.valueOrNull;
+    final courtShifts = _courtShifts(statusData);
+    final selectedShiftKey = _effectiveShiftKey(courtShifts);
 
     return Scaffold(
       backgroundColor: _bg,
@@ -170,7 +141,7 @@ class _ManagerHousekeepingScreenState
           bottom: false,
           child: Column(
             children: [
-              _buildHeader(courtsAsync), // Pass to header
+              _buildHeader(courtsAsync, courtShifts, selectedShiftKey),
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -187,9 +158,7 @@ class _ManagerHousekeepingScreenState
                       loading: () => const _Loader(),
                       error: (e, _) => _ErrorView(onRetry: _refresh),
                       data: (data) {
-                        if (data == null) {
-                          return _ErrorView(onRetry: _refresh);
-                        }
+                        if (data == null) return _ErrorView(onRetry: _refresh);
                         return courtsAsync.when(
                           loading: () => const _Loader(),
                           error: (err, stack) => _ErrorView(onRetry: _refresh),
@@ -199,18 +168,21 @@ class _ManagerHousekeepingScreenState
                                 child: Text("No Courts available"),
                               );
                             }
-                            // Auto-select first active court if none selected
                             if (_court == null ||
                                 !courts.any((c) => c.id == _court)) {
                               WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted)
+                                if (mounted) {
                                   setState(() => _court = courts.first.id);
+                                }
                               });
                             }
-
                             if (_court == null) return const SizedBox.shrink();
 
-                            return _buildContent(data, navClearance);
+                            return _buildContent(
+                              data,
+                              selectedShiftKey,
+                              navClearance,
+                            );
                           },
                         );
                       },
@@ -225,7 +197,11 @@ class _ManagerHousekeepingScreenState
     );
   }
 
-  Widget _buildHeader(AsyncValue<List<dynamic>> courtsAsync) {
+  Widget _buildHeader(
+    AsyncValue<List<dynamic>> courtsAsync,
+    List<hk.ShiftStatus> courtShifts,
+    String? selectedShiftKey,
+  ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: Column(
@@ -306,9 +282,9 @@ class _ManagerHousekeepingScreenState
 
           const SizedBox(height: 14),
 
-          // CHANGED: Dynamic Court tabs using the generic provider
+          // Dynamic court tabs
           courtsAsync.when(
-            loading: () => const SizedBox(height: 38), // placeholder height
+            loading: () => const SizedBox(height: 38),
             error: (_, __) => const SizedBox(height: 38),
             data: (courts) {
               if (courts.isEmpty) return const SizedBox(height: 38);
@@ -323,7 +299,10 @@ class _ManagerHousekeepingScreenState
                     return GestureDetector(
                       onTap: () {
                         HapticFeedback.selectionClick();
-                        setState(() => _court = courtInfo.id);
+                        setState(() {
+                          _court = courtInfo.id;
+                          _shiftKey = null; // re-resolve for new court
+                        });
                         _listCtrl
                           ..reset()
                           ..forward();
@@ -362,57 +341,77 @@ class _ManagerHousekeepingScreenState
 
           const SizedBox(height: 10),
 
-          // Shift tabs
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111111),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: hk.Shift.values.map((s) {
-                final sel = _shift == s;
-                return Expanded(
-                  child: GestureDetector(
+          // Dynamic shift tabs (horizontal scroll — any number of shifts)
+          if (courtShifts.isEmpty)
+            const SizedBox(height: 4)
+          else
+            SizedBox(
+              height: 40,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: courtShifts.length,
+                itemBuilder: (context, index) {
+                  final s = courtShifts[index];
+                  final sel = s.shiftKey == selectedShiftKey;
+                  return GestureDetector(
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      setState(() => _shift = s);
+                      setState(() => _shiftKey = s.shiftKey);
                       _listCtrl
                         ..reset()
                         ..forward();
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      margin: EdgeInsets.only(
+                        right: index < courtShifts.length - 1 ? 8 : 0,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 9,
+                      ),
                       decoration: BoxDecoration(
-                        color: sel ? _white : Colors.transparent,
-                        borderRadius: BorderRadius.circular(9),
+                        color: sel ? _white : const Color(0xFF111111),
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(
+                          color: sel ? Colors.transparent : _white.withOpacity(0.06),
+                        ),
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _shiftIcon(s),
+                            hk.hkShiftIcon(s.startTime),
                             size: 13,
                             color: sel ? _black : _grey,
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            _shiftLabel(s),
+                            s.shiftName,
                             style: GoogleFonts.inter(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: sel ? _black : _grey,
                             ),
                           ),
+                          if (!s.isActiveNow) ...[
+                            const SizedBox(width: 5),
+                            Container(
+                              width: 5,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: sel ? _danger : _grey.withOpacity(0.5),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
-                  ),
-                );
-              }).toList(),
+                  );
+                },
+              ),
             ),
-          ),
 
           const SizedBox(height: 18),
         ],
@@ -458,182 +457,170 @@ class _ManagerHousekeepingScreenState
     }
   }
 
-  Widget _buildContent(hk.FullStatusResponse data, double navClearance) {
+  Widget _buildContent(
+    hk.FullStatusResponse data,
+    String? selectedShiftKey,
+    double navClearance,
+  ) {
     if (_court == null) return const SizedBox.shrink();
 
-    final courtData = data.courts.firstWhere(
-      (c) => c.courtId == _court,
-      orElse: () =>
-          hk.CourtDayStatus(courtId: _court!, date: _dateStr, shifts: []),
-    );
-    final shiftData = courtData.shifts.firstWhere(
-      (s) => s.shift == _shift,
-      orElse: () => hk.ShiftStatus(
-        shift: _shift,
-        total: 0,
-        done: 0,
-        submitted: false,
-        tasks: [],
-      ),
-    );
+    final court = data.courtById(_court!);
+    final courtName = court?.courtName.isNotEmpty == true
+        ? court!.courtName
+        : (ref
+                  .read(courtsNotifierProvider)
+                  .value
+                  ?.firstWhereOrNull((c) => c.id == _court)
+                  ?.name ??
+              'Court $_court');
 
-    final apiMap = {for (final t in shiftData.tasks) t.taskId: t};
-    final mergedTasks = _kDailyTasks.map((def) {
-      final api = apiMap[def.id];
-      return _MergedTask(
-        def: def,
-        isDone: api?.isDone ?? false,
-        photoUrl: api?.photoUrl,
-        doneAt: api?.doneAt,
-        doneByName: api?.doneByName,
-      );
-    }).toList();
+    final shifts = court?.shifts ?? const <hk.ShiftStatus>[];
 
-    final doneCount = mergedTasks.where((t) => t.isDone).length;
-    final total = mergedTasks.length;
+    if (shifts.isEmpty) {
+      return _EmptyConfig(courtName: courtName);
+    }
+
+    final shiftData =
+        shifts.firstWhereOrNull((s) => s.shiftKey == selectedShiftKey) ??
+        shifts.first;
+
+    final tasks = shiftData.tasks;
+    final doneCount = tasks.where((t) => t.isDone).length;
+    final total = tasks.length;
+
     final viewDate = DateTime(_date.year, _date.month, _date.day, 23, 59, 59);
 
-    final rawWeekly = data.weeklyTasks.firstWhere(
-      (w) => w.courtId == _court,
-      orElse: () => hk.WeeklyTaskStatus(courtId: _court!, isOverdue: true),
-    );
-    final rawMonthly = data.monthlyTasks.firstWhere(
-      (m) => m.courtId == _court,
-      orElse: () => hk.MonthlyTaskStatus(courtId: _court!, isOverdue: true),
-    );
+    final weekly = data.weeklyFor(_court!);
+    final monthly = data.monthlyFor(_court!);
 
-    final effectiveWeekly = _effectiveRecurring<hk.WeeklyTaskStatus>(
-      raw: rawWeekly,
-      viewDate: viewDate,
-      cooldownDays: 7,
-      makeEmpty: () => hk.WeeklyTaskStatus(courtId: _court!, isOverdue: true),
-      makeFiltered: (lastDone, nextDue, overdue, photo, doneBy) =>
-          hk.WeeklyTaskStatus(
-            courtId: _court!,
-            lastDoneAt: lastDone,
-            nextDueAt: nextDue,
-            isOverdue: overdue,
-            photoUrl: photo,
-            doneByName: doneBy,
-          ),
-    );
-
-    final effectiveMonthly = _effectiveRecurring<hk.MonthlyTaskStatus>(
-      raw: rawMonthly,
-      viewDate: viewDate,
-      cooldownDays: 30,
-      makeEmpty: () => hk.MonthlyTaskStatus(courtId: _court!, isOverdue: true),
-      makeFiltered: (lastDone, nextDue, overdue, photo, doneBy) =>
-          hk.MonthlyTaskStatus(
-            courtId: _court!,
-            lastDoneAt: lastDone,
-            nextDueAt: nextDue,
-            isOverdue: overdue,
-            photoUrl: photo,
-            doneByName: doneBy,
-          ),
-    );
-
-    return ListView(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
-      children: [
-        _StaggerItem(
-          anim: _itemAnim(0),
-          child: _SummaryCard(
-            done: doneCount,
-            total: total,
-            courtName:
-                ref
-                    .read(courtsNotifierProvider)
-                    .value
-                    ?.firstWhere((c) => c.id == _court)
-                    .name ??
-                "Unknown Court",
-            shift: _shift,
-          ),
+    var idx = 0;
+    final children = <Widget>[
+      _StaggerItem(
+        anim: _itemAnim(idx++),
+        child: _SummaryCard(
+          done: doneCount,
+          total: total,
+          courtName: courtName,
+          shiftName: shiftData.shiftName,
         ),
-
-        const SizedBox(height: 16),
-
-        _StaggerItem(
-          anim: _itemAnim(1),
-          child: _SectionLabel(
-            label: 'Daily Tasks',
-            right: '$doneCount / $total done',
-          ),
+      ),
+      const SizedBox(height: 16),
+      _StaggerItem(
+        anim: _itemAnim(idx++),
+        child: _SectionLabel(
+          label: 'Daily Tasks',
+          right: '$doneCount / $total done',
         ),
-        const SizedBox(height: 10),
+      ),
+      const SizedBox(height: 10),
+    ];
 
-        ...mergedTasks.asMap().entries.map(
-          (e) => _StaggerItem(
-            anim: _itemAnim(e.key + 2),
+    if (tasks.isEmpty) {
+      children.add(
+        _StaggerItem(
+          anim: _itemAnim(idx++),
+          child: const _EmptyRow(text: 'No daily tasks in this shift.'),
+        ),
+      );
+    } else {
+      for (final t in tasks) {
+        final i = idx++;
+        children.add(
+          _StaggerItem(
+            anim: _itemAnim(i),
             child: _DailyTaskTile(
-              key: ValueKey(
-                'hk_daily_${_court}_${_shift.name}_${e.value.def.id}',
-              ),
-              task: e.value,
-              onPhotoTap: e.value.photoUrl != null
-                  ? () => _openPhoto(e.value.photoUrl!, e.value.def.title)
+              key: ValueKey('hk_daily_${_court}_${shiftData.shiftKey}_${t.taskId}'),
+              title: t.taskTitle,
+              icon: hk.hkIconFor(t.icon),
+              accent: hk.hkAccentFor(t.icon),
+              isDone: t.isDone,
+              doneAt: t.doneAt,
+              doneByName: t.doneByName,
+              photoUrl: t.photoUrl,
+              onPhotoTap: t.photoUrl != null
+                  ? () => _openPhoto(t.photoUrl!, t.taskTitle)
                   : null,
             ),
           ),
-        ),
+        );
+      }
+    }
 
-        const SizedBox(height: 10),
-
-        _StaggerItem(
-          anim: _itemAnim(mergedTasks.length + 2),
-          child: const _SectionLabel(label: 'Weekly Task'),
-        ),
-        const SizedBox(height: 10),
-        _StaggerItem(
-          anim: _itemAnim(mergedTasks.length + 3),
-          child: _RecurringTile(
-            icon: Icons.flag_rounded,
-            title: 'Flags Washing',
-            accentColor: _purple,
-            lastDoneAt: effectiveWeekly.lastDoneAt,
-            nextDueAt: effectiveWeekly.nextDueAt,
-            isOverdue: effectiveWeekly.isOverdue,
-            photoUrl: effectiveWeekly.photoUrl,
-            doneByName: effectiveWeekly.doneByName,
-            onPhotoTap: effectiveWeekly.photoUrl != null
-                ? () => _openPhoto(effectiveWeekly.photoUrl!, 'Flags Washing')
-                : null,
+    // Weekly recurring (multiple)
+    if (weekly.isNotEmpty) {
+      children
+        ..add(const SizedBox(height: 10))
+        ..add(
+          _StaggerItem(
+            anim: _itemAnim(idx++),
+            child: const _SectionLabel(label: 'Weekly Tasks'),
           ),
-        ),
-
-        const SizedBox(height: 10),
-
-        _StaggerItem(
-          anim: _itemAnim(mergedTasks.length + 4),
-          child: const _SectionLabel(label: 'Monthly Task'),
-        ),
-        const SizedBox(height: 10),
-        _StaggerItem(
-          anim: _itemAnim(mergedTasks.length + 5),
-          child: _RecurringTile(
-            icon: Icons.fire_extinguisher_rounded,
-            title: 'Fire Safety Audit',
-            accentColor: _danger,
-            lastDoneAt: effectiveMonthly.lastDoneAt,
-            nextDueAt: effectiveMonthly.nextDueAt,
-            isOverdue: effectiveMonthly.isOverdue,
-            photoUrl: effectiveMonthly.photoUrl,
-            doneByName: effectiveMonthly.doneByName,
-            onPhotoTap: effectiveMonthly.photoUrl != null
-                ? () => _openPhoto(
-                    effectiveMonthly.photoUrl!,
-                    'Fire Safety Audit',
-                  )
-                : null,
+        )
+        ..add(const SizedBox(height: 10));
+      for (final raw in weekly) {
+        final eff = _effective(raw, viewDate);
+        final i = idx++;
+        children.add(
+          _StaggerItem(
+            anim: _itemAnim(i),
+            child: _RecurringTile(
+              icon: hk.hkIconFor(eff.icon),
+              title: eff.title.isNotEmpty ? eff.title : 'Weekly Task',
+              accentColor: _purple,
+              lastDoneAt: eff.lastDoneAt,
+              nextDueAt: eff.nextDueAt,
+              isOverdue: eff.isOverdue,
+              photoUrl: eff.photoUrl,
+              doneByName: eff.doneByName,
+              onPhotoTap: eff.photoUrl != null
+                  ? () => _openPhoto(eff.photoUrl!, eff.title)
+                  : null,
+            ),
           ),
-        ),
+        );
+      }
+    }
 
-        const SizedBox(height: 20),
+    // Monthly recurring (multiple)
+    if (monthly.isNotEmpty) {
+      children
+        ..add(const SizedBox(height: 10))
+        ..add(
+          _StaggerItem(
+            anim: _itemAnim(idx++),
+            child: const _SectionLabel(label: 'Monthly Tasks'),
+          ),
+        )
+        ..add(const SizedBox(height: 10));
+      for (final raw in monthly) {
+        final eff = _effective(raw, viewDate);
+        final i = idx++;
+        children.add(
+          _StaggerItem(
+            anim: _itemAnim(i),
+            child: _RecurringTile(
+              icon: hk.hkIconFor(eff.icon),
+              title: eff.title.isNotEmpty ? eff.title : 'Monthly Task',
+              accentColor: _danger,
+              lastDoneAt: eff.lastDoneAt,
+              nextDueAt: eff.nextDueAt,
+              isOverdue: eff.isOverdue,
+              photoUrl: eff.photoUrl,
+              doneByName: eff.doneByName,
+              onPhotoTap: eff.photoUrl != null
+                  ? () => _openPhoto(eff.photoUrl!, eff.title)
+                  : null,
+            ),
+          ),
+        );
+      }
+    }
 
+    children
+      ..add(const SizedBox(height: 20))
+      ..add(
         _StaggerItem(
-          anim: _itemAnim(mergedTasks.length + 6),
+          anim: _itemAnim(idx++),
           child: Center(
             child: Text(
               'Pull to refresh · auto-refreshes every 30s',
@@ -644,31 +631,38 @@ class _ManagerHousekeepingScreenState
             ),
           ),
         ),
-      ],
+      );
+
+    return ListView(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, navClearance),
+      children: children,
     );
   }
 
-  T _effectiveRecurring<T>({
-    required dynamic raw,
-    required DateTime viewDate,
-    required int cooldownDays,
-    required T Function() makeEmpty,
-    required T Function(DateTime?, DateTime?, bool, String?, String?)
-    makeFiltered,
-  }) {
-    final DateTime? lastDoneAt = raw.lastDoneAt as DateTime?;
-    final String? photoUrl = raw.photoUrl as String?;
-    final String? doneByName = raw.doneByName as String?;
-    if (lastDoneAt == null) return makeEmpty();
-    if (lastDoneAt.isAfter(viewDate)) return makeEmpty();
-    final computedNextDue = lastDoneAt.add(Duration(days: cooldownDays));
-    final isOverdueForView = viewDate.isAfter(computedNextDue);
-    return makeFiltered(
-      lastDoneAt,
-      computedNextDue,
-      isOverdueForView,
-      photoUrl,
-      doneByName,
+  // Re-base a recurring task's cooldown/overdue to the *viewed* date so that
+  // browsing past dates shows the historically-correct state.
+  hk.RecurringTaskStatus _effective(
+    hk.RecurringTaskStatus raw,
+    DateTime viewDate,
+  ) {
+    final last = raw.lastDoneAt;
+    if (last == null || last.isAfter(viewDate)) {
+      // Not yet done as of the viewed date.
+      return hk.RecurringTaskStatus(
+        courtId: raw.courtId,
+        taskId: raw.taskId,
+        title: raw.title,
+        icon: raw.icon,
+        intervalDays: raw.intervalDays,
+        isOverdue: true,
+      );
+    }
+    final nextDue = last.add(Duration(days: raw.intervalDays));
+    final overdue = viewDate.isAfter(nextDue);
+    return raw.copyWith(
+      lastDoneAt: last,
+      nextDueAt: nextDue,
+      isOverdue: overdue,
     );
   }
 
@@ -697,30 +691,15 @@ class _StaggerItem extends StatelessWidget {
   );
 }
 
-class _MergedTask {
-  final _TaskDef def;
-  final bool isDone;
-  final String? photoUrl;
-  final DateTime? doneAt;
-  final String? doneByName;
-  const _MergedTask({
-    required this.def,
-    required this.isDone,
-    this.photoUrl,
-    this.doneAt,
-    this.doneByName,
-  });
-}
-
 class _SummaryCard extends StatelessWidget {
   final int done, total;
-  final String courtName; // CHANGED: now taking string name
-  final hk.Shift shift;
+  final String courtName;
+  final String shiftName;
   const _SummaryCard({
     required this.done,
     required this.total,
     required this.courtName,
-    required this.shift,
+    required this.shiftName,
   });
 
   @override
@@ -761,7 +740,7 @@ class _SummaryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$courtName · ${_shiftLabel(shift)} Shift', // CHANGED
+                      '$courtName · $shiftName Shift',
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -819,15 +798,31 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _DailyTaskTile extends StatelessWidget {
-  final _MergedTask task;
+  final String title;
+  final IconData icon;
+  final Color accent;
+  final bool isDone;
+  final DateTime? doneAt;
+  final String? doneByName;
+  final String? photoUrl;
   final VoidCallback? onPhotoTap;
-  const _DailyTaskTile({super.key, required this.task, this.onPhotoTap});
+
+  const _DailyTaskTile({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.accent,
+    required this.isDone,
+    this.doneAt,
+    this.doneByName,
+    this.photoUrl,
+    this.onPhotoTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final done = task.isDone;
-    final catColor = _catColor(task.def.cat);
-    final hasPhoto = task.photoUrl != null;
+    final done = isDone;
+    final hasPhoto = photoUrl != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -846,13 +841,13 @@ class _DailyTaskTile extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: done ? _ok.withOpacity(0.1) : catColor.withOpacity(0.1),
+              color: done ? _ok.withOpacity(0.1) : accent.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              done ? Icons.check_rounded : task.def.icon,
+              done ? Icons.check_rounded : icon,
               size: 18,
-              color: done ? _ok : catColor,
+              color: done ? _ok : accent,
             ),
           ),
           const SizedBox(width: 12),
@@ -861,7 +856,7 @@ class _DailyTaskTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  task.def.title,
+                  title,
                   style: GoogleFonts.inter(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -889,18 +884,18 @@ class _DailyTaskTile extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (done && task.doneAt != null) ...[
+                    if (done && doneAt != null) ...[
                       const SizedBox(width: 6),
                       Text(
-                        _fmtTime(task.doneAt!.toLocal()),
+                        _fmtTime(doneAt!.toLocal()),
                         style: GoogleFonts.inter(fontSize: 11, color: _grey),
                       ),
                     ],
                   ],
                 ),
                 if (done &&
-                    task.doneByName != null &&
-                    task.doneByName!.trim().isNotEmpty) ...[
+                    doneByName != null &&
+                    doneByName!.trim().isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -912,7 +907,7 @@ class _DailyTaskTile extends StatelessWidget {
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
-                          task.doneByName!,
+                          doneByName!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.inter(
@@ -945,7 +940,7 @@ class _DailyTaskTile extends StatelessWidget {
                       ),
                     ),
                     child: AppNetworkImage(
-                      url: task.photoUrl,
+                      url: photoUrl,
                       width: 48,
                       height: 48,
                       memCacheWidth: 144,
@@ -1070,12 +1065,13 @@ class _RecurringTile extends StatelessWidget {
         : 'Pending';
 
     String? subInfo;
-    if (justDone && nextDueAt != null)
+    if (justDone && nextDueAt != null) {
       subInfo = 'Next due ${_fmtDateShort(nextDueAt!.toLocal())}';
-    else if (overdue && lastDoneAt != null)
+    } else if (overdue && lastDoneAt != null) {
       subInfo = 'Last done ${_fmtDateShort(lastDoneAt!.toLocal())}';
-    else if (!neverDone && lastDoneAt != null)
+    } else if (!neverDone && lastDoneAt != null) {
       subInfo = 'Last done ${_fmtDateShort(lastDoneAt!.toLocal())}';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1388,6 +1384,61 @@ class _SectionLabel extends StatelessWidget {
   );
 }
 
+class _EmptyRow extends StatelessWidget {
+  final String text;
+  const _EmptyRow({required this.text});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+    decoration: BoxDecoration(
+      color: _lg,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.info_outline_rounded, size: 16, color: _grey),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: GoogleFonts.inter(fontSize: 12.5, color: _grey),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _EmptyConfig extends StatelessWidget {
+  final String courtName;
+  const _EmptyConfig({required this.courtName});
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(20, 60, 20, 40),
+    children: [
+      const Icon(Icons.checklist_rtl_rounded, size: 44, color: _grey),
+      const SizedBox(height: 14),
+      Text(
+        'No checklist configured',
+        textAlign: TextAlign.center,
+        style: GoogleFonts.inter(
+          fontSize: 16,
+          fontWeight: FontWeight.w800,
+          color: _black,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        '$courtName has no housekeeping checklist yet.\nSet one up in Settings → Manage Courts.',
+        textAlign: TextAlign.center,
+        style: GoogleFonts.inter(fontSize: 13, color: _grey, height: 1.5),
+      ),
+    ],
+  );
+}
+
 class _Loader extends StatelessWidget {
   const _Loader();
   @override
@@ -1447,25 +1498,6 @@ class _ErrorView extends StatelessWidget {
   );
 }
 
-hk.Shift _autoShift() {
-  final h = DateTime.now().hour;
-  if (h >= 6 && h < 12) return hk.Shift.morning;
-  if (h >= 12 && h < 17) return hk.Shift.day;
-  return hk.Shift.night;
-}
-
-String _shiftLabel(hk.Shift s) => const {
-  hk.Shift.morning: 'Morning',
-  hk.Shift.day: 'Day',
-  hk.Shift.night: 'Night',
-}[s]!;
-
-IconData _shiftIcon(hk.Shift s) => switch (s) {
-  hk.Shift.morning => Icons.wb_sunny_rounded,
-  hk.Shift.day => Icons.light_mode_rounded,
-  hk.Shift.night => Icons.nights_stay_rounded,
-};
-
 String _dateHeader(DateTime d) {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
@@ -1477,41 +1509,15 @@ String _dateHeader(DateTime d) {
   return fmt;
 }
 
-String _fmtDate(DateTime d) {
-  const m = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${d.day} ${m[d.month - 1]} ${d.year}';
-}
+const _kMonthsShort = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
 
-String _fmtDateShort(DateTime d) {
-  const m = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${d.day} ${m[d.month - 1]}';
-}
+String _fmtDate(DateTime d) =>
+    '${d.day} ${_kMonthsShort[d.month - 1]} ${d.year}';
+
+String _fmtDateShort(DateTime d) => '${d.day} ${_kMonthsShort[d.month - 1]}';
 
 String _fmtTime(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
