@@ -32,21 +32,6 @@ def _upsert_insert(db: Session):
     dialect = db.get_bind().dialect.name
     return pg_insert(HkTask) if dialect == "postgresql" else sqlite_insert(HkTask)
 
-_COURTS     = [1, 2, 3]
-_SHIFTS     = ["morning", "day", "night"]
-_WEEKLY_ID  = "flagswash"
-_MONTHLY_ID = "fireaudit"
-
-_DAILY_TASK_IDS = [
-    "floorclean",
-    "tablechairclean",
-    "binclean",
-    "trayclean",
-    "binempty",
-    "pestspray",
-]
-TASKS_PER_SHIFT = len(_DAILY_TASK_IDS)
-
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
 
