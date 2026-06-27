@@ -119,22 +119,28 @@ async def sync_outlet_for_dates(
             except (ValueError, TypeError):
                 total_amt = 0.0
 
-            # Business day = the order_date we asked Petpooja for. Petpooja
-            # already groups orders under the outlet's operational day, so this
-            # is the authoritative business date.
+            # Business day = Petpooja's own per-order `order_date` field.
             #
-            # Previously we re-derived business_date from `created_on` + a 4 AM
-            # buffer. Petpooja's created_on is NOT in a fixed/assumed timezone,
-            # so that parsing shifted whole days back — e.g. order_date=26's
-            # bills landed on sale_date=25 and no sale_date=26 row was created,
-            # so "yesterday" showed 0.
-            business_date = api_date
+            # Petpooja already groups each bill under the outlet's operational
+            # day in this field: post-midnight orders correctly carry the
+            # PREVIOUS day (verified — a bill created at "2026-06-26 01:05:40"
+            # has order_date "2026-06-25"). This is the most authoritative
+            # attribution: no timezone guessing, no 4 AM buffer, and it
+            # reconciles 1:1 with Petpooja's own reports / dashboard.
+            #
+            # Fallback (only if the field is missing/unparseable): Petpooja's
+            # documented T-1 rule — request order_date=X returns day X-1.
+            order_date_str = order.get("order_date", "") or ""
+            try:
+                business_date = datetime.strptime(order_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                business_date = api_date - timedelta(days=1)
 
             created_on_str = order.get("created_on", "") or ""
             try:
                 created_on = datetime.strptime(created_on_str, "%Y-%m-%d %H:%M:%S")
             except ValueError:
-                created_on = datetime.combine(api_date, datetime.min.time())
+                created_on = datetime.combine(business_date, datetime.min.time())
 
             affected_business_dates.add(business_date)
             attributed += 1
@@ -153,7 +159,7 @@ async def sync_outlet_for_dates(
             )
             db.execute(stmt)
 
-        print(f"[ATTRIBUTE] order_date={api_date_str} -> business_date={api_date_str} | bills={attributed}")
+        print(f"[ATTRIBUTE] request_order_date={api_date_str} | bills={attributed}")
             
     db.commit() # Individual bills safely database mein chale gaye
 
