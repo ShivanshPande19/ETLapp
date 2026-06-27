@@ -102,38 +102,58 @@ async def sync_outlet_for_dates(
             continue
             
         orders = extract_orders(raw)
-        
+
+        attributed = 0
         for item in orders:
             order = item.get("Order", {})
-            created_on_str = order.get("created_on", "")
-            if not created_on_str:
+
+            try:
+                order_id = int(order.get("orderID", 0))
+            except (ValueError, TypeError):
+                order_id = 0
+            if order_id <= 0:
                 continue
-                
-            created_on = datetime.strptime(created_on_str, "%Y-%m-%d %H:%M:%S")
-            
-            # --- 4 AM BUFFER BUSINESS DAY LOGIC ---
-            if created_on.hour < 4:
-                business_date = (created_on - timedelta(days=1)).date()
-            else:
-                business_date = created_on.date()
-                
+
+            try:
+                total_amt = float(order.get("total", 0) or 0)
+            except (ValueError, TypeError):
+                total_amt = 0.0
+
+            # Business day = the order_date we asked Petpooja for. Petpooja
+            # already groups orders under the outlet's operational day, so this
+            # is the authoritative business date.
+            #
+            # Previously we re-derived business_date from `created_on` + a 4 AM
+            # buffer. Petpooja's created_on is NOT in a fixed/assumed timezone,
+            # so that parsing shifted whole days back — e.g. order_date=26's
+            # bills landed on sale_date=25 and no sale_date=26 row was created,
+            # so "yesterday" showed 0.
+            business_date = api_date
+
+            created_on_str = order.get("created_on", "") or ""
+            try:
+                created_on = datetime.strptime(created_on_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                created_on = datetime.combine(api_date, datetime.min.time())
+
             affected_business_dates.add(business_date)
-            
-            order_id = int(order.get("orderID", 0))
-            total_amt = float(order.get("total", 0))
-            
-            # --- UPSERT: Individual Bill in PetpoojaOrder (Duplicate Blocking) ---
+            attributed += 1
+
+            # UPSERT the bill. business_date is ALSO updated on conflict so a
+            # re-sync self-heals any row an older build mis-dated.
             stmt = _upsert(db, PetpoojaOrder).values(
                 order_id=order_id,
                 outlet_id=outlet.id,
                 business_date=business_date,
                 created_on=created_on,
-                total_amount=total_amt
+                total_amount=total_amt,
             ).on_conflict_do_update(
                 index_elements=['order_id'],
-                set_={'total_amount': total_amt}
+                set_={'total_amount': total_amt, 'business_date': business_date},
             )
             db.execute(stmt)
+
+        print(f"[ATTRIBUTE] order_date={api_date_str} -> business_date={api_date_str} | bills={attributed}")
             
     db.commit() # Individual bills safely database mein chale gaye
 
