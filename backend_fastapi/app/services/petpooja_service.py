@@ -119,22 +119,21 @@ async def sync_outlet_for_dates(
             except (ValueError, TypeError):
                 total_amt = 0.0
 
-            # Business day = the order_date we asked Petpooja for. Petpooja
-            # already groups orders under the outlet's operational day, so this
-            # is the authoritative business date.
+            # Petpooja's T-1 rule: order_date=X returns the orders of day X-1
+            # (their docs: order_date=2026-05-15 returns 14 May's data). So the
+            # business day is always one day BEFORE the order_date we requested.
             #
-            # Previously we re-derived business_date from `created_on` + a 4 AM
-            # buffer. Petpooja's created_on is NOT in a fixed/assumed timezone,
-            # so that parsing shifted whole days back — e.g. order_date=26's
-            # bills landed on sale_date=25 and no sale_date=26 row was created,
-            # so "yesterday" showed 0.
-            business_date = api_date
+            # This is the authoritative mapping. We previously re-derived the
+            # date from `created_on` + a 4 AM buffer, which is fragile (depends
+            # on Petpooja's created_on timezone); using order_date - 1 is exact
+            # and timezone-independent.
+            business_date = api_date - timedelta(days=1)
 
             created_on_str = order.get("created_on", "") or ""
             try:
                 created_on = datetime.strptime(created_on_str, "%Y-%m-%d %H:%M:%S")
             except ValueError:
-                created_on = datetime.combine(api_date, datetime.min.time())
+                created_on = datetime.combine(business_date, datetime.min.time())
 
             affected_business_dates.add(business_date)
             attributed += 1
@@ -153,7 +152,7 @@ async def sync_outlet_for_dates(
             )
             db.execute(stmt)
 
-        print(f"[ATTRIBUTE] order_date={api_date_str} -> business_date={api_date_str} | bills={attributed}")
+        print(f"[ATTRIBUTE] order_date={api_date_str} -> business_date={business_date} | bills={attributed}")
             
     db.commit() # Individual bills safely database mein chale gaye
 
