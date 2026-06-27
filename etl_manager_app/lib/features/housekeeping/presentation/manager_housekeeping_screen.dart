@@ -129,7 +129,7 @@ class _ManagerHousekeepingScreenState
 
     final navClearance = MediaQuery.of(context).padding.bottom + 92.0;
 
-    final statusData = statusAsync.valueOrNull;
+    final statusData = statusAsync.asData?.value;
     final courtShifts = _courtShifts(statusData);
     final selectedShiftKey = _effectiveShiftKey(courtShifts);
 
