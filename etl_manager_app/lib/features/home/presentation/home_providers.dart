@@ -37,6 +37,21 @@ class CourtHkRow {
     required this.courtName,
     required this.shifts,
   });
+
+  /// Total tasks completed across all of this court's shifts today.
+  int get done => shifts.fold(0, (sum, s) => sum + s.done);
+
+  /// Total tasks configured across all of this court's shifts today.
+  int get total => shifts.fold(0, (sum, s) => sum + s.total);
+
+  /// Overall completion fraction for the court (0.0–1.0).
+  double get pct => total == 0 ? 0.0 : done / total;
+
+  /// True only when the court has tasks and every one of them is done.
+  bool get isComplete => total > 0 && done == total;
+
+  /// Number of shifts that are fully complete.
+  int get completedShifts => shifts.where((s) => s.isComplete).length;
 }
 
 // ─── Revenue Card — Yesterday, All Courts ─────────────────────────────────────
