@@ -490,7 +490,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                           message: err.toString(),
                           onRetry: () => notifier.fetchEtlData(isRefresh: true),
                         ),
-                        data: (data) => AppearFade(child: _buildContent(data)),
+                        data: (data) => _buildContent(data),
                       ),
                   ),
                 ),
@@ -558,19 +558,13 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
           )
         else
           ...data.feedbacks.asMap().entries.map((e) {
-            final anim = _itemAnim(e.key);
-            return FadeTransition(
-              opacity: anim,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.08),
-                  end: Offset.zero,
-                ).animate(anim),
-                child: _EtlFeedbackCard(
-                  feedback: e.value,
-                  courts: data.courts,
-                  outlets: data.outlets,
-                ),
+            return AppearFade(
+              delayMs: (e.key.clamp(0, 12)) * 55,
+              slide: 0.08,
+              child: _EtlFeedbackCard(
+                feedback: e.value,
+                courts: data.courts,
+                outlets: data.outlets,
               ),
             );
           }),
