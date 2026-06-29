@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/widgets/appear_fade.dart';
 
 import '../domain/feedback_notifier.dart';
 
@@ -345,7 +346,9 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                         message: err.toString(),
                         onRetry: () => notifier.fetchFeedbacks(isRefresh: true),
                       ),
-                      data: (data) => _buildContent(data, notifier),
+                      data: (data) => AppearFade(
+                        child: _buildContent(data, notifier),
+                      ),
                     ),
                   ),
                 ),

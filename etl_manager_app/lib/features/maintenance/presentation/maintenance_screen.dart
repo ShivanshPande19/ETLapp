@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../domain/maintenance_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/widgets/appear_fade.dart';
 import '../../auth/domain/auth_notifier.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
@@ -419,20 +420,14 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
                             itemCount: filtered.length,
                             itemBuilder: (context, i) {
                               final issue = filtered[i];
-                              final anim = _itemAnim(i);
-                              return FadeTransition(
-                                opacity: anim,
-                                child: SlideTransition(
-                                  position: Tween<Offset>(
-                                    begin: const Offset(0, 0.08),
-                                    end: Offset.zero,
-                                  ).animate(anim),
-                                  child: _TicketCard(
-                                    issue: issue,
-                                    isManager: isManager,
-                                    onTap: () =>
-                                        _showDetailSheet(issue, isManager),
-                                  ),
+                              return AppearFade(
+                                delayMs: i < 8 ? i * 60 : 0,
+                                slide: 0.08,
+                                child: _TicketCard(
+                                  issue: issue,
+                                  isManager: isManager,
+                                  onTap: () =>
+                                      _showDetailSheet(issue, isManager),
                                 ),
                               );
                             },

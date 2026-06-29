@@ -15,6 +15,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/widgets/appear_fade.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -155,11 +156,13 @@ class _ManagerHousekeepingScreenState
                     backgroundColor: _white,
                     onRefresh: () async => _refresh(),
                     child: statusAsync.when(
+                      skipLoadingOnReload: true,
                       loading: () => const _Loader(),
                       error: (e, _) => _ErrorView(onRetry: _refresh),
                       data: (data) {
                         if (data == null) return _ErrorView(onRetry: _refresh);
                         return courtsAsync.when(
+                          skipLoadingOnReload: true,
                           loading: () => const _Loader(),
                           error: (err, stack) => _ErrorView(onRetry: _refresh),
                           data: (courts) {
@@ -178,10 +181,12 @@ class _ManagerHousekeepingScreenState
                             }
                             if (_court == null) return const SizedBox.shrink();
 
-                            return _buildContent(
-                              data,
-                              selectedShiftKey,
-                              navClearance,
+                            return AppearFade(
+                              child: _buildContent(
+                                data,
+                                selectedShiftKey,
+                                navClearance,
+                              ),
                             );
                           },
                         );
