@@ -15,7 +15,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
-import '../../../core/widgets/appear_fade.dart';
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -181,12 +180,10 @@ class _ManagerHousekeepingScreenState
                             }
                             if (_court == null) return const SizedBox.shrink();
 
-                            return AppearFade(
-                              child: _buildContent(
-                                data,
-                                selectedShiftKey,
-                                navClearance,
-                              ),
+                            return _buildContent(
+                              data,
+                              selectedShiftKey,
+                              navClearance,
                             );
                           },
                         );
@@ -501,7 +498,7 @@ class _ManagerHousekeepingScreenState
     var idx = 0;
     final children = <Widget>[
       _StaggerItem(
-        anim: _itemAnim(idx++),
+        index: idx++,
         child: _SummaryCard(
           done: doneCount,
           total: total,
@@ -511,7 +508,7 @@ class _ManagerHousekeepingScreenState
       ),
       const SizedBox(height: 16),
       _StaggerItem(
-        anim: _itemAnim(idx++),
+        index: idx++,
         child: _SectionLabel(
           label: 'Daily Tasks',
           right: '$doneCount / $total done',
@@ -523,7 +520,7 @@ class _ManagerHousekeepingScreenState
     if (tasks.isEmpty) {
       children.add(
         _StaggerItem(
-          anim: _itemAnim(idx++),
+          index: idx++,
           child: const _EmptyRow(text: 'No daily tasks in this shift.'),
         ),
       );
@@ -532,7 +529,7 @@ class _ManagerHousekeepingScreenState
         final i = idx++;
         children.add(
           _StaggerItem(
-            anim: _itemAnim(i),
+            index: i,
             child: _DailyTaskTile(
               key: ValueKey('hk_daily_${_court}_${shiftData.shiftKey}_${t.taskId}'),
               title: t.taskTitle,
@@ -557,7 +554,7 @@ class _ManagerHousekeepingScreenState
         ..add(const SizedBox(height: 10))
         ..add(
           _StaggerItem(
-            anim: _itemAnim(idx++),
+            index: idx++,
             child: const _SectionLabel(label: 'Weekly Tasks'),
           ),
         )
@@ -567,7 +564,7 @@ class _ManagerHousekeepingScreenState
         final i = idx++;
         children.add(
           _StaggerItem(
-            anim: _itemAnim(i),
+            index: i,
             child: _RecurringTile(
               icon: hk.hkIconFor(eff.icon),
               title: eff.title.isNotEmpty ? eff.title : 'Weekly Task',
@@ -592,7 +589,7 @@ class _ManagerHousekeepingScreenState
         ..add(const SizedBox(height: 10))
         ..add(
           _StaggerItem(
-            anim: _itemAnim(idx++),
+            index: idx++,
             child: const _SectionLabel(label: 'Monthly Tasks'),
           ),
         )
@@ -602,7 +599,7 @@ class _ManagerHousekeepingScreenState
         final i = idx++;
         children.add(
           _StaggerItem(
-            anim: _itemAnim(i),
+            index: i,
             child: _RecurringTile(
               icon: hk.hkIconFor(eff.icon),
               title: eff.title.isNotEmpty ? eff.title : 'Monthly Task',
@@ -625,7 +622,7 @@ class _ManagerHousekeepingScreenState
       ..add(const SizedBox(height: 20))
       ..add(
         _StaggerItem(
-          anim: _itemAnim(idx++),
+          index: idx++,
           child: Center(
             child: Text(
               'Pull to refresh · auto-refreshes every 30s',
@@ -678,21 +675,51 @@ class _ManagerHousekeepingScreenState
   );
 }
 
-class _StaggerItem extends StatelessWidget {
-  final Animation<double> anim;
+class _StaggerItem extends StatefulWidget {
+  final int index;
   final Widget child;
-  const _StaggerItem({required this.anim, required this.child});
+  const _StaggerItem({required this.index, required this.child});
+
+  @override
+  State<_StaggerItem> createState() => _StaggerItemState();
+}
+
+class _StaggerItemState extends State<_StaggerItem>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 430),
+    );
+    final curve = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+    _fade = curve;
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.10),
+      end: Offset.zero,
+    ).animate(curve);
+    // Stagger by position; cap so a long list doesn't wait too long.
+    final delay = (widget.index.clamp(0, 12)) * 55;
+    Future.delayed(Duration(milliseconds: delay), () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-    opacity: anim,
-    child: SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, 0.06),
-        end: Offset.zero,
-      ).animate(anim),
-      child: child,
-    ),
+    opacity: _fade,
+    child: SlideTransition(position: _slide, child: widget.child),
   );
 }
 

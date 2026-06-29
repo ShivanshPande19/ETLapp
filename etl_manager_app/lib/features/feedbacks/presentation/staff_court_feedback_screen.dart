@@ -277,7 +277,7 @@ class _StaffCourtFeedbackScreenState
                           message: err.toString(),
                           onRetry: _refresh,
                         ),
-                        data: (data) => AppearFade(child: _buildContent(data)),
+                        data: (data) => _buildContent(data),
                       ),
                     ),
                   ),
@@ -343,18 +343,12 @@ class _StaffCourtFeedbackScreenState
           _EmptyState()
         else
           ...data.feedbacks.asMap().entries.map((e) {
-            final anim = _itemAnim(e.key);
-            return FadeTransition(
-              opacity: anim,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.08),
-                  end: Offset.zero,
-                ).animate(anim),
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _FeedbackCard(feedback: e.value),
-                ),
+            return AppearFade(
+              delayMs: (e.key.clamp(0, 12)) * 55,
+              slide: 0.08,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _FeedbackCard(feedback: e.value),
               ),
             );
           }),
