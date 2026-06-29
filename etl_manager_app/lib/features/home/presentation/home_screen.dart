@@ -1,5 +1,7 @@
 // lib/features/home/presentation/home_screen.dart
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -732,78 +734,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           // ── Housekeeping — stagger 3 ──────────────────
                           _StaggerRow(
                             anim: _stagger(3),
-                            child: _OutlineCard(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        'Housekeeping',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 12,
-                                          color: _grey,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      Row(
-                                        children: [
-                                          _LegendDot(
-                                            fg: _pillGreenFg,
-                                            label: 'Done',
-                                          ),
-                                          const SizedBox(width: 8),
-                                          _LegendDot(
-                                            fg: _pillYellowFg,
-                                            label: 'In progress',
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  if (hkLoading) ...[
-                                    const SizedBox(height: 14),
-                                    ...List.generate(
-                                      3,
-                                      (_) => const Padding(
-                                        padding: EdgeInsets.only(bottom: 10),
-                                        child: Row(
-                                          children: [
-                                            Expanded(
-                                              child: _Skeleton(
-                                                width: double.infinity,
-                                                height: 14,
-                                              ),
-                                            ),
-                                            SizedBox(width: 10),
-                                            _Skeleton(width: 52, height: 26),
-                                            SizedBox(width: 5),
-                                            _Skeleton(width: 52, height: 26),
-                                            SizedBox(width: 5),
-                                            _Skeleton(width: 52, height: 26),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ] else if (hkRows.isEmpty) ...[
-                                    const SizedBox(height: 14),
-                                    Text(
-                                      'No submissions today',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 13,
-                                        color: _grey,
-                                      ),
-                                    ),
-                                  ] else ...[
-                                    const SizedBox(height: 12),
-                                    ...hkRows.map(
-                                      (row) => _CourtHkRow(row: row),
-                                    ),
-                                  ],
-                                ],
-                              ),
+                            child: _HousekeepingCard(
+                              loading: hkLoading,
+                              rows: hkRows,
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                context.go('/housekeeping');
+                              },
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -1061,6 +998,255 @@ class _LegendDot extends StatelessWidget {
   );
 }
 
+// ─── Housekeeping Card (interactive) ──────────────────────────────────────────
+
+class _HousekeepingCard extends StatefulWidget {
+  final bool loading;
+  final List<CourtHkRow> rows;
+  final VoidCallback onTap;
+  const _HousekeepingCard({
+    required this.loading,
+    required this.rows,
+    required this.onTap,
+  });
+
+  @override
+  State<_HousekeepingCard> createState() => _HousekeepingCardState();
+}
+
+class _HousekeepingCardState extends State<_HousekeepingCard> {
+  bool _pressed = false;
+
+  bool get _tappable => !widget.loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = widget.rows;
+    final totalDone = rows.fold<int>(0, (s, r) => s + r.done);
+    final totalTasks = rows.fold<int>(0, (s, r) => s + r.total);
+    final overallPct = totalTasks == 0 ? 0.0 : totalDone / totalTasks;
+    final hasData = !widget.loading && rows.isNotEmpty;
+
+    final String subtitle = widget.loading
+        ? 'Fetching today\u2019s checklists\u2026'
+        : rows.isEmpty
+        ? 'No checklist configured yet'
+        : totalTasks == 0
+        ? 'No tasks scheduled today'
+        : '$totalDone of $totalTasks tasks done today';
+
+    return GestureDetector(
+      onTapDown: _tappable ? (_) => setState(() => _pressed = true) : null,
+      onTapCancel: () => setState(() => _pressed = false),
+      onTapUp: _tappable
+          ? (_) {
+              setState(() => _pressed = false);
+              widget.onTap();
+            }
+          : null,
+      child: AnimatedScale(
+        scale: _pressed ? 0.975 : 1.0,
+        duration: const Duration(milliseconds: 130),
+        curve: Curves.easeOutCubic,
+        child: _OutlineCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Header: title + summary + ring + chevron ──
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Housekeeping',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: _grey,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          subtitle,
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: _black,
+                            fontWeight: FontWeight.w700,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  if (hasData && totalTasks > 0) _HkRing(pct: overallPct),
+                  if (_tappable) ...[
+                    const SizedBox(width: 8),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 11,
+                      color: _grey,
+                    ),
+                  ],
+                ],
+              ),
+
+              if (widget.loading) ...[
+                const SizedBox(height: 16),
+                ...List.generate(
+                  3,
+                  (_) => const Padding(
+                    padding: EdgeInsets.only(bottom: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            _Skeleton(width: 110, height: 13),
+                            Spacer(),
+                            _Skeleton(width: 38, height: 13),
+                          ],
+                        ),
+                        SizedBox(height: 9),
+                        _Skeleton(width: double.infinity, height: 6),
+                        SizedBox(height: 9),
+                        Row(
+                          children: [
+                            _Skeleton(width: 64, height: 24),
+                            SizedBox(width: 5),
+                            _Skeleton(width: 64, height: 24),
+                            SizedBox(width: 5),
+                            _Skeleton(width: 64, height: 24),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ] else if (rows.isEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  'Build a checklist from the Housekeeping tab to track '
+                  'shift completion here.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    color: _grey,
+                    height: 1.35,
+                  ),
+                ),
+              ] else ...[
+                const SizedBox(height: 6),
+                const Divider(height: 22, thickness: 1, color: Color(0xFFF1F1F1)),
+                for (int i = 0; i < rows.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 15),
+                  _CourtHkRow(row: rows[i]),
+                ],
+                const SizedBox(height: 14),
+                // legend footer
+                Row(
+                  children: const [
+                    _LegendDot(fg: _pillGreenFg, label: 'Done'),
+                    SizedBox(width: 12),
+                    _LegendDot(fg: _pillYellowFg, label: 'In progress'),
+                    SizedBox(width: 12),
+                    _LegendDot(fg: _pillInactiveFg, label: 'Pending'),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Overall completion ring ──────────────────────────────────────────────────
+
+class _HkRing extends StatelessWidget {
+  final double pct;
+  const _HkRing({required this.pct});
+
+  @override
+  Widget build(BuildContext context) {
+    final bool complete = pct >= 0.999;
+    final Color color = complete
+        ? _pillGreenFg
+        : pct > 0
+        ? _black
+        : _grey;
+
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: pct.clamp(0.0, 1.0)),
+        duration: const Duration(milliseconds: 850),
+        curve: Curves.easeOutCubic,
+        builder: (_, v, __) => CustomPaint(
+          painter: _RingPainter(pct: v, color: color),
+          child: Center(
+            child: complete
+                ? const Icon(
+                    Icons.check_rounded,
+                    size: 18,
+                    color: _pillGreenFg,
+                  )
+                : Text(
+                    '${(v * 100).round()}',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 14,
+                      color: color,
+                      height: 1,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  final double pct;
+  final Color color;
+  const _RingPainter({required this.pct, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 4.0;
+    final center = size.center(Offset.zero);
+    final radius = (size.width - stroke) / 2;
+
+    final track = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..color = const Color(0xFFEDEDED);
+    canvas.drawCircle(center, radius, track);
+
+    if (pct > 0) {
+      final arc = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round
+        ..color = color;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2,
+        2 * math.pi * pct.clamp(0.0, 1.0),
+        false,
+        arc,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RingPainter old) =>
+      old.pct != pct || old.color != color;
+}
+
 // ─── Court HK Row ─────────────────────────────────────────────────────────────
 
 class _CourtHkRow extends StatelessWidget {
@@ -1068,49 +1254,132 @@ class _CourtHkRow extends StatelessWidget {
   const _CourtHkRow({required this.row});
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 9),
-    child: Row(
+  Widget build(BuildContext context) {
+    final bool hasTasks = row.total > 0;
+    final bool allDone = row.isComplete;
+    final bool started = row.done > 0;
+
+    final Color dotColor = !hasTasks
+        ? _pillInactiveFg
+        : allDone
+        ? _pillGreenFg
+        : started
+        ? _pillYellowFg
+        : _pillInactiveFg;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Text(
-            row.courtName,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: _black,
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
             ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
-        ),
-        const SizedBox(width: 8),
-        if (row.shifts.isEmpty)
-          Text(
-            'No checklist',
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              color: _grey,
-              fontWeight: FontWeight.w500,
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                row.courtName,
+                style: GoogleFonts.inter(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: _black,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
             ),
-          )
-        else
-          Flexible(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              reverse: true,
-              child: Row(
+            const SizedBox(width: 8),
+            if (!hasTasks)
+              Text(
+                'No checklist',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: _grey,
+                  fontWeight: FontWeight.w500,
+                ),
+              )
+            else if (allDone)
+              Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final p in row.shifts) ...[
-                    _ShiftPill(pill: p),
-                    const SizedBox(width: 5),
-                  ],
+                  const Icon(Icons.check_circle_rounded,
+                      size: 14, color: _pillGreenFg),
+                  const SizedBox(width: 4),
+                  Text(
+                    'All done',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: _pillGreenFg,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ],
+              )
+            else
+              Text(
+                '${row.done}/${row.total}',
+                style: GoogleFonts.inter(
+                  fontSize: 11.5,
+                  color: _grey,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+        if (hasTasks) ...[
+          const SizedBox(height: 8),
+          _MiniBar(
+            pct: row.pct,
+            color: allDone ? _pillGreenFg : _black,
+          ),
+        ],
+        if (row.shifts.isNotEmpty) ...[
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 5,
+            runSpacing: 5,
+            children: [for (final p in row.shifts) _ShiftPill(pill: p)],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── Mini progress bar ────────────────────────────────────────────────────────
+
+class _MiniBar extends StatelessWidget {
+  final double pct;
+  final Color color;
+  const _MiniBar({required this.pct, required this.color});
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(999),
+    child: SizedBox(
+      height: 6,
+      child: Stack(
+        children: [
+          Container(color: const Color(0xFFF0F0F0)),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: pct.clamp(0.0, 1.0)),
+            duration: const Duration(milliseconds: 850),
+            curve: Curves.easeOutCubic,
+            builder: (_, v, __) => FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: v,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(999),
+                ),
               ),
             ),
           ),
-      ],
+        ],
+      ),
     ),
   );
 }
@@ -1123,27 +1392,44 @@ class _ShiftPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isActive = pill.isActive;
-    final Color fg = !isActive
+    final bool empty = pill.total == 0;
+    final bool complete = pill.isComplete;
+    final bool started = pill.done > 0;
+
+    // Colour reflects actual completion (a finished shift stays green even if
+    // it's no longer the active window). The active shift is highlighted with
+    // a live dot + ring instead of being greyed out.
+    final Color fg = empty
         ? _pillInactiveFg
-        : pill.isComplete
+        : complete
         ? _pillGreenFg
-        : _pillYellowFg;
-    final Color bg = !isActive
+        : started
+        ? _pillYellowFg
+        : _pillInactiveFg;
+    final Color bg = empty
         ? _pillInactiveBg
-        : pill.isComplete
+        : complete
         ? _pillGreenBg
-        : _pillYellowBg;
+        : started
+        ? _pillYellowBg
+        : _pillInactiveBg;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(999),
+        border: pill.isActive
+            ? Border.all(color: fg.withOpacity(0.55), width: 1)
+            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (pill.isActive) ...[
+            _LiveDot(color: fg),
+            const SizedBox(width: 5),
+          ],
           Text(
             pill.label,
             style: GoogleFonts.inter(
@@ -1152,8 +1438,19 @@ class _ShiftPill extends StatelessWidget {
               color: fg,
             ),
           ),
-          if (isActive) ...[
-            const SizedBox(width: 3),
+          const SizedBox(width: 4),
+          if (empty)
+            Text(
+              '\u2014',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: fg,
+              ),
+            )
+          else if (complete)
+            Icon(Icons.check_rounded, size: 12, color: fg)
+          else
             Text(
               '${(pill.pct * 100).round()}%',
               style: GoogleFonts.inter(
@@ -1162,11 +1459,52 @@ class _ShiftPill extends StatelessWidget {
                 color: fg,
               ),
             ),
-          ],
         ],
       ),
     );
   }
+}
+
+// ─── Live (pulsing) dot — marks the currently-active shift ────────────────────
+
+class _LiveDot extends StatefulWidget {
+  final Color color;
+  const _LiveDot({required this.color});
+
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: Tween<double>(begin: 0.35, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    ),
+    child: Container(
+      width: 6,
+      height: 6,
+      decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+    ),
+  );
 }
 
 // ─── Section Header ───────────────────────────────────────────────────────────
