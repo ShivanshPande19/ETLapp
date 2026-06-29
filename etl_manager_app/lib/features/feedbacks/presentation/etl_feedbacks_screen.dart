@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../domain/etl_feedback_notifier.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/widgets/appear_fade.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -478,18 +479,19 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                       await notifier.fetchEtlData(isRefresh: true);
                       _restartListAnim();
                     },
-                    child: feedbacksState.when(
-                      loading: () => const SkeletonList(
-                        dark: false,
-                        count: 6,
-                        tileHeight: 92,
+                      child: feedbacksState.when(
+                        skipLoadingOnReload: true,
+                        loading: () => const SkeletonList(
+                          dark: false,
+                          count: 6,
+                          tileHeight: 92,
+                        ),
+                        error: (err, _) => _ErrorView(
+                          message: err.toString(),
+                          onRetry: () => notifier.fetchEtlData(isRefresh: true),
+                        ),
+                        data: (data) => AppearFade(child: _buildContent(data)),
                       ),
-                      error: (err, _) => _ErrorView(
-                        message: err.toString(),
-                        onRetry: () => notifier.fetchEtlData(isRefresh: true),
-                      ),
-                      data: (data) => _buildContent(data),
-                    ),
                   ),
                 ),
               ),
