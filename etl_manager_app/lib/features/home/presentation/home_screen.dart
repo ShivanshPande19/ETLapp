@@ -28,6 +28,10 @@ const _pillYellowFg = Color(0xFFB45309);
 const _pillYellowBg = Color(0xFFFEF3C7);
 const _pillInactiveFg = Color(0xFFBBBBBB);
 const _pillInactiveBg = Color(0xFFF5F5F5);
+// Pending = has tasks but none done yet (scheduled / upcoming). Grey now stays
+// reserved for genuinely inactive shifts (no checklist configured).
+const _pillPendingFg = Color(0xFF1D4ED8);
+const _pillPendingBg = Color(0xFFDBEAFE);
 
 // ─── Home Screen ──────────────────────────────────────────────────────────────
 
@@ -1016,6 +1020,10 @@ class _HousekeepingCard extends StatefulWidget {
 
 class _HousekeepingCardState extends State<_HousekeepingCard> {
   bool _pressed = false;
+  bool _expanded = false;
+
+  /// How many courts to show before the "Show all" toggle.
+  static const int _previewCount = 3;
 
   bool get _tappable => !widget.loading;
 
@@ -1139,9 +1147,39 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
               ] else ...[
                 const SizedBox(height: 6),
                 const Divider(height: 22, thickness: 1, color: Color(0xFFF1F1F1)),
-                for (int i = 0; i < rows.length; i++) ...[
+                // Always-visible preview (top courts).
+                for (int i = 0; i < math.min(_previewCount, rows.length); i++) ...[
                   if (i > 0) const SizedBox(height: 15),
                   _CourtHkRow(row: rows[i]),
+                ],
+                // Remaining courts behind a smooth expand/collapse.
+                if (rows.length > _previewCount)
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: _expanded
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (int i = _previewCount; i < rows.length; i++) ...[
+                                const SizedBox(height: 15),
+                                _CourtHkRow(row: rows[i]),
+                              ],
+                            ],
+                          )
+                        : const SizedBox(width: double.infinity, height: 0),
+                  ),
+                if (rows.length > _previewCount) ...[
+                  const SizedBox(height: 13),
+                  _ExpandToggle(
+                    expanded: _expanded,
+                    hiddenCount: rows.length - _previewCount,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _expanded = !_expanded);
+                    },
+                  ),
                 ],
                 const SizedBox(height: 14),
                 // legend footer
@@ -1151,7 +1189,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                     SizedBox(width: 12),
                     _LegendDot(fg: _pillYellowFg, label: 'In progress'),
                     SizedBox(width: 12),
-                    _LegendDot(fg: _pillInactiveFg, label: 'Pending'),
+                    _LegendDot(fg: _pillPendingFg, label: 'Pending'),
                   ],
                 ),
               ],
@@ -1265,7 +1303,7 @@ class _CourtHkRow extends StatelessWidget {
         ? _pillGreenFg
         : started
         ? _pillYellowFg
-        : _pillInactiveFg;
+        : _pillPendingFg;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1398,21 +1436,22 @@ class _ShiftPill extends StatelessWidget {
 
     // Colour reflects actual completion (a finished shift stays green even if
     // it's no longer the active window). The active shift is highlighted with
-    // a live dot + ring instead of being greyed out.
+    // a live dot + ring instead of being greyed out. Grey is reserved for
+    // shifts with no checklist; pending (not-yet-started) shifts use blue.
     final Color fg = empty
         ? _pillInactiveFg
         : complete
         ? _pillGreenFg
         : started
         ? _pillYellowFg
-        : _pillInactiveFg;
+        : _pillPendingFg;
     final Color bg = empty
         ? _pillInactiveBg
         : complete
         ? _pillGreenBg
         : started
         ? _pillYellowBg
-        : _pillInactiveBg;
+        : _pillPendingBg;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -1503,6 +1542,57 @@ class _LiveDotState extends State<_LiveDot>
       width: 6,
       height: 6,
       decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+    ),
+  );
+}
+
+// ─── Expand / collapse toggle (Show all courts) ───────────────────────────────
+
+class _ExpandToggle extends StatelessWidget {
+  final bool expanded;
+  final int hiddenCount;
+  final VoidCallback onTap;
+  const _ExpandToggle({
+    required this.expanded,
+    required this.hiddenCount,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F6F6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            expanded ? 'Show less' : 'Show all  (+$hiddenCount)',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: _black,
+            ),
+          ),
+          const SizedBox(width: 4),
+          AnimatedRotation(
+            turns: expanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            child: const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: _black,
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
