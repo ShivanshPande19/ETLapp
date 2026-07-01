@@ -6,7 +6,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     SECRET_KEY: str = "changethisinsecretkey123"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    # 30 days — app stays signed in for a month; expiry is now handled
+    # gracefully (a 401 signs the user out cleanly and routes to login).
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
 
     # Database
     DATABASE_URL: str = "sqlite:///./app/etl.db"
