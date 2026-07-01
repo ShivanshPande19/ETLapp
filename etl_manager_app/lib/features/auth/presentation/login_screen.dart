@@ -162,6 +162,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) _fieldsCtrl!.forward();
       });
+
+      // If we landed here because the session expired (auto sign-out on a 401),
+      // surface a one-time message so the user knows why they're back at login.
+      final auth = ref.read(authNotifierProvider);
+      if (auth.status == AuthStatus.idle &&
+          (auth.errorMessage?.isNotEmpty ?? false)) {
+        _showError(auth.errorMessage!);
+      }
     });
 
     SystemChrome.setSystemUIOverlayStyle(

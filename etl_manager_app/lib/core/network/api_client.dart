@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/token_storage.dart';
+import '../../features/auth/domain/auth_notifier.dart';
 
 const String baseUrl = 'http://172.20.10.4:8080';
 
@@ -37,6 +38,19 @@ final dioProvider = Provider<Dio>((ref) {
         return handler.next(options);
       },
       onError: (error, handler) {
+        // Any authenticated request coming back 401 means the JWT expired or is
+        // no longer valid. Sign the user out cleanly so the router sends them to
+        // login, instead of leaving the app in a half-broken state (some
+        // screens erroring, others showing stale cached data).
+        //
+        // Auth endpoints are skipped: a 401 there is a wrong password / bad
+        // reset link, handled locally by those screens — not a session expiry.
+        final statusCode = error.response?.statusCode;
+        final path = error.requestOptions.path;
+        final isAuthCall = path.contains('/auth/');
+        if (statusCode == 401 && !isAuthCall) {
+          ref.read(authNotifierProvider.notifier).sessionExpired();
+        }
         return handler.next(error);
       },
     ),
