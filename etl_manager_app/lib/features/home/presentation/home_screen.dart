@@ -28,6 +28,10 @@ const _pillYellowFg = Color(0xFFB45309);
 const _pillYellowBg = Color(0xFFFEF3C7);
 const _pillInactiveFg = Color(0xFFBBBBBB);
 const _pillInactiveBg = Color(0xFFF5F5F5);
+// Pending = has tasks but none done yet (scheduled / upcoming). Grey now stays
+// reserved for genuinely inactive shifts (no checklist configured).
+const _pillPendingFg = Color(0xFF1D4ED8);
+const _pillPendingBg = Color(0xFFDBEAFE);
 
 // ─── Home Screen ──────────────────────────────────────────────────────────────
 
@@ -1185,7 +1189,7 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
                     SizedBox(width: 12),
                     _LegendDot(fg: _pillYellowFg, label: 'In progress'),
                     SizedBox(width: 12),
-                    _LegendDot(fg: _pillInactiveFg, label: 'Pending'),
+                    _LegendDot(fg: _pillPendingFg, label: 'Pending'),
                   ],
                 ),
               ],
@@ -1299,7 +1303,7 @@ class _CourtHkRow extends StatelessWidget {
         ? _pillGreenFg
         : started
         ? _pillYellowFg
-        : _pillInactiveFg;
+        : _pillPendingFg;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1432,21 +1436,22 @@ class _ShiftPill extends StatelessWidget {
 
     // Colour reflects actual completion (a finished shift stays green even if
     // it's no longer the active window). The active shift is highlighted with
-    // a live dot + ring instead of being greyed out.
+    // a live dot + ring instead of being greyed out. Grey is reserved for
+    // shifts with no checklist; pending (not-yet-started) shifts use blue.
     final Color fg = empty
         ? _pillInactiveFg
         : complete
         ? _pillGreenFg
         : started
         ? _pillYellowFg
-        : _pillInactiveFg;
+        : _pillPendingFg;
     final Color bg = empty
         ? _pillInactiveBg
         : complete
         ? _pillGreenBg
         : started
         ? _pillYellowBg
-        : _pillInactiveBg;
+        : _pillPendingBg;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
