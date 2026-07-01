@@ -54,19 +54,43 @@ async def _save_staff_photo(photo: Optional[UploadFile]) -> Optional[str]:
 
 # ── GET all staff ─────────────────────────────────────────────────────────────
 @router.get("/", response_model=StaffListResponse)
-def list_all_staff(db: Session = Depends(get_db)):
+def list_all_staff(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # ETL manager only — this lists every ETL staff member (with PII).
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
     return StaffListResponse(staff=get_all_staff(db))
 
 
 # ── GET staff by court ────────────────────────────────────────────────────────
 @router.get("/court/{court_id}", response_model=StaffListResponse)
-def list_staff_by_court(court_id: int, db: Session = Depends(get_db)):
+def list_staff_by_court(
+    court_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # ETL manager only — court-wise staff listing.
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
     return StaffListResponse(staff=get_staff_by_court(court_id, db))
 
 
 # ── GET staff by outlet (outlet staff shown in the outlet detail sheet) ───────
 @router.get("/outlet/{outlet_id}", response_model=StaffListResponse)
-def list_staff_by_outlet(outlet_id: int, db: Session = Depends(get_db)):
+def list_staff_by_outlet(
+    outlet_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # ETL manager (any outlet) or the outlet's own manager/staff.
+    if user.is_etl_manager:
+        pass
+    elif user.is_outlet_user and user.outlet_id == outlet_id:
+        pass
+    else:
+        raise HTTPException(status_code=403, detail="Access denied.")
     return StaffListResponse(staff=get_staff_by_outlet(outlet_id, db))
 
 
@@ -154,7 +178,27 @@ async def add_outlet_staff(
 
 # ── PATCH deactivate (remove access) ─────────────────────────────────────────
 @router.patch("/{staff_id}/deactivate")
-def remove_staff_access(staff_id: int, db: Session = Depends(get_db)):
+def remove_staff_access(
+    staff_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    staff = db.query(Staff).filter(Staff.id == staff_id).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    # ETL manager can remove any; an outlet manager only their own outlet's staff.
+    if user.is_etl_manager:
+        pass
+    elif user.role == "outlet_manager" and user.outlet_id is not None:
+        if staff.outlet_id != user.outlet_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only remove your own outlet's staff.",
+            )
+    else:
+        raise HTTPException(status_code=403, detail="Manager access required.")
+
     success = deactivate_staff(staff_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -163,7 +207,16 @@ def remove_staff_access(staff_id: int, db: Session = Depends(get_db)):
 
 # ── PATCH reassign court ──────────────────────────────────────────────────────
 @router.patch("/{staff_id}/court", response_model=StaffResponse)
-def assign_court(staff_id: int, req: CourtAssignRequest, db: Session = Depends(get_db)):
+def assign_court(
+    staff_id: int,
+    req: CourtAssignRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    # Court reassignment applies to ETL (court-level) staff — ETL manager only.
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
     staff = reassign_court(staff_id, req.court_id, db)
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
