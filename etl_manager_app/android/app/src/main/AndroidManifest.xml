@@ -17,7 +17,7 @@
     <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
-        android:label="etl_manager_app"
+        android:label="ETL Manager"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

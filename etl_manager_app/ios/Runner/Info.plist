@@ -7,7 +7,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>Etl Manager App</string>
+    <string>ETL Manager</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -38,9 +38,7 @@
     <string>ETL Manager uses Face ID to keep your data secure</string>
 
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>This app needs your location to verify your attendance.</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>This app needs your location to verify your attendance.</string>
+    <string>ETL Manager uses your location only while the app is open, to verify your attendance check-in is at the correct court/outlet.</string>
 
     <key>UIApplicationSceneManifest</key>
     <dict>
@@ -82,11 +80,13 @@
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+    <!-- ATS enforced (HTTPS only) for the production backend. Arbitrary cleartext
+         loads are NOT allowed. NSAllowsLocalNetworking stays true so a local-dev
+         build (--dart-define=API_BASE_URL=http://192.168.x.x:8080) still works
+         without disabling ATS for public traffic. -->
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
-        <true/>
-        <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
 </dict>

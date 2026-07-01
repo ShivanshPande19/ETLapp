@@ -68,6 +68,22 @@ dev_dependencies:
   riverpod_generator: ^4.0.3
   json_serializable: ^6.13.0
   freezed: ^3.2.5
+  # Generates all Android + iOS launcher icon sizes from the source PNGs.
+  # Run once after adding the logo:  dart run flutter_launcher_icons
+  flutter_launcher_icons: ^0.14.4
+
+# ─── App launcher icon (ETL "Eat Truck Love" logo) ───────────────────────────
+# Drop the logo files under assets/icon/ (see assets/icon/README.md), then run:
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"          # 1024x1024, square
+  android: true
+  ios: true
+  remove_alpha_ios: true                            # App Store: no transparency
+  background_color_ios: "#FFFFFF"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"               # Android 8+ adaptive icon
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -82,6 +98,7 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/icon/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
