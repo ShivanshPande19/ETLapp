@@ -1,0 +1,17 @@
+# Android release signing — TEMPLATE.
+#
+# Copy this file to  android/key.properties  and fill in your real values.
+# The real key.properties (and *.jks / *.keystore) are gitignored — NEVER commit
+# them, and keep a safe backup of the keystore file + passwords. If you lose the
+# keystore you can never update the app on the Play Store again.
+#
+# Create the keystore once:
+#   keytool -genkey -v -keystore ~/etl-upload-keystore.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# Then set the values below (storeFile is best given as an ABSOLUTE path):
+
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=upload
+storeFile=/Users/you/etl-upload-keystore.jks

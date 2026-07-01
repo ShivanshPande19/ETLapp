@@ -28,6 +28,7 @@ from .api.routes import roster
 from .api.routes import attendance
 from .api.routes import onboarding
 from .api.routes import notices
+from .api.routes import legal
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -153,3 +154,4 @@ app.include_router(attendance.router,   prefix="/attendance",   tags=["Attendanc
 app.include_router(onboarding.router,   prefix="/onboarding",   tags=["Onboarding"])
 app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"])
 app.include_router(notices.router,      prefix="/notices",      tags=["Notices"])
+app.include_router(legal.router,                                tags=["Legal"])
