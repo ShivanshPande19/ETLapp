@@ -8,6 +8,7 @@ from typing import Optional
 from ...database import get_db
 from ...schemas.attendance import RosterResponse, EtlRosterResponse
 from ...services.roster_service import get_daily_roster, get_etl_court_roster
+from ...core.query_utils import now_ist
 from ..deps import get_current_user, CurrentUser
 
 router = APIRouter()
@@ -25,7 +26,7 @@ def get_etl_roster(
         raise HTTPException(status_code=403, detail="ETL manager access required.")
 
     if not target_date:
-        target_date = date.today()
+        target_date = now_ist().date()
 
     return get_etl_court_roster(db, target_date, court_id)
 
@@ -48,6 +49,6 @@ def get_roster(
         raise HTTPException(status_code=403, detail="Access denied.")
 
     if not target_date:
-        target_date = date.today()
+        target_date = now_ist().date()
 
     return get_daily_roster(db, outlet_id, target_date)
