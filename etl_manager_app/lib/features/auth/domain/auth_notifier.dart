@@ -68,6 +68,9 @@ class AuthState {
 }
 
 class AuthNotifier extends Notifier<AuthState> {
+  // Guards against multiple concurrent 401s all triggering a logout at once.
+  bool _sessionExpiryInFlight = false;
+
   @override
   AuthState build() {
     // Try to restore a previous session (auth persistence across app kills).
@@ -181,6 +184,31 @@ class AuthNotifier extends Notifier<AuthState> {
     await ref.read(authRepositoryProvider).logout();
     _clearUserScopedProviders();
     state = const AuthState(status: AuthStatus.idle);
+  }
+
+  /// Called by the network layer when an authenticated request returns 401
+  /// (the JWT has expired or is no longer valid on the server).
+  ///
+  /// Previously nothing handled 401s: the token would silently expire, screens
+  /// that refetch (housekeeping / feedbacks / maintenance) would fail while
+  /// already-cached ones (sales) kept showing stale data, and the user had to
+  /// manually log out and back in. Now we clear the session and flip the auth
+  /// state so the router redirects straight to the login screen.
+  Future<void> sessionExpired() async {
+    // De-dupe: many requests can 401 together; only act once, and never when
+    // we're already logged out.
+    if (_sessionExpiryInFlight) return;
+    if (state.status != AuthStatus.success) return;
+    _sessionExpiryInFlight = true;
+    try {
+      await ref.read(authRepositoryProvider).logout(); // clears token storage
+    } catch (_) {}
+    _clearUserScopedProviders();
+    state = const AuthState(
+      status: AuthStatus.idle,
+      errorMessage: 'Session expired — please sign in again.',
+    );
+    _sessionExpiryInFlight = false;
   }
 
   /// Reset providers that hold data scoped to the logged-in user, so switching
