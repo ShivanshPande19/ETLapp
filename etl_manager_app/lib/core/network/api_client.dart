@@ -3,7 +3,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/token_storage.dart';
 import '../../features/auth/domain/auth_notifier.dart';
 
-const String baseUrl = 'http://172.20.10.4:8080';
+// Backend API base URL.
+//
+// Defaults to the production Railway backend, so a normal `flutter build`
+// (and App Store / Play Store releases) point at prod automatically.
+//
+// For local development against a machine on your LAN, override at build/run
+// time WITHOUT editing this file:
+//   flutter run --dart-define=API_BASE_URL=http://192.168.x.x:8080
+//
+// NOTE: this is NOT a secret — the URL ships inside every app binary regardless.
+// Real secrets (JWT key, Petpooja/Resend keys, DB URL) live only in the
+// backend's Railway env vars, never here.
+const String baseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'https://etlapp-production.up.railway.app',
+);
 
 /// Resolves a stored media path to a fully-qualified URL.
 ///
