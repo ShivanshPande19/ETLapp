@@ -17,6 +17,7 @@ from ...models.feedback import Feedback
 from ...models.sale import Court, Outlet
 from ...schemas.feedback import FeedbackCreate, FeedbackOut, FeedbackAnalytics
 from ..deps import get_current_user, CurrentUser
+from .events import fire_notify
 
 logger = logging.getLogger("feedback")
 
@@ -189,6 +190,18 @@ def submit_feedback(
         db.add(new_feedback)
         db.commit()
         db.refresh(new_feedback)
+
+        # ✅ Live SSE ping so managers/staff screens refresh instantly.
+        # Routed to the court channel (+ managers on court_id 0). Clients
+        # re-fetch their own role-scoped feedback lists.
+        fire_notify(
+            {
+                "type": "feedback_update",
+                "court_id": new_feedback.court_id or 0,
+                "outlet_id": new_feedback.outlet_id,
+                "feedback_id": new_feedback.id,
+            }
+        )
         return _to_out(new_feedback)
     except Exception as e:
         db.rollback()

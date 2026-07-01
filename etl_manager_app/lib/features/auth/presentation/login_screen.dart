@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../domain/auth_notifier.dart';
 import '../data/auth_repository.dart';
+import '../../../core/services/sse_service.dart';
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -207,6 +208,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     ref.listen<AuthState>(authNotifierProvider, (_, next) {
       if (next.status == AuthStatus.success) {
+        // Start the realtime SSE stream as soon as we're authenticated. This is
+        // idempotent (connect() disconnects first), and guarantees SSE is live
+        // even if this login flow doesn't pass through the biometric gate.
+        ref.read(sseServiceProvider).connect();
         context.go(next.isStaff ? '/staff/home' : '/home');
       }
       if (next.status == AuthStatus.error) {

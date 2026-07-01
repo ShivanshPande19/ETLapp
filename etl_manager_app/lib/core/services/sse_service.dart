@@ -10,6 +10,10 @@ import '../../features/staff/domain/housekeeping_notifier.dart';
 import '../../features/housekeeping/presentation/manager_housekeeping_screen.dart';
 import '../../features/maintenance/domain/maintenance_notifier.dart'; // ✅ NEW
 import '../../features/notices/domain/notices_notifier.dart';
+import '../../features/feedbacks/domain/etl_feedback_notifier.dart';
+import '../../features/feedbacks/domain/court_feedback_notifier.dart';
+import '../../features/feedbacks/domain/feedback_notifier.dart';
+import '../../features/home/presentation/home_providers.dart';
 
 class SSEService {
   final Ref _ref;
@@ -79,20 +83,34 @@ class SSEService {
     final type = data['type'];
 
     if (type == 'housekeeping_update') {
+      // Staff checklist + manager housekeeping screen + ETL home widget.
       _ref.invalidate(housekeepingNotifierProvider);
       final today = DateTime.now().toIso8601String().substring(0, 10);
       _ref.invalidate(managerHkProvider(today));
+      _ref.invalidate(homeHousekeepingProvider);
     }
 
-    // ✅ NEW: Maintenance ticket update — list turant refresh
+    // ✅ Maintenance ticket update — list + home count turant refresh.
     if (type == 'maintenance_update') {
       debugPrint(
         '[SSE] Maintenance update — issue #${data['issue_id']} → ${data['status']}',
       );
       _ref.invalidate(maintenanceNotifierProvider);
+      _ref.invalidate(homeMaintenanceProvider);
     }
 
-    // ✅ NEW: Notice update (shift change / early logout) — refresh notices + badge
+    // ✅ Feedback update (new customer review via QR/app) — every feedback
+    // view + the ETL home count refresh instantly for whichever role is open.
+    if (type == 'feedback_update') {
+      debugPrint('[SSE] Feedback update — feedback #${data['feedback_id']}');
+      _ref.invalidate(etlFeedbackNotifierProvider); // ETL manager: all feedback
+      _ref.invalidate(feedbackNotifierProvider); // outlet manager/staff
+      _ref.invalidate(courtFeedbackNotifierProvider); // ETL staff: court feedback
+      _ref.invalidate(homeFeedbacksProvider); // ETL home count
+    }
+
+    // ✅ Notice update (shift change / early logout / auto-close) — refresh
+    // notices list + unread badge.
     if (type == 'notice_update') {
       debugPrint('[SSE] Notice update — audience ${data['audience']}');
       _ref.invalidate(noticesNotifierProvider);
@@ -117,17 +135,21 @@ class SSEService {
     _buffer = '';
   }
 
+  // Court id from the stored "zone". Accepts a raw integer id (any court, not
+  // just 1–3), or a legacy A/B/C letter, or a digit embedded in the string.
+  // Matches housekeeping_notifier so staff in courts with id > 3 (or multi-
+  // digit ids) subscribe to the correct SSE channel.
   int? _parseZone(String? zone) {
     if (zone == null) return null;
     final z = zone.trim().toUpperCase();
     final direct = int.tryParse(z);
-    if (direct != null && direct >= 1 && direct <= 3) return direct;
+    if (direct != null && direct >= 1) return direct;
     final letter = RegExp(r'[ABC]').firstMatch(z)?.group(0);
     if (letter != null) return const {'A': 1, 'B': 2, 'C': 3}[letter];
-    final match = RegExp(r'(\d)').firstMatch(z);
+    final match = RegExp(r'(\d+)').firstMatch(z);
     if (match != null) {
       final n = int.tryParse(match.group(1)!);
-      if (n != null && n >= 1 && n <= 3) return n;
+      if (n != null && n >= 1) return n;
     }
     return null;
   }
