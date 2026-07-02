@@ -245,12 +245,15 @@ async def get_sales_trend(
             ts, tb = range_totals(start, end) if end >= start else (0.0, 0)
             points.append(SalesTrendPoint(label=month_abbr[mm], date=str(start), total_sales=ts, total_bills=tb))
     elif clean == "month":
-        # Last 4 weeks as 7-day buckets, ending yesterday (oldest -> newest).
-        # Cleaner + more actionable than 30 cramped daily bars.
+        # Last 4 calendar weeks (Sunday -> Saturday), ending with the week that
+        # contains yesterday. Sunday-aligned so buckets match how a week is
+        # actually counted. Oldest -> newest.
         bucket = "weekly"
-        for w in range(4, 0, -1):
-            end = today - timedelta(days=(w - 1) * 7 + 1)
-            start = end - timedelta(days=6)
+        yday = today - timedelta(days=1)
+        cur_sun = yday - timedelta(days=(yday.weekday() + 1) % 7)  # Sun on/before yday
+        for w in range(3, -1, -1):
+            start = cur_sun - timedelta(days=w * 7)
+            end = min(start + timedelta(days=6), yday)
             ts, tb = range_totals(start, end)
             points.append(SalesTrendPoint(
                 label=f"{start.day}-{end.day}",

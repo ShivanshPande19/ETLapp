@@ -27,13 +27,42 @@ class SalesState {
   });
 }
 
+class _CachedSales {
+  final SalesSummary summary;
+  final SalesTrend? trend;
+  const _CachedSales(this.summary, this.trend);
+}
+
 class SalesNotifier extends Notifier<SalesState> {
+  // Stale-while-revalidate cache so switching period/court is instant on
+  // revisit. Sales data only changes a few times a day (sync), so serving the
+  // cached view immediately and refreshing in the background is safe + fast.
+  final Map<String, _CachedSales> _cache = {};
+  // Guards against out-of-order responses when the user taps chips quickly:
+  // only the latest request is allowed to update state.
+  int _reqCounter = 0;
+
   @override
   SalesState build() {
     Future.microtask(
       () => fetchSummary(allCourts: true, period: SalesPeriod.yesterday),
     );
     return const SalesState(status: SalesLoadStatus.loading);
+  }
+
+  String _periodStr(SalesPeriod p) {
+    switch (p) {
+      case SalesPeriod.yesterday:
+        return 'yesterday';
+      case SalesPeriod.week:
+        return 'this_week';
+      case SalesPeriod.month:
+        return 'this_month';
+      case SalesPeriod.year:
+        return 'this_year';
+      case SalesPeriod.custom:
+        return 'custom';
+    }
   }
 
   Future<void> fetchSummary({
@@ -44,78 +73,84 @@ class SalesNotifier extends Notifier<SalesState> {
     String? customDateTo,
   }) async {
     final nextCourtId = allCourts ? null : courtId;
+    final periodStr = _periodStr(period);
+    final key =
+        '$periodStr|${nextCourtId ?? 'all'}|${customDateFrom ?? ''}|${customDateTo ?? ''}';
+    final reqId = ++_reqCounter;
 
-    state = SalesState(
-      status: SalesLoadStatus.loading,
-      summary: state.summary,
-      trend: state.trend,
+    SalesState base({
+      required SalesLoadStatus status,
+      SalesSummary? summary,
+      SalesTrend? trend,
+      String? error,
+    }) => SalesState(
+      status: status,
+      summary: summary,
+      trend: trend,
+      error: error,
       selectedCourtId: nextCourtId,
       period: period,
       customDateFrom: customDateFrom,
       customDateTo: customDateTo,
     );
 
-    try {
-      // API string convertor
-      String periodStr;
-      switch (period) {
-        case SalesPeriod.yesterday:
-          periodStr = 'yesterday';
-          break;
-        case SalesPeriod.week:
-          periodStr = 'this_week';
-          break;
-        case SalesPeriod.month:
-          periodStr = 'this_month';
-          break;
-        case SalesPeriod.year:
-          periodStr = 'this_year';
-          break;
-        case SalesPeriod.custom:
-          periodStr = 'custom';
-          break;
-      }
-
-      final repo = ref.read(salesRepositoryProvider);
-
-      // Summary is the primary payload; the trend chart is best-effort so a
-      // trend failure never blocks the numbers. Custom (single date) has no
-      // meaningful series, so skip it.
-      final summaryFut = repo.getSalesSummary(
-        courtId: nextCourtId,
-        period: periodStr,
-        dateFrom: customDateFrom,
-        dateTo: customDateTo,
-      );
-      final Future<SalesTrend?> trendFut = period == SalesPeriod.custom
-          ? Future.value(null)
-          : repo
-              .getSalesTrend(courtId: nextCourtId, period: periodStr)
-              .then<SalesTrend?>((t) => t)
-              .catchError((_) => null);
-
-      final results = await Future.wait([summaryFut, trendFut]);
-      final summary = results[0] as SalesSummary;
-      final trend = results[1] as SalesTrend?;
-
-      state = SalesState(
+    // 1) Instant paint: cached view if we have it, else keep current data
+    //    visible (no blank flash) while the fresh data loads.
+    final cached = _cache[key];
+    if (cached != null) {
+      state = base(
         status: SalesLoadStatus.loaded,
-        summary: summary,
-        trend: trend,
-        selectedCourtId: nextCourtId,
-        period: period,
-        customDateFrom: customDateFrom,
-        customDateTo: customDateTo,
+        summary: cached.summary,
+        trend: cached.trend,
       );
-    } catch (e) {
-      state = SalesState(
-        status: SalesLoadStatus.error,
-        error: e.toString(),
+    } else {
+      state = base(
+        status: SalesLoadStatus.loading,
+        summary: state.summary,
         trend: state.trend,
-        selectedCourtId: nextCourtId,
-        period: period,
       );
     }
+
+    final repo = ref.read(salesRepositoryProvider);
+
+    // 2) Fire summary + trend in parallel. Trend is best-effort.
+    final summaryFut = repo.getSalesSummary(
+      courtId: nextCourtId,
+      period: periodStr,
+      dateFrom: customDateFrom,
+      dateTo: customDateTo,
+    );
+    final Future<SalesTrend?> trendFut = period == SalesPeriod.custom
+        ? Future.value(null)
+        : repo
+            .getSalesTrend(courtId: nextCourtId, period: periodStr)
+            .then<SalesTrend?>((t) => t)
+            .catchError((_) => null);
+
+    // 3) Show the numbers as soon as the summary lands (chart keeps the old/
+    //    cached view for the split-second the trend is still in flight).
+    SalesSummary summary;
+    try {
+      summary = await summaryFut;
+    } catch (e) {
+      if (reqId != _reqCounter) return; // superseded
+      if (cached != null) return; // keep the cached view silently
+      state = base(status: SalesLoadStatus.error, error: e.toString(), trend: state.trend);
+      return;
+    }
+    if (reqId != _reqCounter) return;
+
+    state = base(
+      status: SalesLoadStatus.loaded,
+      summary: summary,
+      trend: cached?.trend ?? state.trend,
+    );
+
+    // 4) Patch in the fresh trend + refresh cache.
+    final trend = await trendFut;
+    if (reqId != _reqCounter) return;
+    state = base(status: SalesLoadStatus.loaded, summary: summary, trend: trend);
+    _cache[key] = _CachedSales(summary, trend);
   }
 }
 
