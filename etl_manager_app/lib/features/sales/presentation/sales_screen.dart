@@ -1385,7 +1385,8 @@ class _SalesTrendChart extends StatelessWidget {
 
     final maxV = t.maxSales;
     final n = t.points.length;
-    final step = (n / 6).ceil().clamp(1, n);
+    final step = n <= 12 ? 1 : (n / 8).ceil();
+    final showValues = n <= 5; // month = 4 weekly bars -> show ₹ on each
     int peakIdx = 0;
     for (var i = 1; i < n; i++) {
       if (t.points[i].totalSales > t.points[peakIdx].totalSales) peakIdx = i;
@@ -1462,7 +1463,7 @@ class _SalesTrendChart extends StatelessWidget {
             )
           else ...[
             SizedBox(
-              height: 120,
+              height: 140,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: List.generate(n, (i) {
@@ -1471,20 +1472,40 @@ class _SalesTrendChart extends StatelessWidget {
                   final isPeak = i == peakIdx;
                   return Expanded(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: n > 12 ? 1 : 3),
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: frac),
-                        duration: Duration(milliseconds: 500 + i * 12),
-                        curve: Curves.easeOutCubic,
-                        builder: (_, v, __) => Container(
-                          height: (v * 112).clamp(3.0, 112.0),
-                          decoration: BoxDecoration(
-                            color: isPeak ? _accent : _accent.withOpacity(0.26),
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(5),
+                      padding: EdgeInsets.symmetric(horizontal: n > 8 ? 2 : 5),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (showValues && p.totalSales > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 5),
+                              child: Text(
+                                '₹${_fmt(p.totalSales)}',
+                                maxLines: 1,
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: _black,
+                                ),
+                              ),
+                            ),
+                          TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0, end: frac),
+                            duration: Duration(milliseconds: 500 + i * 30),
+                            curve: Curves.easeOutCubic,
+                            builder: (_, v, __) => Container(
+                              height: (v * 104).clamp(3.0, 104.0),
+                              decoration: BoxDecoration(
+                                color: isPeak
+                                    ? _accent
+                                    : _accent.withOpacity(0.26),
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(5),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   );

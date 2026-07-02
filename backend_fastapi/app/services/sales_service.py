@@ -244,13 +244,30 @@ async def get_sales_trend(
             end = min(nxt - timedelta(days=1), today - timedelta(days=1))
             ts, tb = range_totals(start, end) if end >= start else (0.0, 0)
             points.append(SalesTrendPoint(label=month_abbr[mm], date=str(start), total_sales=ts, total_bills=tb))
+    elif clean == "month":
+        # Last 4 weeks as 7-day buckets, ending yesterday (oldest -> newest).
+        # Cleaner + more actionable than 30 cramped daily bars.
+        bucket = "weekly"
+        for w in range(4, 0, -1):
+            end = today - timedelta(days=(w - 1) * 7 + 1)
+            start = end - timedelta(days=6)
+            ts, tb = range_totals(start, end)
+            points.append(SalesTrendPoint(
+                label=f"{start.day}-{end.day}",
+                date=str(start),
+                total_sales=ts,
+                total_bills=tb,
+            ))
     else:
-        # yesterday & week -> last 7 days; month -> last 30 days. All end yesterday.
-        days = 30 if clean == "month" else 7
-        for i in range(days, 0, -1):
+        # yesterday & week -> last 7 days (daily), ending yesterday
+        for i in range(7, 0, -1):
             d = today - timedelta(days=i)
             ts, tb = range_totals(d, d)
-            label = str(d.day) if clean == "month" else d.strftime("%a")
-            points.append(SalesTrendPoint(label=label, date=str(d), total_sales=ts, total_bills=tb))
+            points.append(SalesTrendPoint(
+                label=d.strftime("%a"),
+                date=str(d),
+                total_sales=ts,
+                total_bills=tb,
+            ))
 
     return SalesTrendResponse(period=period, bucket=bucket, points=points)
