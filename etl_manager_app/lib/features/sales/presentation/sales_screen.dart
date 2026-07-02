@@ -180,26 +180,12 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
       backgroundColor: _black,
       body: FadeTransition(
         opacity: _fadeAnim ?? const AlwaysStoppedAnimation(1.0),
-        child: RefreshIndicator(
-          color: _white,
-          backgroundColor: _black,
-          strokeWidth: 2,
-          onRefresh: () => ref
-              .read(salesNotifierProvider.notifier)
-              .fetchSummary(
-                courtId: salesState.selectedCourtId,
-                period: salesState.period,
-                customDateFrom: salesState.customDateFrom,
-                customDateTo: salesState.customDateTo,
-              ),
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              // ── Black Header ──────────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              // ── Fixed Black Header (does NOT scroll) ─────────────────────
+              Padding(
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -321,12 +307,26 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                       ],
                     ),
                   ),
-                ),
-              ),
 
-              // ── White Body ────────────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Container(
+              // ── Scrollable White Body (only this scrolls) ────────────────
+              Expanded(
+                child: RefreshIndicator(
+                  color: _black,
+                  backgroundColor: _white,
+                  strokeWidth: 2,
+                  onRefresh: () => ref
+                      .read(salesNotifierProvider.notifier)
+                      .fetchSummary(
+                        courtId: salesState.selectedCourtId,
+                        period: salesState.period,
+                        customDateFrom: salesState.customDateFrom,
+                        customDateTo: salesState.customDateTo,
+                      ),
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Container(
                   decoration: const BoxDecoration(
                     color: _white,
                     borderRadius: BorderRadius.vertical(
@@ -544,6 +544,10 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                     ],
                   ),
                 ),
+              ),
+            ],
+          ),
+        ),
               ),
             ],
           ),
