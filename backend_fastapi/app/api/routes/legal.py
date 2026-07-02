@@ -114,7 +114,7 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 
   <h2>11. Contact</h2>
   <p>Questions about this policy or your data? Contact us at
-  <a href="mailto:[YOUR-CONTACT-EMAIL]">[YOUR-CONTACT-EMAIL]</a>.</p>
+  <a href="mailto:pshivanshofficial@gmail.com">pshivanshofficial@gmail.com</a>.</p>
 
   <footer>
     &copy; 2026 Azimuth &middot; ETL (Eat Truck Love). This policy applies to the
