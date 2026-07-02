@@ -17,7 +17,7 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Privacy Policy — ETL Manager</title>
+<title>Privacy Policy — Eat Truck Love</title>
 <style>
   :root { --red:#d02128; --ink:#111; --muted:#555; }
   * { box-sizing:border-box; }
@@ -39,10 +39,10 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 <div class="wrap">
   <header>
     <h1>Privacy Policy</h1>
-    <div class="muted">ETL Manager &mdash; by Azimuth &middot; Last updated: June 2026</div>
+    <div class="muted">Eat Truck Love &mdash; by Azimuth &middot; Last updated: June 2026</div>
   </header>
 
-  <p>ETL Manager (&ldquo;the App&rdquo;) is an internal operations tool used by the
+  <p>Eat Truck Love (&ldquo;the App&rdquo;) is an internal operations tool used by the
   managers and staff of ETL (Eat Truck Love) food courts to manage attendance,
   housekeeping, sales insights, feedback and maintenance. This policy explains
   what information we collect, why, and how it is handled.</p>
@@ -118,7 +118,7 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 
   <footer>
     &copy; 2026 Azimuth &middot; ETL (Eat Truck Love). This policy applies to the
-    ETL Manager mobile application.
+    Eat Truck Love mobile application.
   </footer>
 </div>
 </body>
