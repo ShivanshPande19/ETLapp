@@ -8,6 +8,7 @@ enum SalesPeriod { yesterday, week, month, year, custom }
 class SalesState {
   final SalesLoadStatus status;
   final SalesSummary? summary;
+  final SalesTrend? trend;
   final String? error;
   final int? selectedCourtId;
   final SalesPeriod period;
@@ -17,6 +18,7 @@ class SalesState {
   const SalesState({
     this.status = SalesLoadStatus.idle,
     this.summary,
+    this.trend,
     this.error,
     this.selectedCourtId,
     this.period = SalesPeriod.yesterday,
@@ -46,6 +48,7 @@ class SalesNotifier extends Notifier<SalesState> {
     state = SalesState(
       status: SalesLoadStatus.loading,
       summary: state.summary,
+      trend: state.trend,
       selectedCourtId: nextCourtId,
       period: period,
       customDateFrom: customDateFrom,
@@ -73,18 +76,32 @@ class SalesNotifier extends Notifier<SalesState> {
           break;
       }
 
-      final summary = await ref
-          .read(salesRepositoryProvider)
-          .getSalesSummary(
-            courtId: nextCourtId,
-            period: periodStr,
-            dateFrom: customDateFrom,
-            dateTo: customDateTo,
-          );
+      final repo = ref.read(salesRepositoryProvider);
+
+      // Summary is the primary payload; the trend chart is best-effort so a
+      // trend failure never blocks the numbers. Custom (single date) has no
+      // meaningful series, so skip it.
+      final summaryFut = repo.getSalesSummary(
+        courtId: nextCourtId,
+        period: periodStr,
+        dateFrom: customDateFrom,
+        dateTo: customDateTo,
+      );
+      final Future<SalesTrend?> trendFut = period == SalesPeriod.custom
+          ? Future.value(null)
+          : repo
+              .getSalesTrend(courtId: nextCourtId, period: periodStr)
+              .then<SalesTrend?>((t) => t)
+              .catchError((_) => null);
+
+      final results = await Future.wait([summaryFut, trendFut]);
+      final summary = results[0] as SalesSummary;
+      final trend = results[1] as SalesTrend?;
 
       state = SalesState(
         status: SalesLoadStatus.loaded,
         summary: summary,
+        trend: trend,
         selectedCourtId: nextCourtId,
         period: period,
         customDateFrom: customDateFrom,
@@ -94,6 +111,7 @@ class SalesNotifier extends Notifier<SalesState> {
       state = SalesState(
         status: SalesLoadStatus.error,
         error: e.toString(),
+        trend: state.trend,
         selectedCourtId: nextCourtId,
         period: period,
       );
