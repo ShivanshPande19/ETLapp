@@ -1,7 +1,8 @@
-"""Public legal pages (privacy policy) served as static HTML.
+"""Public legal pages (privacy policy + data deletion) served as static HTML.
 
-Hosted automatically by the backend, so the store-required Privacy Policy URL is
-simply:  https://etlapp-production.up.railway.app/privacy
+Hosted automatically by the backend, so the store-required URLs are simply:
+  Privacy Policy URL       ->  https://etlapp-production.up.railway.app/privacy
+  Data deletion request URL->  https://etlapp-production.up.railway.app/data-deletion
 
 ⚠️ Before submitting to the stores, replace the [BRACKETED] placeholders below
 (contact email, company legal name if different) with your real details.
@@ -93,7 +94,8 @@ _PRIVACY_HTML = """<!DOCTYPE html>
   <h2>6. Data retention</h2>
   <p>We keep your information for as long as your account is active and as needed
   for legitimate operational, legal and security purposes. You may request
-  deletion of your account data by contacting us.</p>
+  deletion of your account data at any time &mdash; see
+  <a href="/data-deletion">Data deletion</a>.</p>
 
   <h2>7. Security</h2>
   <p>Data is transmitted over encrypted HTTPS connections, access is protected by
@@ -102,7 +104,9 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 
   <h2>8. Your rights</h2>
   <p>You may request access to, correction of, or deletion of your personal data.
-  To do so, contact us at the email below.</p>
+  To request deletion, follow the steps on our
+  <a href="/data-deletion">Data deletion</a> page, or contact us at the email
+  below.</p>
 
   <h2>9. Children</h2>
   <p>This app is intended for use by employees and authorised personnel and is not
@@ -129,3 +133,91 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 @router.get("/privacy", include_in_schema=False)
 def privacy_policy():
     return HTMLResponse(content=_PRIVACY_HTML)
+
+
+_DATA_DELETION_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Data Deletion Request — Eat Truck Love</title>
+<style>
+  :root { --red:#d02128; --ink:#111; --muted:#555; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); line-height:1.65; background:#fafafa; }
+  .wrap { max-width:760px; margin:0 auto; padding:32px 20px 72px; }
+  header { border-bottom:3px solid var(--red); padding-bottom:16px; margin-bottom:24px; }
+  h1 { margin:0 0 4px; font-size:28px; }
+  h2 { margin:32px 0 8px; font-size:19px; }
+  .muted { color:var(--muted); font-size:14px; }
+  ul, ol { padding-left:20px; }
+  li { margin:6px 0; }
+  a { color:var(--red); }
+  .card { background:#fff; border:1px solid #eee; border-radius:12px; padding:18px 20px; margin:20px 0; }
+  .mail { display:inline-block; margin-top:6px; background:var(--red); color:#fff; text-decoration:none;
+          padding:10px 18px; border-radius:8px; font-weight:600; }
+  footer { margin-top:40px; padding-top:16px; border-top:1px solid #e5e5e5; font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Data Deletion Request</h1>
+    <div class="muted">Eat Truck Love &mdash; by Azimuth &middot; Last updated: June 2026</div>
+  </header>
+
+  <p>This page explains how users of the Eat Truck Love (ETL) app can request
+  deletion of their account and associated personal data.</p>
+
+  <p>Eat Truck Love is an internal operations app. Accounts are created and
+  managed by ETL administrators, so account and data deletion is handled through
+  a verified request rather than an in-app button.</p>
+
+  <h2>How to request deletion</h2>
+  <div class="card">
+    <ol>
+      <li>Send an email to the address below from the email address linked to
+          your ETL account.</li>
+      <li>Use the subject line: <strong>Data deletion request</strong>.</li>
+      <li>Include your full name and the court/outlet you are associated with so
+          we can verify your identity.</li>
+    </ol>
+    <a class="mail" href="mailto:pshivanshofficial@gmail.com?subject=Data%20deletion%20request">
+      Email a deletion request
+    </a>
+    <div class="muted" style="margin-top:10px;">pshivanshofficial@gmail.com</div>
+  </div>
+
+  <h2>What gets deleted</h2>
+  <p>On a verified request we delete the personal data associated with your
+  account, including:</p>
+  <ul>
+    <li>Your profile details (name, email, phone number, profile photo).</li>
+    <li>Attendance records and check-in/out photos linked to your account.</li>
+    <li>Onboarding details and documents you submitted, where applicable.</li>
+  </ul>
+
+  <h2>What may be retained</h2>
+  <p>We may retain a limited amount of information where we are required to by
+  law, or for legitimate security, fraud-prevention, dispute-resolution and
+  record-keeping purposes. Aggregated or de-identified business data (for
+  example, outlet sales totals) that is not personally identifiable may be kept.</p>
+
+  <h2>Timeline</h2>
+  <p>We aim to verify and action deletion requests within <strong>30 days</strong>
+  of receiving them, and we will confirm by email once completed.</p>
+
+  <footer>
+    &copy; 2026 Azimuth &middot; ETL (Eat Truck Love). See also our
+    <a href="/privacy">Privacy Policy</a>.
+  </footer>
+</div>
+</body>
+</html>
+"""
+
+
+@router.get("/data-deletion", include_in_schema=False)
+def data_deletion():
+    return HTMLResponse(content=_DATA_DELETION_HTML)
