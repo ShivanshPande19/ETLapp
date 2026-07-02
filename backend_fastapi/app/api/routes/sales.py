@@ -5,8 +5,8 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from ...database import get_db
-from ...schemas.sale import SalesSummaryResponse, VendorHistoryResponse
-from ...services.sales_service import get_sales_summary, get_vendor_history
+from ...schemas.sale import SalesSummaryResponse, VendorHistoryResponse, SalesTrendResponse
+from ...services.sales_service import get_sales_summary, get_vendor_history, get_sales_trend
 from ...services.petpooja_service import (
     sync_court_by_fetch_date,
     sync_all_active_outlets_by_fetch_date,
@@ -31,6 +31,21 @@ async def sales_summary(
         period=period,
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@router.get("/trend", response_model=SalesTrendResponse)
+async def sales_trend(
+    court_id: Optional[int] = Query(None),
+    outlet_id: Optional[int] = Query(None),
+    period: str = Query("yesterday"),
+    db: Session = Depends(get_db),
+):
+    return await get_sales_trend(
+        db=db,
+        court_id=court_id,
+        outlet_id=outlet_id,
+        period=period,
     )
 
 

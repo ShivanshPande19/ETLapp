@@ -13,7 +13,6 @@ const _white = Color(0xFFFFFFFF);
 const _black = Color(0xFF0A0A0A);
 const _grey = Color(0xFF888888);
 const _lightGrey = Color(0xFFF2F2F2);
-const _border = Color(0xFF1A1A1A);
 // Premium accents (subtle — not loud)
 const _accent = Color(0xFF22C55E); // emerald — revenue/positive (matches app)
 const _cardBorder = Color(0xFFECECEC); // soft light border for premium cards
@@ -394,70 +393,49 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
-                                child: Text(
-                                  'Vendor Breakdown',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                    color: _black,
-                                    letterSpacing: -0.3,
+                              // ── Trend chart (period + court scoped) ──
+                              if (salesState.status !=
+                                  SalesLoadStatus.error) ...[
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: _SalesTrendChart(
+                                    trend: salesState.trend,
+                                    period: salesState.period,
+                                    loading:
+                                        isLoading && salesState.trend == null,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
+                                const SizedBox(height: 24),
+                              ],
 
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
-                                child: isLoading
-                                    ? _BentoSkeleton()
-                                    : salesState.status == SalesLoadStatus.error
-                                    ? const _ErrorRow(
-                                        message: 'Could not load sales',
-                                      )
-                                    : summary != null &&
-                                          summary.vendors.isNotEmpty
-                                    ? _VendorBentoGrid(
-                                        vendors: summary.vendors,
-                                        total: summary.totalSales,
-                                        courtId:
-                                            salesState.selectedCourtId ?? 1,
-                                        repo: repo,
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-
-                              const SizedBox(height: 28),
-
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
-                                child: Text(
-                                  'Vendors',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                    color: _black,
-                                    letterSpacing: -0.3,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-
+                              // ── Body: error / loading / empty / content ──
                               if (salesState.status == SalesLoadStatus.error)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 20),
-                                  child: _ErrorRow(
-                                    message: 'Could not load vendors',
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: _SalesErrorState(
+                                    onRetry: () => ref
+                                        .read(salesNotifierProvider.notifier)
+                                        .fetchSummary(
+                                          courtId: salesState.selectedCourtId,
+                                          period: salesState.period,
+                                          customDateFrom:
+                                              salesState.customDateFrom,
+                                          customDateTo: salesState.customDateTo,
+                                        ),
                                   ),
                                 )
-                              else if (isLoading)
+                              else if (isLoading && summary == null) ...[
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: _BentoSkeleton(),
+                                ),
+                                const SizedBox(height: 20),
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 20,
@@ -471,8 +449,68 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                       ),
                                     ),
                                   ),
+                                ),
+                              ] else if (summary == null ||
+                                  summary.vendors.isEmpty ||
+                                  summary.totalSales <= 0)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: _SalesEmptyState(
+                                    courtSelected:
+                                        salesState.selectedCourtId != null,
+                                    hasOutlets: summary != null &&
+                                        summary.vendors.isNotEmpty,
+                                    periodLabel: _periodLabel(
+                                      salesState.period,
+                                      summary?.date,
+                                    ),
+                                  ),
                                 )
-                              else if (summary != null)
+                              else ...[
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: Text(
+                                    'Vendor Breakdown',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: _black,
+                                      letterSpacing: -0.3,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: _VendorBentoGrid(
+                                    vendors: summary.vendors,
+                                    total: summary.totalSales,
+                                    courtId: salesState.selectedCourtId ?? 1,
+                                    repo: repo,
+                                  ),
+                                ),
+                                const SizedBox(height: 28),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  child: Text(
+                                    'Vendors',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: _black,
+                                      letterSpacing: -0.3,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
                                 ...summary.vendors.asMap().entries.map(
                                   (e) => Padding(
                                     padding: const EdgeInsets.fromLTRB(
@@ -496,6 +534,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                     ),
                                   ),
                                 ),
+                              ],
 
                               const SizedBox(height: 110),
                             ],
@@ -1305,26 +1344,368 @@ class _SkeletonBox extends StatelessWidget {
   );
 }
 
-// ── Error Row ─────────────────────────────────────────────────────────────────
+// ── Sales Trend Chart (native bar chart — no package) ─────────────────────────
 
-class _ErrorRow extends StatelessWidget {
-  final String message;
-  const _ErrorRow({required this.message});
+class _SalesTrendChart extends StatelessWidget {
+  final SalesTrend? trend;
+  final SalesPeriod period;
+  final bool loading;
+  const _SalesTrendChart({
+    required this.trend,
+    required this.period,
+    required this.loading,
+  });
+
+  String get _title {
+    switch (period) {
+      case SalesPeriod.yesterday:
+        return 'Last 7 days';
+      case SalesPeriod.week:
+        return 'This week';
+      case SalesPeriod.month:
+        return 'This month';
+      case SalesPeriod.year:
+        return 'This year';
+      case SalesPeriod.custom:
+        return 'Trend';
+    }
+  }
+
+  String _fmt(double v) {
+    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
+    return v.toStringAsFixed(0);
+  }
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: _white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: _border, width: 1.5),
-    ),
-    child: Row(
-      children: [
-        const Icon(Icons.error_outline_rounded, color: Colors.red, size: 18),
-        const SizedBox(width: 10),
-        Text(message, style: GoogleFonts.inter(fontSize: 13, color: _grey)),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    if (loading) return const _ChartSkeleton();
+    final t = trend;
+    if (t == null || t.points.isEmpty) return const SizedBox.shrink();
+
+    final maxV = t.maxSales;
+    final n = t.points.length;
+    final step = (n / 6).ceil().clamp(1, n);
+    int peakIdx = 0;
+    for (var i = 1; i < n; i++) {
+      if (t.points[i].totalSales > t.points[peakIdx].totalSales) peakIdx = i;
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _cardBorder, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _title,
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: _black,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  Text(
+                    'Sales trend',
+                    style: GoogleFonts.inter(fontSize: 11.5, color: _grey),
+                  ),
+                ],
+              ),
+              if (t.hasAnySales)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '₹${_fmt(maxV)}',
+                      style: GoogleFonts.antonSc(fontSize: 18, color: _black),
+                    ),
+                    Text(
+                      'peak',
+                      style: GoogleFonts.inter(fontSize: 10.5, color: _grey),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (!t.hasAnySales)
+            SizedBox(
+              height: 120,
+              child: Center(
+                child: Text(
+                  'No sales in this period',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: _grey,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            )
+          else ...[
+            SizedBox(
+              height: 120,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(n, (i) {
+                  final p = t.points[i];
+                  final frac = maxV > 0 ? p.totalSales / maxV : 0.0;
+                  final isPeak = i == peakIdx;
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: n > 12 ? 1 : 3),
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: frac),
+                        duration: Duration(milliseconds: 500 + i * 12),
+                        curve: Curves.easeOutCubic,
+                        builder: (_, v, __) => Container(
+                          height: (v * 112).clamp(3.0, 112.0),
+                          decoration: BoxDecoration(
+                            color: isPeak ? _accent : _accent.withOpacity(0.26),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(5),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: List.generate(n, (i) {
+                final show = i % step == 0 || i == n - 1;
+                return Expanded(
+                  child: Text(
+                    show ? t.points[i].label : '',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: GoogleFonts.inter(
+                      fontSize: 9.5,
+                      color: _grey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+
+
+// ── Chart skeleton ────────────────────────────────────────────────────────────
+
+class _ChartSkeleton extends StatelessWidget {
+  const _ChartSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 190,
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _cardBorder, width: 1.5),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: List.generate(7, (i) {
+          final h = 30.0 + (i % 3) * 34.0;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Container(
+                height: h,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEDEDED),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(5),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+// ── Empty state (no outlets / no sales) ───────────────────────────────────────
+
+class _SalesEmptyState extends StatelessWidget {
+  final bool courtSelected;
+  final bool hasOutlets;
+  final String periodLabel;
+  const _SalesEmptyState({
+    required this.courtSelected,
+    required this.hasOutlets,
+    required this.periodLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool noOutlets = courtSelected && !hasOutlets;
+    final IconData icon =
+        noOutlets ? Icons.storefront_outlined : Icons.bar_chart_rounded;
+    final String title =
+        noOutlets ? 'No outlets in this court' : 'No sales to show';
+    final String subtitle = noOutlets
+        ? 'Assign vendors/outlets to this court to start seeing their sales here.'
+        : 'There were no recorded sales for $periodLabel. Try a different period or court.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFBFBFB),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _cardBorder, width: 1.5),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              color: _lightGrey,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 30, color: _grey),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _black,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: _grey,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+// ── Error state (network / server) with retry ─────────────────────────────────
+
+class _SalesErrorState extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _SalesErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFBFBFB),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _cardBorder, width: 1.5),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.wifi_off_rounded,
+              size: 28,
+              color: Color(0xFFEF4444),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "Couldn't load sales",
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _black,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Check your internet connection and try again.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(fontSize: 13, color: _grey, height: 1.45),
+          ),
+          const SizedBox(height: 18),
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onRetry();
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+              decoration: BoxDecoration(
+                color: _black,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.refresh_rounded, size: 16, color: _white),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Retry',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

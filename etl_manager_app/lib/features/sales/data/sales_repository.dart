@@ -138,6 +138,52 @@ class VendorHistory {
   }
 }
 
+// ── SalesTrend (chart series) ─────────────────────────────────────────────────
+
+class SalesTrendPoint {
+  final String label;
+  final double totalSales;
+  final int totalBills;
+
+  SalesTrendPoint({
+    required this.label,
+    required this.totalSales,
+    required this.totalBills,
+  });
+
+  factory SalesTrendPoint.fromJson(Map<String, dynamic> json) {
+    return SalesTrendPoint(
+      label: json['label']?.toString() ?? '',
+      totalSales: (json['total_sales'] ?? 0).toDouble(),
+      totalBills: json['total_bills'] ?? 0,
+    );
+  }
+}
+
+class SalesTrend {
+  final String period;
+  final String bucket; // "daily" | "monthly"
+  final List<SalesTrendPoint> points;
+
+  SalesTrend({required this.period, required this.bucket, required this.points});
+
+  factory SalesTrend.fromJson(Map<String, dynamic> json) {
+    final list = json['points'] as List? ?? [];
+    return SalesTrend(
+      period: json['period']?.toString() ?? '',
+      bucket: json['bucket']?.toString() ?? 'daily',
+      points: list
+          .map((e) => SalesTrendPoint.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  double get maxSales =>
+      points.isEmpty ? 0 : points.map((p) => p.totalSales).reduce((a, b) => a > b ? a : b);
+
+  bool get hasAnySales => points.any((p) => p.totalSales > 0);
+}
+
 // ── SalesRepository ───────────────────────────────────────────────────────────
 
 class SalesRepository {
@@ -161,6 +207,20 @@ class SalesRepository {
     );
     // Backend se aaya data, model me bhejo
     return SalesSummary.fromJson(response.data as Map<String, dynamic>, period);
+  }
+
+  Future<SalesTrend> getSalesTrend({
+    int? courtId,
+    String period = 'yesterday',
+  }) async {
+    final response = await _dio.get(
+      '/sales/trend',
+      queryParameters: <String, dynamic>{
+        'period': period,
+        if (courtId != null) 'court_id': courtId,
+      },
+    );
+    return SalesTrend.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<VendorHistory> fetchVendorHistory({

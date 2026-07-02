@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from calendar import month_abbr
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -10,6 +11,8 @@ from ..schemas.sale import (
     VendorSaleDetail,
     VendorHistoryResponse,
     DailySnapshot,
+    SalesTrendPoint,
+    SalesTrendResponse,
 )
 
 
@@ -187,3 +190,67 @@ async def get_vendor_history(
         best_day=best.date if best else "",
         daily_history=history,
     )
+
+
+
+def _resolve_outlet_ids(db: Session, court_id: Optional[int], outlet_id: Optional[int]) -> list[int]:
+    q = db.query(Outlet).filter(Outlet.is_active == 1)
+    if outlet_id:
+        q = q.filter(Outlet.id == outlet_id)
+    elif court_id:
+        q = q.filter(Outlet.court_id == court_id)
+    return [o.id for o in q.all()]
+
+
+async def get_sales_trend(
+    db: Session,
+    court_id: Optional[int] = None,
+    outlet_id: Optional[int] = None,
+    period: str = "yesterday",
+) -> SalesTrendResponse:
+    """Daily/monthly time-series for the sales chart, scoped to all courts, one
+    court, or one outlet. Every series ends at 'yesterday' (IST) so today's
+    in-progress sales never show — consistent with the summary."""
+    today = now_ist().date()
+    clean = period.lower().replace("this_", "")
+    outlet_ids = _resolve_outlet_ids(db, court_id, outlet_id)
+
+    def range_totals(start: date, end: date) -> tuple[float, int]:
+        if not outlet_ids:
+            return 0.0, 0
+        rows = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id.in_(outlet_ids),
+            DailySaleCache.sale_date >= start,
+            DailySaleCache.sale_date <= end,
+        ).all()
+        return round(sum(r.total_sales for r in rows), 2), sum(r.bill_count for r in rows)
+
+    points: list[SalesTrendPoint] = []
+    bucket = "daily"
+
+    if clean == "year":
+        bucket = "monthly"
+        y, m = today.year, today.month
+        months: list[tuple[int, int]] = []
+        for _ in range(12):
+            months.append((y, m))
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+        months.reverse()
+        for (yy, mm) in months:
+            start = date(yy, mm, 1)
+            nxt = date(yy + 1, 1, 1) if mm == 12 else date(yy, mm + 1, 1)
+            end = min(nxt - timedelta(days=1), today - timedelta(days=1))
+            ts, tb = range_totals(start, end) if end >= start else (0.0, 0)
+            points.append(SalesTrendPoint(label=month_abbr[mm], date=str(start), total_sales=ts, total_bills=tb))
+    else:
+        # yesterday & week -> last 7 days; month -> last 30 days. All end yesterday.
+        days = 30 if clean == "month" else 7
+        for i in range(days, 0, -1):
+            d = today - timedelta(days=i)
+            ts, tb = range_totals(d, d)
+            label = str(d.day) if clean == "month" else d.strftime("%a")
+            points.append(SalesTrendPoint(label=label, date=str(d), total_sales=ts, total_bills=tb))
+
+    return SalesTrendResponse(period=period, bucket=bucket, points=points)

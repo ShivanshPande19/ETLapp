@@ -69,3 +69,16 @@ class VendorHistoryResponse(BaseModel):
     last_week_total: float
     best_day: str
     daily_history: List[DailySnapshot]
+
+
+class SalesTrendPoint(BaseModel):
+    label: str          # short axis label (e.g. "Mon", "12", "Jun")
+    date: str           # ISO date the bucket starts on
+    total_sales: float
+    total_bills: int
+
+
+class SalesTrendResponse(BaseModel):
+    period: str
+    bucket: str         # "daily" | "monthly"
+    points: List[SalesTrendPoint]
