@@ -308,32 +308,35 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                     ),
                   ),
 
-              // ── Scrollable White Body (only this scrolls) ────────────────
+              // ── Fixed white sheet; only its content scrolls ──────────────
               Expanded(
-                child: RefreshIndicator(
-                  color: _black,
-                  backgroundColor: _white,
-                  strokeWidth: 2,
-                  onRefresh: () => ref
-                      .read(salesNotifierProvider.notifier)
-                      .fetchSummary(
-                        courtId: salesState.selectedCourtId,
-                        period: salesState.period,
-                        customDateFrom: salesState.customDateFrom,
-                        customDateTo: salesState.customDateTo,
-                      ),
-                  child: CustomScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: Container(
+                child: Container(
+                  width: double.infinity,
                   decoration: const BoxDecoration(
                     color: _white,
                     borderRadius: BorderRadius.vertical(
                       top: Radius.circular(28),
                     ),
                   ),
-                  child: Column(
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
+                    child: RefreshIndicator(
+                      color: _black,
+                      backgroundColor: _white,
+                      strokeWidth: 2,
+                      onRefresh: () => ref
+                          .read(salesNotifierProvider.notifier)
+                          .fetchSummary(
+                            courtId: salesState.selectedCourtId,
+                            period: salesState.period,
+                            customDateFrom: salesState.customDateFrom,
+                            customDateTo: salesState.customDateTo,
+                          ),
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 28),
@@ -543,11 +546,10 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                       ),
                     ],
                   ),
+                    ),
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
               ),
             ],
           ),
