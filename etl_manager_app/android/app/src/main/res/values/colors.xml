@@ -3,4 +3,5 @@
     <!-- Native launch screen background — matches the Flutter SplashScreen (#080808)
          so there's no white flash before the engine draws its first frame. -->
     <color name="splash_bg">#FF080808</color>
+	<color name="ic_launcher_background">#FFFFFF</color>
 </resources>
