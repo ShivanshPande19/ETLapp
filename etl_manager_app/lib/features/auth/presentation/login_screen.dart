@@ -16,6 +16,9 @@ const _white = Color(0xFFFFFFFF);
 const _grey = Color(0xFF888888);
 const _danger = Color(0xFFEF4444);
 const _card = Color(0xFFF5F5F5);
+// Brand red (Eat Truck Love)
+const _red = Color(0xFFC1272D);
+const _redDark = Color(0xFF9A161B);
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 class LoginScreen extends ConsumerStatefulWidget {
@@ -262,6 +265,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             primary: _black,
                             onSurface: _black,
                           ),
+                          // Ensure a visible BLACK caret/handles on the light
+                          // card (global dark theme made the cursor white).
+                          textSelectionTheme: const TextSelectionThemeData(
+                            cursorColor: _black,
+                            selectionColor: Color(0x33C1272D),
+                            selectionHandleColor: _red,
+                          ),
                         ),
                         child: Container(
                           width: double.infinity,
@@ -372,8 +382,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                           'Forgot password?',
                                           style: GoogleFonts.inter(
                                             fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: _black,
+                                            fontWeight: FontWeight.w700,
+                                            color: _red,
                                           ),
                                         ),
                                       ),
@@ -499,7 +509,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: _black, width: 1.5),
+                        borderSide: const BorderSide(color: _red, width: 1.5),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 14),
@@ -550,7 +560,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         decoration: BoxDecoration(
-                          color: _black,
+                          gradient: const LinearGradient(
+                            colors: [_red, _redDark],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Center(
@@ -598,7 +612,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         decoration: BoxDecoration(
-                          color: _black,
+                          gradient: const LinearGradient(
+                            colors: [_red, _redDark],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Center(
@@ -698,11 +716,14 @@ class _DotsPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..style = PaintingStyle.fill;
-    for (final d in _dots) {
+    for (var i = 0; i < _dots.length; i++) {
+      final d = _dots[i];
       final val = (t * d[3] + d[4]) % 1.0;
       final opacity = (0.5 - (val - 0.5).abs()) * 0.25;
       final yOffset = (val - 0.5) * 18 * d[3];
-      paint.color = _white.withOpacity(opacity.clamp(0.0, 0.15));
+      // Every third dot is brand-red for a subtle warm accent.
+      final base = i % 3 == 0 ? _red : _white;
+      paint.color = base.withOpacity(opacity.clamp(0.0, 0.18));
       canvas.drawCircle(
         Offset(d[0] * size.width, d[1] * size.height + yOffset),
         d[2],
@@ -747,28 +768,30 @@ class _BrandSection extends StatelessWidget {
                 builder: (_, child) =>
                     Transform.scale(scale: logoPulse.value, child: child),
                 child: Container(
-                  width: 72,
-                  height: 72,
+                  width: 108,
+                  height: 108,
+                  padding: const EdgeInsets.all(9),
                   decoration: BoxDecoration(
                     color: _white,
-                    borderRadius: BorderRadius.circular(20),
+                    shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: _white.withOpacity(0.12),
-                        blurRadius: 28,
-                        spreadRadius: 2,
+                        color: _red.withOpacity(0.50),
+                        blurRadius: 44,
+                        spreadRadius: 3,
                       ),
                       BoxShadow(
-                        color: _white.withOpacity(0.05),
-                        blurRadius: 48,
-                        spreadRadius: 8,
+                        color: _red.withOpacity(0.20),
+                        blurRadius: 80,
+                        spreadRadius: 14,
                       ),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.store_mall_directory_rounded,
-                    color: _black,
-                    size: 34,
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/images/etl_logo.png',
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),
@@ -800,10 +823,10 @@ class _BrandSection extends StatelessWidget {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: _white.withOpacity(0.07),
+                      color: _red.withOpacity(0.14),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: _white.withOpacity(0.1),
+                        color: _red.withOpacity(0.40),
                         width: 1,
                       ),
                     ),
@@ -811,8 +834,8 @@ class _BrandSection extends StatelessWidget {
                       'Food Court Management',
                       style: GoogleFonts.inter(
                         fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: _grey,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFFF0B4B4),
                       ),
                     ),
                   ),
@@ -877,7 +900,7 @@ class _InputFieldState extends State<_InputField> {
           style: GoogleFonts.inter(
             fontSize: 11,
             fontWeight: FontWeight.w700,
-            color: _focused ? _black : _grey,
+            color: _focused ? _red : _grey,
             letterSpacing: .6,
           ),
           child: Text(widget.label.toUpperCase()),
@@ -890,15 +913,15 @@ class _InputFieldState extends State<_InputField> {
             color: _focused ? _white : _card,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: _focused ? _black.withOpacity(0.3) : Colors.grey.shade200,
+              color: _focused ? _red : Colors.grey.shade200,
               width: 1.5,
             ),
             boxShadow: _focused
                 ? [
                     BoxShadow(
-                      color: _black.withOpacity(0.07),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
+                      color: _red.withOpacity(0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
                   ]
                 : [],
@@ -911,7 +934,7 @@ class _InputFieldState extends State<_InputField> {
                 child: Icon(
                   widget.icon,
                   key: ValueKey(_focused),
-                  color: _focused ? _black : _grey,
+                  color: _focused ? _red : _grey,
                   size: 18,
                 ),
               ),
@@ -1013,14 +1036,21 @@ class _SignInButtonState extends State<_SignInButton>
           width: double.infinity,
           height: 54,
           decoration: BoxDecoration(
-            color: widget.isLoading ? _black.withOpacity(0.45) : _black,
+            gradient: widget.isLoading
+                ? null
+                : const LinearGradient(
+                    colors: [_red, _redDark],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+            color: widget.isLoading ? _redDark.withOpacity(0.5) : null,
             borderRadius: BorderRadius.circular(14),
             boxShadow: (!widget.isLoading && !_pressed)
                 ? [
                     BoxShadow(
-                      color: _black.withOpacity(0.20),
-                      blurRadius: 18,
-                      offset: const Offset(0, 6),
+                      color: _red.withOpacity(0.40),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
                     ),
                   ]
                 : [],
