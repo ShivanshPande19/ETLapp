@@ -29,7 +29,8 @@ def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str
         return yesterday, yesterday
 
     if clean_period == "week":
-        return today - timedelta(days=7), yesterday
+        # Current calendar week so far: Monday of this week -> yesterday.
+        return today - timedelta(days=today.weekday()), yesterday
 
     if clean_period == "month":
         # Current calendar month so far: 1st of this month -> yesterday.
@@ -37,7 +38,8 @@ def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str
         return today.replace(day=1), yesterday
 
     if clean_period == "year":
-        return today - timedelta(days=365), yesterday
+        # Current calendar year so far: Jan 1 -> yesterday.
+        return today.replace(month=1, day=1), yesterday
 
     # FIX: Custom select karne par range nahi, balki exact SINGLE DATE pick hogi
     if clean_period == "custom" and date_from:
@@ -230,28 +232,27 @@ async def get_sales_trend(
     points: list[SalesTrendPoint] = []
     bucket = "daily"
 
+    yday = today - timedelta(days=1)
+
     if clean == "year":
+        # Monthly buckets for the CURRENT calendar year (Jan -> current month),
+        # each clamped to yesterday. Sum of these == the 'year' summary total.
         bucket = "monthly"
-        y, m = today.year, today.month
-        months: list[tuple[int, int]] = []
-        for _ in range(12):
-            months.append((y, m))
-            m -= 1
-            if m == 0:
-                m, y = 12, y - 1
-        months.reverse()
-        for (yy, mm) in months:
-            start = date(yy, mm, 1)
-            nxt = date(yy + 1, 1, 1) if mm == 12 else date(yy, mm + 1, 1)
-            end = min(nxt - timedelta(days=1), today - timedelta(days=1))
+        yr = today.year
+        for mm in range(1, today.month + 1):
+            start = date(yr, mm, 1)
+            nxt = date(yr, mm + 1, 1) if mm < 12 else date(yr + 1, 1, 1)
+            end = min(nxt - timedelta(days=1), yday)
             ts, tb = range_totals(start, end) if end >= start else (0.0, 0)
-            points.append(SalesTrendPoint(label=month_abbr[mm], date=str(start), total_sales=ts, total_bills=tb))
+            points.append(SalesTrendPoint(
+                label=month_abbr[mm], date=str(start),
+                total_sales=ts, total_bills=tb,
+            ))
     elif clean == "month":
-        # Weekly buckets WITHIN the current calendar month only (1-7, 8-14, ...),
-        # clamped to yesterday. Previously this used a rolling last-4-weeks window
-        # that bled into the previous month's data.
+        # 7-day buckets WITHIN the current calendar month (1-7, 8-14, ...),
+        # clamped to yesterday. Day-of-month based, so it does NOT matter which
+        # weekday the 1st falls on. Sum of these == the 'month' summary total.
         bucket = "weekly"
-        yday = today - timedelta(days=1)
         start = today.replace(day=1)
         while start <= yday:
             end = min(start + timedelta(days=6), yday)
@@ -263,8 +264,21 @@ async def get_sales_trend(
                 total_bills=tb,
             ))
             start = start + timedelta(days=7)
+    elif clean == "week":
+        # Daily bars for the CURRENT calendar week (Monday -> yesterday).
+        # Sum of these == the 'week' summary total.
+        d = today - timedelta(days=today.weekday())  # Monday of this week
+        while d <= yday:
+            ts, tb = range_totals(d, d)
+            points.append(SalesTrendPoint(
+                label=d.strftime("%a"),
+                date=str(d),
+                total_sales=ts,
+                total_bills=tb,
+            ))
+            d = d + timedelta(days=1)
     else:
-        # yesterday & week -> last 7 days (daily), ending yesterday
+        # 'yesterday' -> last 7 days (daily) for context, ending yesterday.
         for i in range(7, 0, -1):
             d = today - timedelta(days=i)
             ts, tb = range_totals(d, d)
