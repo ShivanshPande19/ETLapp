@@ -234,49 +234,64 @@ async def get_sales_trend(
 
     yday = today - timedelta(days=1)
 
+    def totals_upto_yesterday(s: date, e: date) -> tuple[float, int]:
+        # Count only completed business days (<= yesterday). Buckets that lie in
+        # the future contribute 0, so every chart keeps its full, pre-set shape
+        # (no single fat bar) while the visible totals still add up to the
+        # summary for the same period.
+        e2 = min(e, yday)
+        return range_totals(s, e2) if s <= e2 else (0.0, 0)
+
     if clean == "year":
-        # Monthly buckets for the CURRENT calendar year (Jan -> current month),
-        # each clamped to yesterday. Sum of these == the 'year' summary total.
+        # All 12 months of the current calendar year (Jan..Dec). Months that
+        # haven't happened yet show 0 so the chart is always a full 12-bar shape.
         bucket = "monthly"
         yr = today.year
-        for mm in range(1, today.month + 1):
+        for mm in range(1, 13):
             start = date(yr, mm, 1)
             nxt = date(yr, mm + 1, 1) if mm < 12 else date(yr + 1, 1, 1)
-            end = min(nxt - timedelta(days=1), yday)
-            ts, tb = range_totals(start, end) if end >= start else (0.0, 0)
+            ts, tb = totals_upto_yesterday(start, nxt - timedelta(days=1))
             points.append(SalesTrendPoint(
                 label=month_abbr[mm], date=str(start),
                 total_sales=ts, total_bills=tb,
             ))
     elif clean == "month":
-        # 7-day buckets WITHIN the current calendar month (1-7, 8-14, ...),
-        # clamped to yesterday. Day-of-month based, so it does NOT matter which
-        # weekday the 1st falls on. Sum of these == the 'month' summary total.
+        # All 7-day buckets of the current month (1-7, 8-14, 15-21, 22-28,
+        # 29-EOM). Weeks not reached yet show 0 so the chart is a proper
+        # multi-bar shape, not one big block. Day-of-month based, so the weekday
+        # the 1st falls on (e.g. Wednesday) never distorts it.
         bucket = "weekly"
-        start = today.replace(day=1)
-        while start <= yday:
-            end = min(start + timedelta(days=6), yday)
-            ts, tb = range_totals(start, end)
+        first = today.replace(day=1)
+        nxt_month = (date(first.year + 1, 1, 1)
+                     if first.month == 12
+                     else date(first.year, first.month + 1, 1))
+        last_day = (nxt_month - timedelta(days=1)).day
+        day = 1
+        while day <= last_day:
+            end_day = min(day + 6, last_day)
+            start = first.replace(day=day)
+            ts, tb = totals_upto_yesterday(start, first.replace(day=end_day))
             points.append(SalesTrendPoint(
-                label=f"{start.day}-{end.day}",
+                label=f"{day}-{end_day}",
                 date=str(start),
                 total_sales=ts,
                 total_bills=tb,
             ))
-            start = start + timedelta(days=7)
+            day = end_day + 1
     elif clean == "week":
-        # Daily bars for the CURRENT calendar week (Monday -> yesterday).
-        # Sum of these == the 'week' summary total.
-        d = today - timedelta(days=today.weekday())  # Monday of this week
-        while d <= yday:
-            ts, tb = range_totals(d, d)
+        # All 7 days of the current calendar week (Mon..Sun). Days not reached
+        # yet show 0 so the chart is always a full 7-bar shape.
+        bucket = "daily"
+        monday = today - timedelta(days=today.weekday())
+        for i in range(7):
+            d = monday + timedelta(days=i)
+            ts, tb = totals_upto_yesterday(d, d)
             points.append(SalesTrendPoint(
                 label=d.strftime("%a"),
                 date=str(d),
                 total_sales=ts,
                 total_bills=tb,
             ))
-            d = d + timedelta(days=1)
     else:
         # 'yesterday' -> last 7 days (daily) for context, ending yesterday.
         for i in range(7, 0, -1):
