@@ -42,7 +42,12 @@
     <string>ETL Manager uses Face ID to keep your data secure</string>
 
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>ETL Manager uses your location only while the app is open, to verify your attendance check-in is at the correct court/outlet.</string>
+    <string>Eat Truck Love uses your location only while the app is open, to verify your attendance check-in is at the correct court/outlet.</string>
+    <!-- Required by App Store (ITMS-90683): the location SDK references the
+         always/when-in-use API. The app only uses location in the foreground;
+         it never tracks location in the background. -->
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Eat Truck Love uses your location only while the app is open, to verify your attendance check-in is at the correct court/outlet. It does not track your location in the background.</string>
 
     <key>UIApplicationSceneManifest</key>
     <dict>
