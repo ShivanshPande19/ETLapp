@@ -7,7 +7,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>ETL Manager</string>
+    <string>Eat Truck Love</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -26,6 +26,10 @@
     <string>$(FLUTTER_BUILD_NUMBER)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <!-- App only uses standard HTTPS/TLS (exempt encryption), so App Store
+         Connect won't ask about export compliance on every upload. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     
     <key>NSCameraUsageDescription</key>
     <string>Required to take proof photos for housekeeping tasks and mark attendance</string>
@@ -82,7 +86,7 @@
     </array>
     <!-- ATS enforced (HTTPS only) for the production backend. Arbitrary cleartext
          loads are NOT allowed. NSAllowsLocalNetworking stays true so a local-dev
-         build (--dart-define=API_BASE_URL=http://192.168.x.x:8080) still works
+         build (dart-define API_BASE_URL=http://192.168.x.x:8080) still works
          without disabling ATS for public traffic. -->
     <key>NSAppTransportSecurity</key>
     <dict>
