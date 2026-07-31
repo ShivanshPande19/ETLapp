@@ -63,7 +63,13 @@ final dioProvider = Provider<Dio>((ref) {
         final statusCode = error.response?.statusCode;
         final path = error.requestOptions.path;
         final isAuthCall = path.contains('/auth/');
-        if (statusCode == 401 && !isAuthCall) {
+        // Device (push token) calls are also exempt. They fire outside the
+        // normal user-driven flow — on cold start, on an FCM token refresh, and
+        // during logout — so a 401 there means "this token is already stale",
+        // NOT "the user's session just ended". Without this exemption a failed
+        // push registration would sign a perfectly valid user out.
+        final isDeviceCall = path.contains('/devices/');
+        if (statusCode == 401 && !isAuthCall && !isDeviceCall) {
           ref.read(authNotifierProvider.notifier).sessionExpired();
         }
         return handler.next(error);

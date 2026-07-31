@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../features/auth/domain/auth_notifier.dart';
 import '../core/services/biometric_service.dart';
+import '../core/services/push_service.dart'; // ✅ FCM import
 import '../core/services/sse_service.dart'; // ✅ SSE import
 
 class BiometricGate extends ConsumerStatefulWidget {
@@ -76,12 +77,22 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     // ✅ SSE connect — login ke baad ek baar
     ref.read(sseServiceProvider).connect();
 
+    // ✅ FCM — permission + register this device against the signed-in user.
+    // Fire-and-forget: a push failure must never delay or block sign-in.
+    final push = ref.read(pushServiceProvider);
+    push.initialise();
+
     print('[BIOMETRIC] Navigating — isStaff: ${authState.isStaff}');
     if (authState.isStaff) {
       context.go('/staff/home');
     } else {
       context.go('/home');
     }
+
+    // Release any notification tap that arrived while the app was starting.
+    // Must come AFTER the go() above: the router's redirect pins everything to
+    // '/' until auth is resolved, so an earlier navigation would be discarded.
+    push.openGate();
   }
 
   @override

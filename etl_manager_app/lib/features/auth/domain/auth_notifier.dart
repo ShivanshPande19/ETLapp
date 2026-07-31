@@ -3,6 +3,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/auth_repository.dart';
+import '../../../core/services/push_service.dart';
 import '../../../core/utils/token_storage.dart';
 import '../../notices/domain/notices_notifier.dart';
 
@@ -181,9 +182,28 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> logout() async {
+    // Unregister the push token FIRST — this is an authenticated call, and
+    // authRepository.logout() wipes the JWT it needs.
+    //
+    // This is what stops the next person who signs in on a SHARED DEVICE from
+    // receiving this user's notifications: the FCM token belongs to the app
+    // installation, not the person.
+    await _unregisterPushDevice();
+
     await ref.read(authRepositoryProvider).logout();
     _clearUserScopedProviders();
     state = const AuthState(status: AuthStatus.idle);
+  }
+
+  /// Best-effort push cleanup. Never throws and never blocks sign-out.
+  Future<void> _unregisterPushDevice() async {
+    try {
+      await ref.read(pushServiceProvider).unregister();
+    } catch (_) {
+      // Offline, or Firebase not configured. The backend also transfers token
+      // ownership on the next /devices/register, so a missed unregister here
+      // cannot leak notifications to the next user.
+    }
   }
 
   /// Called by the network layer when an authenticated request returns 401
@@ -200,6 +220,11 @@ class AuthNotifier extends Notifier<AuthState> {
     if (_sessionExpiryInFlight) return;
     if (state.status != AuthStatus.success) return;
     _sessionExpiryInFlight = true;
+    // Drop the local FCM token so a stale device can't keep receiving pushes.
+    // The server-side unregister will 401 (the JWT is what expired), which is
+    // fine — /devices/ is exempt from the 401 handler, and the backend re-binds
+    // the token to whoever registers it next.
+    await _unregisterPushDevice();
     try {
       await ref.read(authRepositoryProvider).logout(); // clears token storage
     } catch (_) {}

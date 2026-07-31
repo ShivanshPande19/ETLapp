@@ -72,6 +72,12 @@
     </dict>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
+    <!-- Lets APNs wake the app to hand a push to firebase_messaging while it is
+         backgrounded. Without this, background/data messages are not delivered. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>

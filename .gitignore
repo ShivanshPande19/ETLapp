@@ -38,3 +38,19 @@ __pycache__/
 *.sqlite3
 
 !seed_etl.db
+
+
+# ─── Firebase ────────────────────────────────────────────────────────────────
+# The service-account JSON grants full admin access to the Firebase project.
+# It belongs ONLY in the backend's FIREBASE_CREDENTIALS_JSON env var (Railway),
+# never in git.
+**/serviceAccountKey.json
+**/firebase-adminsdk*.json
+*-firebase-adminsdk-*.json
+
+# APNs signing key — Apple only lets you download it once.
+*.p8
+
+# NOTE: android/app/google-services.json and ios/Runner/GoogleService-Info.plist
+# are deliberately NOT ignored. They contain no secrets (they ship inside every
+# app binary) and the build needs them present.
