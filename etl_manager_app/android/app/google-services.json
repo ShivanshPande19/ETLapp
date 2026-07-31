@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "344681241326",
+    "project_id": "etl-manager-azimuth",
+    "storage_bucket": "etl-manager-azimuth.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:344681241326:android:e08ceccdceb57d214431ff",
+        "android_client_info": {
+          "package_name": "com.azimuth.etl"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyTEtC1-JmM5D7YW65xiQMhXanz3-BMDc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
