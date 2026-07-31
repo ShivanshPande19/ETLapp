@@ -13,7 +13,9 @@ from ...services.staff_service import (
     create_staff, deactivate_staff, reassign_court
 )
 from ...services.notice_service import create_notice
+from ...services.push_targeting import deactivate_tokens_for_user
 from ...models.staff import Staff
+from ...models.sale import Court
 from ...core.config import settings
 from ..deps import get_current_user, CurrentUser
 
@@ -199,9 +201,45 @@ def remove_staff_access(
     else:
         raise HTTPException(status_code=403, detail="Manager access required.")
 
+    # Trigger #22 — tell them BEFORE deactivating.
+    #
+    # Ordering matters: push targeting joins live against `staff` and filters on
+    # `Staff.is_active == True` (so a revoked account stops receiving), which
+    # means a notice created after deactivation would reach nobody. Their access
+    # dies on the next request anyway (get_current_user re-queries is_active),
+    # so without this the account just silently stops working.
+    try:
+        create_notice(
+            db,
+            audience="staff",
+            type="access_removed",
+            title="Your access has been removed",
+            body=(
+                "Your ETL account has been deactivated by your manager. "
+                "Contact them if you think this is a mistake."
+            ),
+            court_id=staff.court_id,
+            outlet_id=staff.outlet_id,
+            staff_id=staff.id,
+            recipient_staff_id=staff.id,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[STAFF] deactivation notice failed for {staff_id}: {e}")
+
     success = deactivate_staff(staff_id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Stop pushing to their devices now that the account is gone.
+    try:
+        n = deactivate_tokens_for_user(db, user_type="staff", user_id=staff_id)
+        db.commit()
+        if n:
+            print(f"[STAFF] disabled {n} device token(s) for staff {staff_id}")
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        print(f"[STAFF] token cleanup failed for {staff_id}: {e}")
+
     return {"message": "Access removed successfully"}
 
 
@@ -220,6 +258,32 @@ def assign_court(
     staff = reassign_court(staff_id, req.court_id, db)
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Trigger #23 — a court move silently changes three things for this person:
+    # their geofence (attendance._staff_court), their business-day cutoff
+    # (Court.day_cutoff_hour) and which manager sees their events. Worth a push.
+    try:
+        court = db.query(Court).filter(Court.id == req.court_id).first()
+        create_notice(
+            db,
+            audience="staff",
+            type="court_changed",
+            title="You have been moved to a new court",
+            body=(
+                f"You are now assigned to {court.name}. Your check-in location has "
+                f"changed — make sure you are at the new court before marking "
+                f"attendance."
+                if court
+                else "Your court assignment has changed. Your check-in location "
+                     "has changed too."
+            ),
+            court_id=req.court_id,
+            staff_id=staff.id,
+            recipient_staff_id=staff.id,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[STAFF] court-change notice failed for {staff_id}: {e}")
+
     return staff
 
 

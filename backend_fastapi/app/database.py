@@ -257,3 +257,37 @@ def ensure_hk_columns() -> None:
                         )
     except Exception as e:
         print(f"[MIGRATION] ensure_hk_columns skipped: {e}")
+
+
+
+def ensure_device_token_columns() -> None:
+    """Add newly-introduced columns to an existing `device_tokens` table.
+
+    `create_all` builds the table fresh with every column, so this only matters
+    on a deploy where the table already exists from an earlier version.
+    Best-effort + idempotent, same as the other ensure_* helpers.
+    """
+    needed = {
+        "user_type": "VARCHAR",
+        "user_id": "INTEGER",
+        "email": "VARCHAR",
+        "role": "VARCHAR",
+        "court_id": "INTEGER",
+        "outlet_id": "INTEGER",
+        "platform": "VARCHAR",
+        "app_version": "VARCHAR",
+        "last_seen_at": "DATETIME" if _is_sqlite else "TIMESTAMP",
+    }
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "device_tokens" not in insp.get_table_names():
+                return  # create_all builds it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("device_tokens")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE device_tokens ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:
+        print(f"[MIGRATION] ensure_device_token_columns skipped: {e}")

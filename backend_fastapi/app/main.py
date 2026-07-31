@@ -28,6 +28,7 @@ from .api.routes import roster
 from .api.routes import attendance
 from .api.routes import onboarding
 from .api.routes import notices
+from .api.routes import devices
 from .api.routes import legal
 
 from .models import sale as _sale_models
@@ -39,13 +40,15 @@ from .models import staff as _staff_models
 from .models import attendance as _attendance_models
 from .models import onboarding as _onboarding_models
 from .models import notice as _notice_models
+from .models import device_token as _device_token_models
 
+from .services import fcm_service
 from .services.scheduler_service import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -74,9 +77,21 @@ async def lifespan(app: FastAPI):
     ensure_hk_columns()
     print("[DB] Housekeeping schema ensured ✓")
 
+    # ✅ Add FCM device-token columns if the table predates them
+    ensure_device_token_columns()
+    print("[DB] Device token schema ensured ✓")
+
     _hk_routes._main_loop = asyncio.get_event_loop()
     events._main_loop = asyncio.get_event_loop()
+    # Push is fired from sync route handlers running in worker threads, so it
+    # needs the loop reference just like SSE does.
+    fcm_service._main_loop = asyncio.get_event_loop()
     print("[SSE] Event loop captured ✓")
+
+    if fcm_service.is_configured():
+        print("[FCM] Push notifications enabled ✓")
+    else:
+        print("[FCM] Push disabled — FIREBASE_PROJECT_ID / FIREBASE_CREDENTIALS_JSON not set")
 
     start_scheduler()
     print("[AUTO SYNC] scheduler boot hook executed ✓")
@@ -154,4 +169,5 @@ app.include_router(attendance.router,   prefix="/attendance",   tags=["Attendanc
 app.include_router(onboarding.router,   prefix="/onboarding",   tags=["Onboarding"])
 app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"])
 app.include_router(notices.router,      prefix="/notices",      tags=["Notices"])
+app.include_router(devices.router,      prefix="/devices",      tags=["Devices"])
 app.include_router(legal.router,                                tags=["Legal"])

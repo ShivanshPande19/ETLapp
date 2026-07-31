@@ -30,3 +30,11 @@ psycopg2-binary==2.9.10
 jinja2==3.1.4
 email-validator==2.2.0
 APScheduler==3.10.4
+
+# FCM push notifications (services/fcm_service.py).
+# google-auth is used ONLY to mint the OAuth2 access token for the FCM HTTP v1
+# API; messages themselves go out over the httpx client already pinned above.
+# Deliberately NOT firebase-admin — that pulls grpcio + google-cloud-firestore,
+# a heavy compiled tree on python:3.10-slim, for one endpoint we don't need.
+google-auth==2.38.0
+requests==2.32.3
