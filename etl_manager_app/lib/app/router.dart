@@ -30,6 +30,8 @@ import '../features/staff/presentation/outlet_staff_home_screen.dart';
 import '../features/staff/presentation/mark_attendance_screen.dart';
 import '../features/staff/presentation/etl_roster_screen.dart';
 
+import '../features/notices/presentation/notices_screen.dart';
+
 import 'shell_screen.dart';
 import 'biometric_gate.dart';
 import 'splash_screen.dart';
@@ -93,6 +95,10 @@ CustomTransitionPage<T> _buildPage<T>({
   );
 }
 
+/// Locations any authenticated role is allowed to visit, regardless of the
+/// per-role redirects further down. Push-notification deep links land here.
+const _roleAgnosticRoutes = {'/notices', '/settings'};
+
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authNotifierProvider);
 
@@ -123,6 +129,13 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       if (isLoggedIn) {
         final role = authState.role;
+
+        // ── Routes every signed-in role may open ─────────────────────────────
+        // Checked BEFORE the per-role rules below, which otherwise rewrite any
+        // unrecognised location back to that role's home. A push notification
+        // deep-links here, so without this an etl_staff tapping a notification
+        // would be bounced to /staff/home and never see what they tapped.
+        if (_roleAgnosticRoutes.contains(loc)) return null;
 
         if (role == 'etl_staff') {
           if (!loc.startsWith('/staff')) return '/staff/home';
@@ -207,6 +220,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const EtlRosterScreen(),
+          slideFromRight: true,
+        ),
+      ),
+      // Notices inbox. Previously only reachable via Navigator.push from the
+      // settings / staff-home bell, which meant a push notification had nowhere
+      // to deep-link to. Registered as a top-level route (not inside a shell)
+      // so it opens full-screen for every role — see _roleAgnosticRoutes above,
+      // which exempts it from the per-role redirects.
+      GoRoute(
+        path: '/notices',
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: const NoticesScreen(),
           slideFromRight: true,
         ),
       ),

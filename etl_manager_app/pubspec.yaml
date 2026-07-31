@@ -54,6 +54,32 @@ dependencies:
   flutter_map: ^8.1.1
   latlong2: ^0.9.1
 
+  # ⚠️ Declared EXPLICITLY on purpose. core/services/sse_service.dart imports
+  # `package:http`, but until now it was only ever pulled in TRANSITIVELY by
+  # another package. Adding the Firebase packages below re-resolves the
+  # lockfile, and if nothing else happened to depend on http any more, SSE
+  # would break with a compile error. Never rely on a transitive import.
+  http: ^1.6.0
+
+  # ─── Push notifications ───────────────────────────────────────────────────
+  # Background + terminated delivery is drawn by the native FCM SDK, so no
+  # local-notifications package is required for the case that actually matters.
+  #
+  # Foreground is handled per-platform without an extra dependency:
+  #   iOS     — setForegroundNotificationPresentationOptions() makes the system
+  #             draw the banner even while the app is open.
+  #   Android — the OS deliberately does NOT draw one for a foreground app, so
+  #             PushService shows an in-app banner and refreshes the badge.
+  #
+  # `flutter_local_notifications` was considered for Android foreground banners
+  # but deliberately left out for now: v21+ forces compileSdk 36 and minSdk 24
+  # (this app currently inherits Flutter's defaults and targets minSdk 21 per
+  # flutter_launcher_icons below), which is a device-support decision rather
+  # than a notifications one. Easy to add later if system-style foreground
+  # notifications are wanted.
+  firebase_core: ^4.12.1
+  firebase_messaging: ^16.4.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

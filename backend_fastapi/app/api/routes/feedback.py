@@ -16,6 +16,7 @@ from ...database import get_db
 from ...models.feedback import Feedback
 from ...models.sale import Court, Outlet
 from ...schemas.feedback import FeedbackCreate, FeedbackOut, FeedbackAnalytics
+from ...services.notice_service import create_notice
 from ..deps import get_current_user, CurrentUser
 from .events import fire_notify
 
@@ -146,6 +147,94 @@ def serve_feedback_portal(
 
 # ─── PUBLIC: Customer submits feedback (QR scan) ─────────────────────────────
 
+# ─── Durable notices (+ push) for new feedback ───────────────────────────────
+#
+# Submitted by an anonymous QR customer, so there is nobody to notify back —
+# these all go to staff-side personas.
+#
+# PRIVACY: the payload must never carry `customer_phone`. The API masks it
+# (_to_out → FeedbackOut.from_orm_masked) but the raw value is in the DB, and a
+# push notification renders on a LOCK SCREEN. Only name + rating + comment.
+
+_LOW_RATING_THRESHOLD = 2  # 1★ and 2★ count as an escalation
+
+
+def _rating_stars(rating: Optional[int]) -> str:
+    if not rating:
+        return ""
+    return "★" * int(rating)
+
+
+def _notify_feedback(db: Session, fb: Feedback) -> None:
+    """Fan out a new feedback to the personas that can act on it."""
+    try:
+        who = (fb.customer_name or "A customer").strip()
+
+        # ── Outlet review → ONLY that outlet's manager. ───────────────────────
+        # Trigger #15. Previously undeliverable: SSE keys on court_id, so the
+        # outlet manager could never be addressed.
+        if fb.outlet_id and fb.outlet_rating:
+            low = fb.outlet_rating <= _LOW_RATING_THRESHOLD
+            comment = (fb.outlet_comments or "").strip()
+            create_notice(
+                db,
+                audience="manager",
+                type="feedback_low" if low else "feedback_new",
+                title=(
+                    f"{_rating_stars(fb.outlet_rating)} review needs attention"
+                    if low
+                    else f"New {_rating_stars(fb.outlet_rating)} review"
+                ),
+                body=(
+                    f"{who} rated your outlet {fb.outlet_rating}/5"
+                    + (f': "{comment[:140]}"' if comment else ".")
+                ),
+                outlet_id=fb.outlet_id,
+            )
+
+        # ── Court review → ETL manager tier. ─────────────────────────────────
+        # Trigger #14.
+        if fb.court_rating:
+            low = fb.court_rating <= _LOW_RATING_THRESHOLD
+            comment = (fb.court_comments or "").strip()
+            create_notice(
+                db,
+                audience="manager",
+                type="feedback_low" if low else "feedback_new",
+                title=(
+                    f"{_rating_stars(fb.court_rating)} court review needs attention"
+                    if low
+                    else f"New {_rating_stars(fb.court_rating)} court review"
+                ),
+                body=(
+                    f"{who} rated the court {fb.court_rating}/5"
+                    + (f': "{comment[:140]}"' if comment else ".")
+                ),
+                court_id=fb.court_id,
+                outlet_id=None,
+            )
+
+        # ── Trigger #16: a low outlet rating is also an ETL-level escalation. ─
+        # The outlet manager was told above; the ETL manager needs to know a
+        # vendor in their court is being rated badly.
+        if fb.outlet_id and fb.outlet_rating and fb.outlet_rating <= _LOW_RATING_THRESHOLD:
+            outlet = db.query(Outlet).filter(Outlet.id == fb.outlet_id).first()
+            create_notice(
+                db,
+                audience="manager",
+                type="feedback_low",
+                title=f"{_rating_stars(fb.outlet_rating)} rating for an outlet",
+                body=(
+                    f"{(outlet.vendor_name if outlet else 'An outlet')} received "
+                    f"{fb.outlet_rating}/5 from {who}."
+                ),
+                court_id=fb.court_id,
+                outlet_id=None,
+            )
+    except Exception as e:  # noqa: BLE001 — never break a public submit
+        logger.error("[FEEDBACK] notice fan-out failed for #%s: %s", fb.id, e)
+
+
 @router.post(
     "/submit",
     response_model=FeedbackOut,
@@ -202,6 +291,8 @@ def submit_feedback(
                 "feedback_id": new_feedback.id,
             }
         )
+
+        _notify_feedback(db, new_feedback)
         return _to_out(new_feedback)
     except Exception as e:
         db.rollback()

@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 
 from ...schemas.court import CourtsResponse, CourtCreate, CourtLocationUpdate, CourtSettingsUpdate
 from ...services.court_service import get_all_courts
+from ...services.notice_service import create_notice
+from ...services.push_targeting import staff_ids_for_court
 from ...models.sale import Court
 from ...database import get_db
 from ..deps import get_current_user, CurrentUser
@@ -79,6 +81,42 @@ def create_court(
     return _court_out(court)
 
 
+def _notify_court_staff_geofence(db: Session, court: Court) -> None:
+    """Tell every staff member at this court that the check-in area changed.
+
+    Each staff gets their OWN audience="staff" notice addressed by
+    `recipient_staff_id` — deliberately not a court-wide broadcast, so the
+    per-user targeting rules in services/push_targeting.py still apply and
+    nobody receives somebody else's notice.
+
+    `staff_ids_for_court` covers both tiers: ETL staff via `Staff.court_id` and
+    outlet staff via `Staff.outlet_id -> Outlet.court_id` (outlet staff have a
+    NULL court_id, so a naive filter would silently miss all of them).
+    """
+    try:
+        staff_ids = staff_ids_for_court(db, court.id)
+        if not staff_ids:
+            return
+
+        radius = court.geofence_radius or 150
+        for sid in staff_ids:
+            create_notice(
+                db,
+                audience="staff",
+                type="geofence_changed",
+                title="Check-in location updated",
+                body=(
+                    f"The check-in area for {court.name} has been updated. You must "
+                    f"now be within {radius} m of the new location to mark attendance."
+                ),
+                court_id=court.id,
+                recipient_staff_id=sid,
+            )
+        print(f"[COURT] geofence change notified to {len(staff_ids)} staff at court {court.id}")
+    except Exception as e:  # noqa: BLE001 — never fail the update over a notice
+        print(f"[COURT] geofence notice fan-out failed for court {court.id}: {e}")
+
+
 @router.patch("/{court_id}/location")
 def set_court_location(
     court_id: int,
@@ -97,6 +135,12 @@ def set_court_location(
     if not court:
         raise HTTPException(status_code=404, detail="Court not found.")
 
+    moved = (
+        court.latitude != data.latitude
+        or court.longitude != data.longitude
+        or court.geofence_radius != data.geofence_radius
+    )
+
     court.latitude = data.latitude
     court.longitude = data.longitude
     court.geofence_radius = data.geofence_radius
@@ -105,6 +149,12 @@ def set_court_location(
 
     db.commit()
     db.refresh(court)
+
+    # Trigger #21 — the geofence moved, so staff who could check in from their
+    # usual spot yesterday may not be able to today. High-value because the
+    # failure mode is a confusing 403 at the start of a shift.
+    if moved:
+        _notify_court_staff_geofence(db, court)
 
     return _court_out(court)
 

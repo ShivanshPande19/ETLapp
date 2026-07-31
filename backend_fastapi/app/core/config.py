@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     PETPOOJA_ACCESS_TOKEN: str = ""
     PETPOOJA_COOKIE: str = ""
 
+    # ── Firebase Cloud Messaging (push notifications) ─────────────────────────
+    # FIREBASE_PROJECT_ID:       the Firebase project id, e.g. "etl-manager".
+    # FIREBASE_CREDENTIALS_JSON: the FULL service-account JSON as a single
+    #                            env var (Railway has no secret-file mount, so
+    #                            paste the file contents). Never commit this.
+    #
+    # If either is empty, push sending is skipped gracefully — in-app notices
+    # and SSE keep working, so local dev needs no Firebase setup at all.
+    FIREBASE_PROJECT_ID: str = ""
+    FIREBASE_CREDENTIALS_JSON: str = ""
+
     class Config:
         env_file = ".env"
         # Ye line zaroori hai taaki `.env` file mein agar koi extra 
