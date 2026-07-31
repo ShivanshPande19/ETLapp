@@ -37,6 +37,7 @@ async def auto_close_expired_tickets():
     """Close RESOLVED maintenance tickets older than the 24h verification window."""
     from ..models.maintenance import MaintenanceIssue
     from ..api.routes.events import notify_clients
+    from .notice_service import create_notice
 
     db: Session = SessionLocal()
     try:
@@ -58,11 +59,43 @@ async def auto_close_expired_tickets():
                     await notify_clients({
                         "type": "maintenance_update",
                         "court_id": ticket.court_id,
+                        "outlet_id": ticket.outlet_id,
                         "issue_id": ticket.id,
                         "status": "CLOSED",
                     })
                 except Exception:
                     pass
+
+                # Trigger #11 — auto-closed without the outlet's verdict.
+                # The outlet lost their say, so they get told; the ETL manager
+                # gets it for the audit trail.
+                try:
+                    create_notice(
+                        db,
+                        audience="manager",
+                        type="maintenance_auto_closed",
+                        title="Ticket closed automatically",
+                        body=(
+                            f"Your {ticket.issue_type} ticket was closed after "
+                            f"{VERIFICATION_WINDOW_HOURS}h without verification."
+                        ),
+                        outlet_id=ticket.outlet_id,
+                    )
+                    create_notice(
+                        db,
+                        audience="manager",
+                        type="maintenance_auto_closed",
+                        title="Ticket auto-closed (no verification)",
+                        body=(
+                            f"Ticket #{ticket.id} ({ticket.issue_type}) at "
+                            f"{ticket.outlet_name or 'an outlet'} closed after "
+                            f"{VERIFICATION_WINDOW_HOURS}h with no response."
+                        ),
+                        court_id=ticket.court_id,
+                        outlet_id=None,
+                    )
+                except Exception as ne:
+                    print(f"[AUTO_CLOSE] notice failed for #{ticket.id}: {ne}")
     except Exception as e:
         db.rollback()
         print(f"[AUTO_CLOSE] Error: {e}")
@@ -90,6 +123,7 @@ async def auto_close_forgotten_attendance():
         business_day_end_utc,
     )
     from .notice_service import create_notice
+    from .push_targeting import manager_scope_for_staff
 
     db: Session = SessionLocal()
     try:
@@ -139,10 +173,10 @@ async def auto_close_forgotten_attendance():
                 name = staff.name if staff else "Staff"
                 out_local = to_ist(close_at).strftime("%I:%M %p").lstrip("0")
                 # Route to outlet manager (outlet staff) or court/ETL manager.
-                if staff and staff.outlet_id and not staff.court_id:
-                    mgr_court_id, mgr_outlet_id = None, staff.outlet_id
-                else:
-                    mgr_court_id, mgr_outlet_id = rec.court_id, None
+                # Shared helper, so this matches attendance.py and push targeting.
+                mgr_court_id, mgr_outlet_id = manager_scope_for_staff(staff)
+                if mgr_court_id is None and mgr_outlet_id is None:
+                    mgr_court_id = rec.court_id
                 try:
                     create_notice(
                         db,

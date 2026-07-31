@@ -16,6 +16,11 @@
     <!-- Internet — dio/API calls -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- Push notifications — FCM.
+         Android 13 (API 33) and above require this at RUNTIME too; the prompt is
+         raised by FirebaseMessaging.requestPermission() in PushService. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="ETL Manager"
         android:name="${applicationName}"
@@ -37,10 +42,25 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Lets a tapped FCM notification reopen this activity so
+                 FirebaseMessaging.onMessageOpenedApp fires. `launchMode` above
+                 is already singleTop, so no duplicate activity is created. -->
+            <intent-filter>
+                <action android:name="FLUTTER_NOTIFICATION_CLICK"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Default channel for notifications that arrive while the app is in
+             the background. MUST match the `android_channel_id` the backend
+             sends (services/fcm_service.py -> _ANDROID_CHANNEL_ID) or Android
+             silently drops them into an unnamed low-importance channel. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="etl_default" />
     </application>
 
     <queries>

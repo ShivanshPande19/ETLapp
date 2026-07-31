@@ -13,6 +13,7 @@ from ...database import get_db
 from ...models.maintenance import MaintenanceIssue
 from ...models.sale import Court, Outlet
 from ...core.uploads import save_upload_image
+from ...services.notice_service import create_notice
 from ..deps import CurrentUser, get_current_user, require_etl_manager, require_outlet_user
 from .events import notify_clients
 
@@ -161,11 +162,59 @@ async def _notify(issue: MaintenanceIssue):
         await notify_clients({
             "type": "maintenance_update",
             "court_id": issue.court_id,
+            # outlet_id lets an outlet client tell "my ticket" from a
+            # neighbouring outlet's without a second round-trip.
+            "outlet_id": issue.outlet_id,
             "issue_id": issue.id,
             "status": issue.status,
         })
     except Exception:
         pass  # SSE failure must never break the API call
+
+
+# ─── Persistent notices (+ push) ─────────────────────────────────────────────
+#
+# SSE alone is ephemeral: it only reaches a device whose app is open. These
+# helpers add a durable Notice row, which create_notice() also turns into an
+# FCM push. Targeting rules (services/push_targeting.py):
+#   outlet_id set  → ONLY that outlet's manager
+#   outlet_id None → ONLY ETL managers
+# so a ticket never leaks to a neighbouring vendor.
+
+def _notify_etl(db: Session, issue: MaintenanceIssue, *, type: str, title: str, body: str) -> None:
+    """Durable notice for the ETL manager tier (outlet_id deliberately NULL)."""
+    try:
+        create_notice(
+            db,
+            audience="manager",
+            type=type,
+            title=title,
+            body=body,
+            court_id=issue.court_id,
+            outlet_id=None,
+        )
+    except Exception as e:  # noqa: BLE001 — notifications must not break the API
+        print(f"[MAINTENANCE] ETL notice failed for #{issue.id}: {e}")
+
+
+def _notify_outlet(db: Session, issue: MaintenanceIssue, *, type: str, title: str, body: str) -> None:
+    """Durable notice for the owning outlet's manager only."""
+    try:
+        create_notice(
+            db,
+            audience="manager",
+            type=type,
+            title=title,
+            body=body,
+            court_id=None,
+            outlet_id=issue.outlet_id,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[MAINTENANCE] outlet notice failed for #{issue.id}: {e}")
+
+
+def _ticket_label(issue: MaintenanceIssue) -> str:
+    return f"{issue.issue_type} · {issue.outlet_name or 'outlet'}"
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -216,6 +265,20 @@ async def raise_ticket(
     db.refresh(issue)
 
     await _notify(issue)
+
+    # Trigger #6 — new ticket. Goes to the ETL manager tier only; the outlet
+    # already knows (they just raised it).
+    urgency = " — HIGH PRIORITY" if (issue.priority or "").lower() == "high" else ""
+    _notify_etl(
+        db,
+        issue,
+        type="maintenance_raised",
+        title=f"New maintenance ticket{urgency}",
+        body=(
+            f"{issue.outlet_name or 'An outlet'} raised a {issue.issue_type} issue "
+            f"at {issue.court_name or 'the court'}: {issue.description[:120]}"
+        ),
+    )
     return _to_out(issue)
 
 
@@ -301,6 +364,19 @@ async def assign_technician(
     db.refresh(issue)
 
     await _notify(issue)
+
+    # Trigger #7 — technician assigned. The outlet that raised it needs the
+    # name/phone, so this one goes to the OWNING outlet only.
+    _notify_outlet(
+        db,
+        issue,
+        type="maintenance_assigned",
+        title="Technician assigned",
+        body=(
+            f"{issue.technician_name} ({issue.technician_phone}) has been assigned "
+            f"to your {issue.issue_type} ticket."
+        ),
+    )
     return _to_out(issue)
 
 
@@ -325,6 +401,20 @@ async def mark_resolved(
     db.refresh(issue)
 
     await _notify(issue)
+
+    # Trigger #8 — the highest-value push in the module. The outlet now has a
+    # hard 24h deadline to verify or the ticket auto-closes without their say
+    # (see scheduler_service.auto_close_expired_tickets).
+    _notify_outlet(
+        db,
+        issue,
+        type="maintenance_resolved",
+        title="Please verify the repair",
+        body=(
+            f"Your {issue.issue_type} ticket was marked resolved. Confirm within "
+            f"{VERIFICATION_WINDOW_HOURS}h or it closes automatically."
+        ),
+    )
     return _to_out(issue)
 
 
@@ -356,4 +446,30 @@ async def verify_closure(
     db.refresh(issue)
 
     await _notify(issue)
+
+    # Triggers #9 / #10 — the outlet's verdict. Both go to the ETL manager tier,
+    # since they are the ones who must act on a dispute.
+    if issue.status == IssueStatus.CLOSED.value:
+        _notify_etl(
+            db,
+            issue,
+            type="maintenance_closed",
+            title="Ticket verified and closed",
+            body=(
+                f"{issue.outlet_name or 'The outlet'} confirmed the "
+                f"{issue.issue_type} repair. Ticket #{issue.id} is closed."
+            ),
+        )
+    else:
+        _notify_etl(
+            db,
+            issue,
+            type="maintenance_disputed",
+            title="Repair disputed — needs rework",
+            body=(
+                f"{issue.outlet_name or 'The outlet'} was not satisfied with the "
+                f"{issue.issue_type} repair. Ticket #{issue.id} needs to be "
+                f"reassigned."
+            ),
+        )
     return _to_out(issue)

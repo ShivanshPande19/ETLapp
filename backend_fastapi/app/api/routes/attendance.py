@@ -31,6 +31,7 @@ from app.core.geo import (
     DEFAULT_GEOFENCE_RADIUS_M,
 )
 from app.services.notice_service import create_notice
+from app.services.push_targeting import manager_scope_for_staff
 from app.services.attendance_service import build_staff_calendar, build_court_calendars, build_outlet_calendars
 from app.api.deps import get_current_user, CurrentUser
 
@@ -486,12 +487,15 @@ def _notify_early_logout(
     early_min = int(round((scheduled_end - checkout_utc).total_seconds() / 60))
     out_local = to_ist(checkout_utc).strftime("%I:%M %p").lstrip("0")
 
-    # Route to the right manager: outlet staff → their outlet manager;
+    # Route to the right manager: outlet staff → their outlet manager ONLY;
     # ETL staff → the court (ETL manager).
-    if staff.outlet_id and not staff.court_id:
-        mgr_court_id, mgr_outlet_id = None, staff.outlet_id
-    else:
-        mgr_court_id, mgr_outlet_id = staff.court_id, None
+    #
+    # Uses the shared helper so this stays identical to every other
+    # manager-audience notice and to push targeting. The previous inline
+    # `if staff.outlet_id and not staff.court_id` mis-routed any staff row that
+    # had BOTH ids set (nothing in the schema prevents that) — the outlet
+    # manager would have silently lost events about their own staff.
+    mgr_court_id, mgr_outlet_id = manager_scope_for_staff(staff)
 
     # Manager notice (read/unread in Settings → Notices).
     create_notice(

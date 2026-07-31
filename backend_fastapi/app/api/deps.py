@@ -21,6 +21,7 @@ class CurrentUser:
         role: str,
         court_id: int | None = None,
         outlet_id: int | None = None,
+        user_type: str = "manager",
     ):
         self.id = id
         self.name = name
@@ -28,6 +29,14 @@ class CurrentUser:
         self.role = role
         self.court_id = court_id
         self.outlet_id = outlet_id
+        # Which table this identity came from: "manager" | "staff".
+        #
+        # The JWT carries no type claim and `id` is only unique WITHIN a table
+        # (manager.id == 1 and staff.id == 1 are different people), so anything
+        # that persists a per-user row — e.g. device_tokens — MUST store this
+        # alongside the id. Resolved in get_current_user() below, matching the
+        # lookup order there.
+        self.user_type = user_type
 
     @property
     def is_etl_manager(self) -> bool:
@@ -40,6 +49,16 @@ class CurrentUser:
     @property
     def is_etl_staff(self) -> bool:
         return self.role in ("etl_staff", "staff")
+
+    @property
+    def is_manager_account(self) -> bool:
+        """True when this identity is a row in `managers`."""
+        return self.user_type == "manager"
+
+    @property
+    def is_staff_account(self) -> bool:
+        """True when this identity is a row in `staff`."""
+        return self.user_type == "staff"
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -79,6 +98,7 @@ def get_current_user(
             email=user.email,
             role=user.role,
             outlet_id=user.outlet_id,
+            user_type="manager",
         )
 
     staff = db.query(Staff).filter(
@@ -93,6 +113,7 @@ def get_current_user(
             role=staff.role,
             court_id=staff.court_id,
             outlet_id=staff.outlet_id,
+            user_type="staff",
         )
 
     raise HTTPException(status_code=401, detail="User not found or deactivated.")

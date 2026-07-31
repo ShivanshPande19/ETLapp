@@ -30,6 +30,7 @@ from ...schemas.onboarding import (
 from ...core.config import settings
 from ...core.security import create_token, hash_password
 from ...services.email_service import send_email
+from ...services.notice_service import create_notice
 from ..deps import get_current_user, CurrentUser
 
 logger = logging.getLogger("onboarding")
@@ -156,6 +157,27 @@ async def submit_application(
     )
     db.add(application)
     db.commit()
+    db.refresh(application)
+
+    # Trigger #17 — a vendor just applied. Until now this produced NO signal at
+    # all: the ETL manager only found out by opening the app and noticing
+    # `pending_count` had gone up. Goes to the ETL manager tier only
+    # (outlet_id=None) — the applicant has no account yet.
+    try:
+        create_notice(
+            db,
+            audience="manager",
+            type="onboarding_submitted",
+            title="New outlet application",
+            body=(
+                f"{owner_name} applied to open “{outlet_name}” at {court.name}. "
+                f"Review the documents to approve or reject."
+            ),
+            court_id=court.id,
+            outlet_id=None,
+        )
+    except Exception as e:  # noqa: BLE001 — never break the public form
+        print(f"[ONBOARDING] submit notice failed for #{application.id}: {e}")
 
     return templates.TemplateResponse(
         request=request,
@@ -310,7 +332,7 @@ async def approve_application(
 
 
 @router.post("/applications/{application_id}/reject")
-def reject_application(
+async def reject_application(
     application_id: int,
     data: RejectRequest,
     db: Session = Depends(get_db),
@@ -330,7 +352,24 @@ def reject_application(
     app.rejection_reason = (data.reason or "").strip() or None
     app.reviewed_at = datetime.utcnow()
     db.commit()
-    return {"message": "Application rejected."}
+
+    # Trigger #18 — tell the applicant. They have no account (and therefore no
+    # device token), so EMAIL is the only channel that can reach them. Until now
+    # a rejected applicant was simply never told anything.
+    email_sent = False
+    if app.owner_email:
+        try:
+            email_sent = await send_email(
+                to=app.owner_email,
+                subject=f"Update on your application for {app.outlet_name}",
+                html=_rejection_email_html(
+                    app.owner_name, app.outlet_name, app.rejection_reason
+                ),
+            )
+        except Exception as e:  # noqa: BLE001 — rejection must still succeed
+            print(f"[ONBOARDING] rejection email failed for #{app.id}: {e}")
+
+    return {"message": "Application rejected.", "email_sent": email_sent}
 
 
 # ─── ETL MANAGER: outlets of a court (with onboarding documents) ─────────────
@@ -379,7 +418,43 @@ def list_court_outlets(
     return result
 
 
-# ─── Email body ──────────────────────────────────────────────────────────────
+# ─── Email bodies ────────────────────────────────────────────────────────────
+
+def _rejection_email_html(
+    owner_name: Optional[str],
+    outlet_name: Optional[str],
+    reason: Optional[str],
+) -> str:
+    """Rejection notice for an applicant.
+
+    The applicant has no account and no device, so email is the only channel
+    that can reach them — hence this exists alongside the push triggers.
+    """
+    reason_block = (
+        f"""
+      <div style="background:#FAFAFA; border-left:3px solid #D02128;
+                  padding:12px 16px; margin:20px 0;">
+        <p style="margin:0; color:#333; font-size:14px;"><b>Reason:</b> {reason}</p>
+      </div>"""
+        if reason
+        else ""
+    )
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+      <h2 style="color:#0A0A0A;">Update on your application</h2>
+      <p>Hi {owner_name or 'there'},</p>
+      <p>Thank you for your interest in opening <b>{outlet_name or 'an outlet'}</b>
+         with ETL Food Court.</p>
+      <p>After reviewing your application, we are not able to move forward with
+         it at this time.</p>
+      {reason_block}
+      <p>You are welcome to apply again with updated details. If you believe
+         something was missed, simply reply to this email and we will take
+         another look.</p>
+      <p style="color:#888; font-size:13px; margin-top:28px;">— ETL Food Court Team</p>
+    </div>
+    """
+
 
 def _set_password_email_html(owner_name: str, outlet_name: str, link: str) -> str:
     return f"""
