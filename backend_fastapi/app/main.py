@@ -1,6 +1,7 @@
 # app/main.py
 
 import asyncio
+import logging
 import os
 import shutil
 from contextlib import asynccontextmanager
@@ -44,6 +45,22 @@ from .models import device_token as _device_token_models
 
 from .services import fcm_service
 from .services.scheduler_service import start_scheduler, stop_scheduler
+
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+# Without a configured root handler, Python falls back to `logging.lastResort`,
+# which only emits WARNING and above. Every logger.info() in the app was being
+# silently dropped — including the "email sent" line in email_service.py and the
+# "push delivered" line in fcm_service.py, i.e. exactly the lines you need to
+# confirm a delivery actually happened.
+#
+# force=True because uvicorn installs its own handlers first; without it
+# basicConfig() is a no-op under `uvicorn app.main:app`.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s | %(message)s",
+    force=True,
+)
 
 
 @asynccontextmanager
