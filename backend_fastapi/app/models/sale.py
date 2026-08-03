@@ -49,6 +49,16 @@ class Court(Base):
     # still counts on the day the shift started.
     day_cutoff_hour = Column(Integer, default=0)
 
+    # ── Google review funnel ──────────────────────────────────────────────────
+    # Each court is its own Google Business listing, so the review link is
+    # per-court. Nullable: when unset, the feedback portal simply hides the
+    # Google call-to-action and behaves exactly as before.
+    #
+    # Only ever set to a Google-owned host — see _ALLOWED_REVIEW_HOSTS in
+    # app/api/routes/courts.py. This value is used as a redirect target, so an
+    # arbitrary URL here would turn the redirect into an open redirect.
+    google_review_url = Column(String, nullable=True)
+
     outlets = relationship("Outlet", back_populates="court", cascade="all, delete-orphan")
 
 
