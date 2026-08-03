@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from slowapi import Limiter
@@ -16,6 +16,7 @@ from ...database import get_db
 from ...models.feedback import Feedback
 from ...models.sale import Court, Outlet
 from ...schemas.feedback import FeedbackCreate, FeedbackOut, FeedbackAnalytics
+from ...schemas.court import validate_google_review_url
 from ...services.notice_service import create_notice
 from ..deps import get_current_user, CurrentUser
 from .events import fire_notify
@@ -109,6 +110,13 @@ def _analytics(feedbacks: List[Feedback]) -> FeedbackAnalytics:
         this_week_count=this_week,
         last_week_count=last_week,
         rating_distribution=distribution,
+        # How many of these customers we handed off to Google (see
+        # GET /{feedback_id}/google). Not a count of posted reviews — Google
+        # gives us no way to confirm those.
+        google_cta_click_count=sum(
+            1 for f in feedbacks
+            if getattr(f, "google_cta_clicked_at", None) is not None
+        ),
     )
 
 
@@ -141,6 +149,14 @@ def serve_feedback_portal(
             "court_id": court_id,
             "court_name": court_name,
             "outlets": outlets_data,
+            # Only a BOOLEAN reaches the page — never the URL itself. The
+            # thank-you screen links to our own /feedback/{id}/google, which
+            # resolves the real destination server-side. That keeps the click
+            # measurable and means the redirect target can be corrected
+            # without touching anything already rendered on a customer phone.
+            "has_google_review": bool(
+                (getattr(court, "google_review_url", None) or "").strip()
+            ),
         },
     )
 
@@ -302,6 +318,74 @@ def submit_feedback(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save feedback.",
         )
+
+
+# ─── PUBLIC: hand off to Google reviews (tracked) ────────────────────────────
+#
+# Reached when a customer taps "also review us on Google" on the thank-you
+# screen, AFTER their feedback is already committed. Nothing here can affect
+# the stored feedback — by the time this runs, our data is safe.
+#
+# Why bounce through our own server instead of linking Google directly:
+#   1. It makes the hand-off measurable (google_cta_clicked_at).
+#   2. The destination stays server-side, so a wrong/expired review link can be
+#      fixed for everyone without reprinting a QR or re-rendering a page.
+#
+# IMPORTANT — this is a redirect to an operator-supplied URL, i.e. exactly the
+# shape of an open-redirect bug. The URL is allowlisted to Google hosts when it
+# is SAVED (schemas/court.py), and re-checked HERE before redirecting, because
+# a value written to the DB by any other path (manual SQL, seed script, an older
+# build) would otherwise be trusted blindly.
+#
+# Declared before /court/{court_id} etc. is safe: the second segment must match
+# the literal "google", so /feedback/court/5 can never fall into this route.
+
+@router.get("/{feedback_id}/google", include_in_schema=False)
+@limiter.limit("30/minute")
+def google_review_handoff(
+    request: Request,
+    feedback_id: int,
+    db: Session = Depends(get_db),
+):
+    """Record the Google hand-off for this feedback, then redirect to Google."""
+    fb = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+    if not fb:
+        raise HTTPException(status_code=404, detail="Feedback not found.")
+
+    court = db.query(Court).filter(Court.id == fb.court_id).first()
+    raw_url = (getattr(court, "google_review_url", None) or "").strip() if court else ""
+    if not raw_url:
+        # No link configured for this court — the CTA should not have rendered.
+        raise HTTPException(status_code=404, detail="No review link for this court.")
+
+    try:
+        target = validate_google_review_url(raw_url)
+    except ValueError:
+        # Stored value is not a Google URL: refuse to bounce the customer to it.
+        logger.error(
+            "[FEEDBACK] court %s has a non-Google google_review_url; refusing redirect",
+            fb.court_id,
+        )
+        raise HTTPException(status_code=404, detail="No review link for this court.")
+
+    if not target:
+        raise HTTPException(status_code=404, detail="No review link for this court.")
+
+    # Stamp only the FIRST tap, so the metric counts people, not taps (and a
+    # reloaded/shared link can't inflate it further).
+    if fb.google_cta_clicked_at is None:
+        try:
+            fb.google_cta_clicked_at = datetime.utcnow()
+            db.commit()
+        except Exception as e:  # noqa: BLE001 — tracking must never block the hand-off
+            db.rollback()
+            logger.error(
+                "[FEEDBACK] failed to stamp google CTA for #%s: %s", feedback_id, e
+            )
+
+    # 302: deliberately not a permanent redirect — the destination is
+    # operator-editable, so browsers must not cache it.
+    return RedirectResponse(url=target, status_code=status.HTTP_302_FOUND)
 
 
 # ─── PROTECTED: ETL Manager — all feedbacks ──────────────────────────────────

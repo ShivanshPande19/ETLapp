@@ -6,8 +6,9 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, Depends
+from fastapi import FastAPI, File, UploadFile, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -65,7 +66,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -82,9 +83,14 @@ async def lifespan(app: FastAPI):
     ensure_staff_columns()
     print("[DB] Staff schema ensured ✓")
 
-    # ✅ Add court geofencing columns (latitude, longitude, geofence_radius, address)
+    # ✅ Add court geofencing columns (latitude, longitude, geofence_radius,
+    #    address) + the per-court google_review_url
     ensure_court_columns()
     print("[DB] Court schema ensured ✓")
+
+    # ✅ Add the Google-review CTA tracking column to feedbacks if missing
+    ensure_feedback_columns()
+    print("[DB] Feedback schema ensured ✓")
 
     # ✅ Add notice outlet_id column if missing
     ensure_notice_columns()
@@ -148,6 +154,28 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads"
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ─── PRINTED QR SHORT LINK ───────────────────────────────────────────────────
+#
+# The per-court feedback QRs produced by generate_qr.py encode `/c/{court_id}`
+# — a deliberately short path, because fewer characters => a lower-density QR
+# => a far more reliable scan from a printed standee in bad light.
+#
+# That path had NO route, so every printed QR resolved to a 404. This is the
+# missing hop. Keep it dumb (no DB hit): /feedback/portal already validates the
+# court and renders a proper 404 for an unknown/inactive one.
+#
+# Do NOT change this path or old printed QRs stop working — they are physically
+# out in the world and cannot be reprinted cheaply.
+
+@app.get("/c/{court_id}", include_in_schema=False)
+def court_qr_shortlink(court_id: int):
+    """Redirect a scanned court QR to the customer feedback portal."""
+    return RedirectResponse(
+        url=f"/feedback/portal?court_id={court_id}",
+        status_code=status.HTTP_302_FOUND,
+    )
 
 
 # ─── SAFE OUTLETS ROUTE (explicit columns only — no phone/PII leak) ──────────

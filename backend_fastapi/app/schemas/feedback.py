@@ -90,6 +90,12 @@ class FeedbackOut(BaseModel):
     outlet_comments: Optional[str]
     source: str
     created_at: datetime
+    # ✅ Did this customer tap through to Google from the thank-you screen?
+    # Exposed as a plain bool (not the timestamp) — the staff app only needs
+    # "did the hand-off happen", and this keeps the funnel metric readable.
+    # NOTE: a true here means we sent them to Google, NOT that they posted a
+    # review — Google exposes no API to confirm that.
+    google_review_clicked: bool = False
 
     class Config:
         from_attributes = True
@@ -119,6 +125,7 @@ class FeedbackOut(BaseModel):
             outlet_comments=obj.outlet_comments,
             source=getattr(obj, "source", "qr"),
             created_at=obj.created_at,
+            google_review_clicked=getattr(obj, "google_cta_clicked_at", None) is not None,
         )
 
 
@@ -134,3 +141,7 @@ class FeedbackAnalytics(BaseModel):
     # Lets the home screen render the distribution bars without loading every
     # feedback (important once pagination only fetches a single page).
     rating_distribution: List[int] = Field(default_factory=lambda: [0, 0, 0, 0, 0])
+    # ✅ How many of these customers tapped through to Google. Divide by
+    # total_count for the hand-off rate — the one number that says whether the
+    # Google funnel is actually working.
+    google_cta_click_count: int = 0

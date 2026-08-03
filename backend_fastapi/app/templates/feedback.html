@@ -179,6 +179,57 @@
         /* Lock State for Outlet Section */
         .locked { opacity: 0.25; pointer-events: none; filter: grayscale(100%); transition: all 0.4s ease; }
         .unlock-hint { text-align: center; font-size: 11px; color: #888; margin-top: -10px; margin-bottom: 15px; font-style: italic; }
+
+        /* ✅ THANK-YOU / GOOGLE HAND-OFF SCREEN */
+        .ty-wrap {
+            min-height: 100%; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            padding: 10px 4px 30px;
+        }
+        .ty-icon { font-size: 58px; margin-bottom: 18px; }
+        .ty-title { font-family: 'Anton', sans-serif; font-size: 32px; color: #0A0A0A; line-height: 1.1; }
+        .ty-sub { color: #666; font-size: 14.5px; margin-top: 10px; line-height: 1.55; max-width: 330px; }
+
+        /* Primary Google CTA (shown to everyone who has a link configured; the
+           EMPHASIS differs by sentiment, the availability never does). */
+        .g-cta {
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            width: 100%; max-width: 330px; margin-top: 26px;
+            background: #ffffff; color: #1f1f1f;
+            font-family: 'Inter', sans-serif; font-weight: 800; font-size: 15.5px;
+            padding: 15px 18px; border: 2px solid #e3e3e3; border-radius: 14px;
+            cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.10);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .g-cta:active { transform: scale(0.98); }
+        .g-cta[disabled] { opacity: 0.65; cursor: default; }
+        .g-cta .g-mark { font-size: 17px; font-weight: 800; letter-spacing: -1px; }
+        .g-cta .g-b { color: #4285F4; } .g-cta .g-r { color: #EA4335; }
+        .g-cta .g-y { color: #FBBC05; } .g-cta .g-g { color: #34A853; }
+
+        /* Secondary, low-emphasis variant — used after a low rating, where
+           fixing the problem is the headline and Google is a quiet option. */
+        .g-link {
+            display: inline-block; margin-top: 24px; font-size: 12.5px;
+            color: #888; text-decoration: underline; cursor: pointer;
+            background: none; border: none; font-family: 'Inter', sans-serif;
+        }
+
+        .ty-hint { font-size: 11.5px; color: #999; margin-top: 12px; max-width: 320px; line-height: 1.5; }
+        .ty-restart {
+            margin-top: 26px; padding: 10px 20px; border-radius: 8px;
+            border: 1px solid #ddd; background: #fff; font-weight: bold;
+            cursor: pointer; font-family: 'Inter', sans-serif; color: #555;
+        }
+        /* Clipboard fallback: if the browser refuses a programmatic copy we
+           surface the text so it can still be copied by hand. */
+        .copy-fallback {
+            width: 100%; max-width: 330px; margin-top: 16px; text-align: left;
+            background: #FAFAFA; border: 2px dashed #ddd; border-radius: 12px;
+            padding: 12px; font-size: 13px; color: #333; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-word;
+        }
+        .copy-fallback b { display: block; font-size: 11px; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
     </style>
 </head>
 <body>
@@ -325,6 +376,156 @@
         }
     });
 
+    // ─── Google review hand-off ──────────────────────────────────────────────
+    //
+    // Whether this court has a Google listing link configured. Only a boolean
+    // reaches the page — the actual destination is resolved server-side by
+    // /feedback/{id}/google, which also records the hand-off.
+    const HAS_GOOGLE_REVIEW = {{ 'true' if has_google_review else 'false' }};
+
+    // Sentiment drives how PROMINENT the Google option is, never WHETHER it is
+    // offered. Hiding the public-review path from unhappy customers while
+    // showing it to happy ones is "review gating" — prohibited by Google's
+    // review policies. So: everyone who can review, can. An unhappy customer
+    // simply sees "we'll fix this" as the headline and Google as a quiet
+    // secondary link, because a resolution matters more to them right then.
+    //
+    // We grade on the LOWEST star given: a 5★ venue with a 1★ outlet is still
+    // somebody with a problem to solve.
+    function sentimentOf(ratings) {
+        const given = ratings.filter(r => typeof r === 'number' && r >= 1);
+        if (!given.length) return 'neutral';
+        const min = Math.min.apply(null, given);
+        if (min <= 2) return 'low';
+        if (min >= 4) return 'high';
+        return 'neutral';
+    }
+
+    // Google's review form cannot be pre-filled — there is no API and no URL
+    // parameter for the review body. The best possible hand-off is putting the
+    // customer's own words on their clipboard so they only have to paste.
+    function combineComments(courtComment, outletComment) {
+        return [courtComment, outletComment]
+            .map(function (s) { return (s || '').trim(); })
+            .filter(Boolean)
+            .join('\n\n');
+    }
+
+    function navigateToGoogle(feedbackId) {
+        // Same-tab navigation: window.open() would be swallowed by popup
+        // blockers, and opening a background tab steals document focus, which
+        // makes navigator.clipboard.writeText() reject outright.
+        window.location.href = '/feedback/' + feedbackId + '/google';
+    }
+
+    async function handleGoogleTap(btn, feedbackId, comment, wrap) {
+        if (!comment) {
+            // Rating only, nothing to paste — just hand off.
+            navigateToGoogle(feedbackId);
+            return;
+        }
+
+        let copied = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                // Fired inside the click handler and BEFORE navigating, so the
+                // page still holds focus and the user gesture is still valid.
+                await navigator.clipboard.writeText(comment);
+                copied = true;
+            }
+        } catch (err) {
+            copied = false; // Permission denied / insecure context / old iOS.
+        }
+
+        if (copied) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-check" style="color:#34A853"></i> Copied — opening Google…';
+            setTimeout(function () { navigateToGoogle(feedbackId); }, 700);
+            return;
+        }
+
+        // Clipboard refused. Never claim a copy that did not happen — show the
+        // text for manual copying and let the next tap continue.
+        if (!wrap.querySelector('.copy-fallback')) {
+            const box = document.createElement('div');
+            box.className = 'copy-fallback';
+            const label = document.createElement('b');
+            label.textContent = 'Copy your review, then tap continue';
+            box.appendChild(label);
+            // textContent, not innerHTML — never inject user input as markup.
+            box.appendChild(document.createTextNode(comment));
+            btn.parentNode.insertBefore(box, btn.nextSibling);
+        }
+        btn.innerHTML = 'Continue to Google <i class="fa-solid fa-arrow-right"></i>';
+        btn.onclick = function () { navigateToGoogle(feedbackId); };
+    }
+
+    const GOOGLE_MARK =
+        '<span class="g-mark">' +
+        '<span class="g-b">G</span><span class="g-r">o</span>' +
+        '<span class="g-y">o</span><span class="g-b">g</span>' +
+        '<span class="g-g">l</span><span class="g-r">e</span></span>';
+
+    function renderThankYou(feedbackId, sentiment, comment) {
+        const back = document.querySelector('.card-back');
+        const low = sentiment === 'low';
+
+        let icon, title, sub;
+        if (low) {
+            icon = '<i class="fa-solid fa-circle-exclamation" style="color:#EF4444"></i>';
+            title = "WE'RE SORRY.";
+            sub = "This isn't the experience we want you to have. Our manager will "
+                + "reach out to you within 24 hours to make it right.";
+        } else if (sentiment === 'high') {
+            icon = '<i class="fa-solid fa-circle-check" style="color:#EF4444"></i>';
+            title = 'THANK YOU!';
+            sub = 'So glad you enjoyed it. Your feedback helps us serve you better.';
+        } else {
+            icon = '<i class="fa-solid fa-circle-check" style="color:#EF4444"></i>';
+            title = 'THANK YOU!';
+            sub = 'Thanks for the honest feedback — we’ll work on it.';
+        }
+
+        let ctaHtml = '';
+        if (HAS_GOOGLE_REVIEW) {
+            if (low) {
+                // Quiet, secondary. Available, not pushed.
+                ctaHtml = '<button type="button" class="g-link" id="g-cta">'
+                        + 'You can also post this review on Google</button>';
+            } else {
+                ctaHtml = '<button type="button" class="g-cta" id="g-cta">'
+                        + '<i class="fa-brands fa-google" style="color:#4285F4"></i>'
+                        + ' Share this on ' + GOOGLE_MARK + '</button>'
+                        + '<div class="ty-hint">'
+                        + (comment
+                            ? 'We’ll copy your review so you just have to paste it.'
+                            : 'Takes about 30 seconds.')
+                        + '</div>';
+            }
+        }
+
+        back.innerHTML =
+            '<div class="ty-wrap">'
+          +   '<div class="ty-icon">' + icon + '</div>'
+          +   '<h2 class="ty-title">' + title + '</h2>'
+          +   '<p class="ty-sub">' + sub + '</p>'
+          +   ctaHtml
+          +   '<button type="button" class="ty-restart" id="ty-restart">Submit Another</button>'
+          + '</div>';
+
+        const wrap = back.querySelector('.ty-wrap');
+        back.querySelector('#ty-restart').addEventListener('click', function () {
+            location.reload();
+        });
+
+        const cta = back.querySelector('#g-cta');
+        if (cta) {
+            cta.addEventListener('click', function () {
+                handleGoogleTap(cta, feedbackId, comment, wrap);
+            });
+        }
+    }
+
     // Form Submission
     document.getElementById('feedback-form').addEventListener('submit', async (e) => {
         e.preventDefault(); 
@@ -332,22 +533,32 @@
         const c_rating = document.querySelector('input[name="court_rating"]:checked');
         const o_rating = document.querySelector('input[name="outlet_rating"]:checked');
         const outletIdVal = document.getElementById('outlet_id').value;
+        const submitBtn = e.target.querySelector('.submit-btn');
 
         if (!c_rating && !o_rating) {
             alert("Please provide a Star Rating for either the Venue or a Specific Outlet!");
             return;
         }
 
+        const courtComments = document.getElementById('court_comments').value;
+        const outletComments = document.getElementById('outlet_comments').value;
+
         const payload = {
             court_id: parseInt("{{ court_id }}"),
             customer_name: document.getElementById('customer_name').value.trim(),
             customer_phone: document.getElementById('customer_phone').value.trim(),
             court_rating: c_rating ? parseInt(c_rating.value) : null,
-            court_comments: document.getElementById('court_comments').value || null,
+            court_comments: courtComments || null,
             outlet_id: outletIdVal !== "" ? parseInt(outletIdVal) : null,
             outlet_rating: o_rating ? parseInt(o_rating.value) : null,
-            outlet_comments: document.getElementById('outlet_comments').value || null
+            outlet_comments: outletComments || null
         };
+
+        // Guard against a double-tap creating two identical feedback rows.
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting…';
+        }
 
         try {
             const response = await fetch('/feedback/submit', {
@@ -357,18 +568,27 @@
             });
             
             if(response.ok) {
-                document.querySelector('.card-back').innerHTML = `
-                    <div style="height: 100%; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
-                        <i class="fa-solid fa-circle-check" style="font-size: 64px; color: #EF4444; margin-bottom: 20px;"></i>
-                        <h2 style="font-family: 'Anton', sans-serif; font-size: 36px; color: #0A0A0A;">THANK YOU!</h2>
-                        <p style="color: #666; font-size: 15px; margin-top:10px;">Your feedback helps us serve you better.</p>
-                        <button onclick="location.reload()" style="margin-top: 40px; padding: 10px 20px; border-radius: 8px; border: 1px solid #ddd; background: #fff; font-weight: bold; cursor: pointer;">Submit Another</button>
-                    </div>
-                `;
+                // The feedback is COMMITTED at this point. Everything after
+                // this line — including the whole Google hand-off — is a bonus
+                // that cannot cost us the review we just captured.
+                const saved = await response.json();
+                renderThankYou(
+                    saved.id,
+                    sentimentOf([payload.court_rating, payload.outlet_rating]),
+                    combineComments(courtComments, outletComments)
+                );
             } else {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Feedback';
+                }
                 alert("Something went wrong. Please try again.");
             }
         } catch(err) {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Feedback';
+            }
             alert("Network error. Please check your connection.");
         }
     });
