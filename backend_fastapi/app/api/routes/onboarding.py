@@ -279,6 +279,7 @@ async def approve_application(
         pp_app_secret=(data.pp_app_secret or None),
         pp_access_token=(data.pp_access_token or None),
         pp_cookie=(data.pp_cookie or None),
+        pos_source=((data.pos_source or "").strip() or "petpooja_generic"),
     )
     db.add(outlet)
     db.flush()  # get outlet.id

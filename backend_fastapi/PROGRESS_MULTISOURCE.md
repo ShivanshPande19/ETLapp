@@ -112,6 +112,17 @@ the **previous day** when its `Transaction Time` hour is `< Court.day_cutoff_hou
   Response wrapper key is **confirmed = `Records`** (validated via `pp_probe2.py`
   which parsed live data). Field names confirmed: `Net sale`, `Receipt number`,
   `Receipt Date`, `Transaction Time`, `Transaction status`, `order_status`.
+
+  **Onboarding tooling (added):**
+  - The onboarding API (`ApproveRequest` + `POST /applications/{id}/approve`) now
+    accepts an optional `pos_source` (default `petpooja_generic`), so future
+    salesdata/royal outlets onboard through the normal flow.
+  - `onboard_outlet.py` — idempotent, env-driven script that replicates the
+    approve flow (Outlet + outlet-manager login + set-password email) AND sets
+    `pos_source` + the court's `day_cutoff_hour`, then runs a live sync to verify.
+    No secrets in the file (all via env vars). Run once on Railway to onboard
+    Coffee Vault. Coffee Vault decisions: same court "Central 50",
+    `day_cutoff_hour = 5`, owner login = yes.
 - **Phase 3 — Royal POS:** implement `royal_pos.py` once their API docs/creds
   are available.
 
