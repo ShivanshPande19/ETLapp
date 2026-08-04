@@ -15,11 +15,16 @@ flavour A this endpoint:
 * mixes in non-revenue rows — we keep only ``Transaction status == SALE`` **and**
   ``order_status == Success``.
 
-⚠️ NOT YET LIVE. Enabling Coffee Vault is blocked on Petpooja issuing creds for
-this account (see PROGRESS_MULTISOURCE.md, Phase 2). The exact JSON wrapper key
-for the records array was not captured during investigation, so
-:func:`_extract_records` tries the likely candidates and MUST be validated
-against a real response before flipping an outlet to this source.
+Enabling Coffee Vault does NOT require any Petpooja remap: it uses this outlet's
+OWN per-outlet credentials (``outlet.pp_app_key/pp_app_secret/pp_access_token``)
+— the exact creds already proven to return this outlet's sales via
+`get_sales_data`. Go-live is just data/config: store those creds on the outlet
+row, set ``pos_source='petpooja_salesdata'``, and set the court's
+``day_cutoff_hour`` (~5-6). See PROGRESS_MULTISOURCE.md, Phase 2.
+
+The records array lives under the top-level ``"Records"`` key (confirmed against
+a live response during investigation); :func:`_extract_records` keeps a few
+fallbacks for safety.
 """
 
 from __future__ import annotations
@@ -34,9 +39,9 @@ from .base import NormalizedOrder, SalesSourceAdapter, register
 
 PETPOOJA_SALESDATA_URL = "https://api.petpooja.com/V1/orders/get_sales_data/"
 
-# Candidate keys the records array may live under. Ordered by likelihood.
-# Validate against a live response and pin the correct one.
-_RECORD_KEYS = ("data", "sales_data", "Records", "records", "order_json", "sales")
+# "Records" is the confirmed live key (verified against a real get_sales_data
+# response). The rest are defensive fallbacks only.
+_RECORD_KEYS = ("Records", "records", "data", "sales_data", "order_json", "sales")
 
 
 def _extract_records(raw: dict) -> list:

@@ -100,12 +100,18 @@ the **previous day** when its `Transaction Time` hour is `< Court.day_cutoff_hou
       via TestClient (lifespan create_all + backfill + ensure_* all clean)
 
 ### Remaining (later phases — blocked / not in this PR)
-- **Phase 2 — Coffee Vault go-live:** BLOCKED on Petpooja. Either they remap
-  `r6h4cd0k2sfi` under ETL's app_key, or issue separate creds for the
-  `get_sales_data` account. Once creds land: set the outlet's `pos_source =
-  'petpooja_salesdata'`, its `pp_*` creds, and the court's `day_cutoff_hour`
-  (~5-6). **`get_sales_data` response wrapper key must be validated against a
-  live response** before enabling (adapter currently tries several likely keys).
+- **Phase 2 — Coffee Vault go-live:** NOT blocked on Petpooja (no remap needed).
+  The adapter uses the outlet's own per-outlet creds — the exact `get_sales_data`
+  creds already proven to return this outlet's sales during investigation
+  (`srd2neaq…` set, kept in `/projects/pp_probe2.py`, NOT in the repo). Go-live is
+  pure data/config:
+    1. store those creds on the Coffee Vault outlet row
+       (`pp_app_key` / `pp_app_secret` / `pp_access_token`);
+    2. set `pos_source = 'petpooja_salesdata'`;
+    3. set the court's `day_cutoff_hour` (~5-6) for correct night-bill attribution.
+  Response wrapper key is **confirmed = `Records`** (validated via `pp_probe2.py`
+  which parsed live data). Field names confirmed: `Net sale`, `Receipt number`,
+  `Receipt Date`, `Transaction Time`, `Transaction status`, `order_status`.
 - **Phase 3 — Royal POS:** implement `royal_pos.py` once their API docs/creds
   are available.
 
