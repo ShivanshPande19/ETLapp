@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ...schemas.court import CourtsResponse, CourtCreate, CourtLocationUpdate, CourtSettingsUpdate
+from ...schemas.court import (
+    CourtsResponse,
+    CourtCreate,
+    CourtLocationUpdate,
+    CourtSettingsUpdate,
+    CourtGoogleReviewUpdate,
+)
 from ...services.court_service import get_all_courts
 from ...services.notice_service import create_notice
 from ...services.push_targeting import staff_ids_for_court
@@ -16,6 +22,7 @@ router = APIRouter()
 def _court_out(court: Court) -> dict:
     """Serialize a Court ORM object the way the client expects."""
     has_geo = court.latitude is not None and court.longitude is not None
+    review_url = getattr(court, "google_review_url", None)
     return {
         "id": court.id,
         "court_uid": court.court_uid,
@@ -28,6 +35,8 @@ def _court_out(court: Court) -> dict:
         "address": court.address,
         "day_cutoff_hour": court.day_cutoff_hour or 0,
         "has_geofence": has_geo,
+        "google_review_url": review_url,
+        "has_google_review": bool(review_url),
     }
 
 
@@ -179,6 +188,40 @@ def set_court_settings(
         raise HTTPException(status_code=404, detail="Court not found.")
 
     court.day_cutoff_hour = data.day_cutoff_hour
+    db.commit()
+    db.refresh(court)
+
+    return _court_out(court)
+
+
+@router.patch("/{court_id}/google-review")
+def set_court_google_review_url(
+    court_id: int,
+    data: CourtGoogleReviewUpdate,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """ETL manager: set / clear this court's Google review link.
+
+    Each court is a separate Google Business listing, so the link is per-court.
+    Once set, the court's feedback portal shows an "also review us on Google"
+    call-to-action on the thank-you screen after a customer submits.
+
+    Send `{"google_review_url": null}` to remove it and hide the CTA again.
+
+    The URL is validated against a Google-host allowlist (see
+    schemas/court.py) because it is later used as a redirect target — an
+    arbitrary host here would make GET /feedback/{id}/google an open redirect.
+    """
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    court = db.query(Court).filter(Court.id == court_id).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found.")
+
+    # Already normalized + host-checked by the schema validator.
+    court.google_review_url = data.google_review_url
     db.commit()
     db.refresh(court)
 

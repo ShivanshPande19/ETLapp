@@ -264,6 +264,7 @@ def ensure_court_columns() -> None:
             "geofence_radius": "INTEGER",
             "address": "VARCHAR",
             "day_cutoff_hour": "INTEGER",
+            "google_review_url": "VARCHAR",
         }
     else:
         needed = {
@@ -272,6 +273,7 @@ def ensure_court_columns() -> None:
             "geofence_radius": "INTEGER",
             "address": "VARCHAR",
             "day_cutoff_hour": "INTEGER",
+            "google_review_url": "VARCHAR",
         }
     try:
         with engine.begin() as conn:
@@ -286,6 +288,32 @@ def ensure_court_columns() -> None:
                     )
     except Exception as e:  # never block startup on a best-effort migration
         print(f"[MIGRATION] ensure_court_columns skipped: {e}")
+
+
+def ensure_feedback_columns() -> None:
+    """Add the Google-review funnel column to an existing `feedbacks` table.
+
+    `create_all` builds the table fresh with every column, so this only matters
+    on a deploy where `feedbacks` already exists from an earlier version.
+    Best-effort + idempotent, same as the other ensure_* helpers. Existing rows
+    get NULL, which correctly reads as "never tapped the Google CTA".
+    """
+    needed = {
+        "google_cta_clicked_at": "DATETIME" if _is_sqlite else "TIMESTAMP",
+    }
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "feedbacks" not in insp.get_table_names():
+                return  # create_all builds it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("feedbacks")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE feedbacks ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:  # never block startup on a best-effort migration
+        print(f"[MIGRATION] ensure_feedback_columns skipped: {e}")
 
 
 def ensure_hk_columns() -> None:

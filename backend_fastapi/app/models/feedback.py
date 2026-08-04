@@ -24,3 +24,13 @@ class Feedback(Base):
     source = Column(String, nullable=False, default="qr")  # qr | app
     
     created_at = Column(DateTime, server_default=func.now())
+
+    # ── Google review funnel ──────────────────────────────────────────────────
+    # Stamped the FIRST time this customer taps "also review us on Google" on
+    # the thank-you screen (see GET /feedback/{id}/google). Only the first tap
+    # is recorded, so this counts unique hand-offs, not taps.
+    #
+    # NULL = never tapped. This measures how many people we handed off to
+    # Google; it can NOT confirm they actually posted a review — Google has no
+    # API for that, so posting is unverifiable by design.
+    google_cta_clicked_at = Column(DateTime, nullable=True)
