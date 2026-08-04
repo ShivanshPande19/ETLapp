@@ -65,7 +65,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, backfill_sales_orders
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -74,9 +74,14 @@ async def lifespan(app: FastAPI):
     ensure_attendance_columns()
     print("[DB] Attendance schema ensured ✓")
 
-    # ✅ Add per-outlet Petpooja credential columns if missing
+    # ✅ Add per-outlet Petpooja credential columns + pos_source if missing
     ensure_outlet_columns()
     print("[DB] Outlet schema ensured ✓")
+
+    # ✅ Seed the multi-source sales_orders table from the legacy petpooja_orders
+    # backup (idempotent). Runs after create_all built sales_orders.
+    backfill_sales_orders()
+    print("[DB] sales_orders backfill ensured ✓")
 
     # ✅ Add staff profile columns (phone, photo_url) if missing
     ensure_staff_columns()

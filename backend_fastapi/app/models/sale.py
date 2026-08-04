@@ -70,6 +70,12 @@ class Outlet(Base):
     pp_access_token = Column(String, nullable=True)
     pp_cookie = Column(String, nullable=True)
 
+    # ✅ Which POS adapter fetches this outlet's sales. Selects the adapter in
+    # app/services/sales_sources. Defaults to 'petpooja_generic' so every
+    # existing outlet keeps its current behaviour with zero migration.
+    # Other values: 'petpooja_salesdata' (get_sales_data flow), 'royal_pos'.
+    pos_source = Column(String, nullable=False, default="petpooja_generic")
+
     court = relationship("Court", back_populates="outlets")
     sales_cache = relationship("DailySaleCache", back_populates="outlet", cascade="all, delete-orphan")
 
@@ -95,6 +101,11 @@ class DailySaleCache(Base):
 
 
 # NAYA TABLE: Individual bills ko track karne ke liye taaki overlap/duplicates na hon
+#
+# NOTE: kept as a FROZEN BACKUP of pre-multisource data. As of the multi-source
+# refactor, the sync no longer writes here — `SalesOrder` (below) is the source
+# of truth and its rows are backfilled from this table on first boot. Drop this
+# manually once the new pipeline is proven in prod.
 class PetpoojaOrder(Base):
     __tablename__ = "petpooja_orders"
 
@@ -103,5 +114,36 @@ class PetpoojaOrder(Base):
     business_date = Column(Date, nullable=False, index=True) # Apna 4 AM buffer wala date
     created_on = Column(DateTime, nullable=False) # Bill fatne ka exact time
     total_amount = Column(Float, default=0.0)
+
+    outlet = relationship("Outlet")
+
+
+# ✅ MULTI-SOURCE bills table. Source-agnostic replacement for petpooja_orders.
+# One row per revenue-counting bill from ANY POS (Petpooja generic / sales_data,
+# Royal POS, ...). `DailySaleCache` is recomputed from these rows and is what the
+# UI reads — this table's shape can evolve without touching the app contract.
+#
+# The composite UNIQUE(outlet_id, source, external_ref) is the key design point:
+# `external_ref` is a STRING (Petpooja generic global orderID, Petpooja
+# sales_data per-outlet Receipt number, etc.) and only needs to be unique WITHIN
+# an outlet+source, so per-outlet sequential receipt numbers never collide.
+class SalesOrder(Base):
+    __tablename__ = "sales_orders"
+
+    id = Column(Integer, primary_key=True, index=True)  # surrogate PK
+    outlet_id = Column(Integer, ForeignKey("outlets.id"), nullable=False, index=True)
+    source = Column(String, nullable=False, default="petpooja_generic")
+    external_ref = Column(String, nullable=False)  # source's own bill id, as string
+    business_date = Column(Date, nullable=False, index=True)
+    created_on = Column(DateTime, nullable=False)
+    total_amount = Column(Float, default=0.0)
+    status = Column(String, nullable=True)  # audit/reconciliation only
+
+    __table_args__ = (
+        UniqueConstraint(
+            "outlet_id", "source", "external_ref", name="uq_sales_orders_outlet_source_ref"
+        ),
+        Index("ix_sales_orders_outlet_bizdate", "outlet_id", "business_date"),
+    )
 
     outlet = relationship("Outlet")

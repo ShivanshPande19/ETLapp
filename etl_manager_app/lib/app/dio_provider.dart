@@ -13,8 +13,12 @@ final dioProvider = Provider<Dio>((ref) {
   return Dio(
     BaseOptions(
       baseUrl: baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
+      // 30s (was 10s): Railway free-tier cold starts and slow mobile networks
+      // routinely exceed 10s, which surfaced to users as a blank "₹0" dashboard
+      // rather than a slow-but-successful load.
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 30),
       headers: {'Content-Type': 'application/json'},
     ),
   );
