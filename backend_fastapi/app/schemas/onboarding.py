@@ -40,6 +40,10 @@ class ApproveRequest(BaseModel):
     pp_app_secret: Optional[str] = None
     pp_access_token: Optional[str] = None
     pp_cookie: Optional[str] = None
+    # Which POS adapter fetches this outlet's sales. Optional; defaults to
+    # 'petpooja_generic' so existing clients that don't send it are unaffected.
+    # Use 'petpooja_salesdata' for get_sales_data outlets, 'royal_pos' for Royal.
+    pos_source: Optional[str] = None
 
 
 class ApproveResponse(BaseModel):

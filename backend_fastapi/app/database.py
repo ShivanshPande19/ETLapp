@@ -144,6 +144,9 @@ def ensure_outlet_columns() -> None:
         "pp_app_secret": "VARCHAR",
         "pp_access_token": "VARCHAR",
         "pp_cookie": "VARCHAR",
+        # Which POS adapter fetches this outlet. DEFAULT backfills existing rows
+        # via the DDL itself so every legacy outlet keeps the generic flow.
+        "pos_source": "VARCHAR DEFAULT 'petpooja_generic'",
     }
     try:
         with engine.begin() as conn:
@@ -158,6 +161,56 @@ def ensure_outlet_columns() -> None:
                     )
     except Exception as e:  # never block startup on a best-effort migration
         print(f"[MIGRATION] ensure_outlet_columns skipped: {e}")
+
+    # Any row that predates the DEFAULT (or was inserted NULL) → generic flow.
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE outlets SET pos_source = 'petpooja_generic' "
+                    "WHERE pos_source IS NULL"
+                )
+            )
+    except Exception as e:
+        print(f"[MIGRATION] backfill outlets.pos_source skipped: {e}")
+
+
+def backfill_sales_orders() -> None:
+    """One-time, idempotent copy of ``petpooja_orders`` → ``sales_orders``.
+
+    Expand → migrate → contract: the new multi-source pipeline reads/writes
+    ``sales_orders``; this seeds it with the existing Momo Box history so
+    ``DailySaleCache`` recompute (now summing ``sales_orders``) reconciles
+    exactly with the old numbers. Rows already present are skipped via the
+    ``(outlet_id, source, external_ref)`` unique key, so this is safe on every
+    boot and independent of whether a new sync has already run.
+    """
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            tables = set(insp.get_table_names())
+            if "petpooja_orders" not in tables or "sales_orders" not in tables:
+                return  # nothing to migrate (fresh DB) — create_all made the table
+
+            conflict = (
+                "OR IGNORE " if _is_sqlite else ""
+            )
+            tail = (
+                "" if _is_sqlite
+                else "ON CONFLICT (outlet_id, source, external_ref) DO NOTHING"
+            )
+            cast = "CAST(order_id AS TEXT)" if _is_sqlite else "CAST(order_id AS VARCHAR)"
+            conn.execute(
+                text(
+                    f"INSERT {conflict}INTO sales_orders "
+                    "(outlet_id, source, external_ref, business_date, created_on, total_amount, status) "
+                    f"SELECT outlet_id, 'petpooja_generic', {cast}, business_date, created_on, "
+                    f"total_amount, 'completed' FROM petpooja_orders {tail}"
+                )
+            )
+        print("[MIGRATION] backfill_sales_orders ran ✓")
+    except Exception as e:
+        print(f"[MIGRATION] backfill_sales_orders skipped: {e}")
 
 
 def ensure_staff_columns() -> None:

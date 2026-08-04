@@ -156,6 +156,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final monthSales = monthAsync.maybeWhen(data: (v) => v, orElse: () => 0.0);
     final isLoadingYesterday = yesterdayAsync is AsyncLoading;
     final isLoadingMonth = monthAsync is AsyncLoading;
+    // Distinguish a real ₹0 day from "couldn't reach the server". On error the
+    // card shows a dash instead of a misleading ₹0 (network/timeout failures).
+    final yesterdayHasError = yesterdayAsync is AsyncError;
+    final monthHasError = monthAsync is AsyncError;
 
     final totalCourts = courtsAsync.whenData((c) => c.length).value ?? 0;
     final isLoadingCourts = courtsAsync is AsyncLoading;
@@ -326,6 +330,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                   width: 100,
                                                   height: 32,
                                                 )
+                                              : yesterdayHasError
+                                              ? Text(
+                                                  '—',
+                                                  style: GoogleFonts.antonSc(
+                                                    fontSize: 30,
+                                                    color: _grey,
+                                                    height: 1,
+                                                  ),
+                                                )
                                               : TweenAnimationBuilder<double>(
                                                   tween: Tween<double>(
                                                     begin: 0,
@@ -475,6 +488,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                             ? const _Skeleton(
                                                 width: 80,
                                                 height: 24,
+                                              )
+                                            : monthHasError
+                                            ? Text(
+                                                '—',
+                                                style: GoogleFonts.antonSc(
+                                                  fontSize: 26,
+                                                  color: _grey,
+                                                  height: 1,
+                                                ),
                                               )
                                             : TweenAnimationBuilder<double>(
                                                 tween: Tween<double>(

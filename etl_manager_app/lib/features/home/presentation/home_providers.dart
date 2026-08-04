@@ -70,10 +70,13 @@ final homeYesterdaySalesProvider = FutureProvider.autoDispose<double>((
     debugPrint(
       '💰 [YESTERDAY_SALES] DioError: ${e.response?.statusCode} ${e.message}',
     );
-    return 0.0;
+    // Rethrow instead of returning 0.0: a network/timeout failure must NOT look
+    // like a genuine zero-sales day. The card renders an "unavailable" dash for
+    // the error state (see home_screen), so the manager can tell the difference.
+    rethrow;
   } catch (e) {
     debugPrint('💰 [YESTERDAY_SALES] Exception: $e');
-    return 0.0;
+    rethrow;
   }
 });
 
@@ -88,10 +91,11 @@ final homeMonthSalesProvider = FutureProvider.autoDispose<double>((ref) async {
     debugPrint(
       '💰 [MONTH_SALES] DioError: ${e.response?.statusCode} ${e.message}',
     );
-    return 0.0;
+    // Rethrow instead of returning 0.0 — see homeYesterdaySalesProvider.
+    rethrow;
   } catch (e) {
     debugPrint('💰 [MONTH_SALES] Exception: $e');
-    return 0.0;
+    rethrow;
   }
 });
 
