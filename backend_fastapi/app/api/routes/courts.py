@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, text, inspect
 from sqlalchemy.orm import Session
 
 from ...schemas.court import (
@@ -12,7 +12,8 @@ from ...schemas.court import (
 from ...services.court_service import get_all_courts
 from ...services.notice_service import create_notice
 from ...services.push_targeting import staff_ids_for_court
-from ...models.sale import Court
+from ...models.sale import Court, Outlet
+from ...models.staff import Staff
 from ...database import get_db
 from ..deps import get_current_user, CurrentUser
 
@@ -226,3 +227,103 @@ def set_court_google_review_url(
     db.refresh(court)
 
     return _court_out(court)
+
+
+@router.delete("/{court_id}")
+def delete_court(
+    court_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """ETL manager: permanently delete a court and everything tied to it.
+
+    SAFETY GUARD: a court that still has ANY outlet attached CANNOT be deleted
+    (409). This deliberately protects live courts — e.g. Central 50 (which has
+    the Momo/Coffee Vault outlets) can never be removed by this endpoint. Only
+    empty/test courts are deletable.
+
+    Because prod is Postgres (FK-enforced) and the schema was built with
+    create_all — not migrations that guarantee ON DELETE CASCADE — this deletes
+    every child row EXPLICITLY, child-first, inside a single transaction, so a
+    partial failure rolls back cleanly instead of leaving orphans.
+    """
+    if not user.is_etl_manager:
+        raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+    court = db.query(Court).filter(Court.id == court_id).first()
+    if not court:
+        raise HTTPException(status_code=404, detail="Court not found.")
+
+    # Capture now — after the DELETE + commit below the ORM object is expired,
+    # so touching court.name later would trigger a reload and error.
+    court_name = court.name
+
+    # HARD GUARD: refuse if the court still owns any outlet.
+    outlet_count = db.query(func.count(Outlet.id)).filter(
+        Outlet.court_id == court_id
+    ).scalar()
+    if outlet_count and outlet_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Court has {outlet_count} outlet(s) attached and cannot be "
+                f"deleted. Remove/reassign its outlets first."
+            ),
+        )
+
+    # Staff belonging to this court (ETL staff via court_id). Outlet staff are
+    # scoped by outlet_id, but this court has no outlets (guard above), so there
+    # are none.
+    staff_ids = [row[0] for row in db.query(Staff.id).filter(Staff.court_id == court_id).all()]
+    # ints from our own DB → safe to inline in the IN(...) fragments below.
+    sid_list = ",".join(str(int(s)) for s in staff_ids)
+
+    existing_tables = set(inspect(db.get_bind()).get_table_names())
+    counts: dict[str, int] = {}
+
+    def _run(table: str, sql: str) -> None:
+        if table not in existing_tables:
+            return
+        res = db.execute(text(sql), {"cid": court_id})
+        counts[table] = res.rowcount if res.rowcount is not None else 0
+
+    try:
+        staff_cond = f" OR staff_id IN ({sid_list})" if sid_list else ""
+        recip_cond = f" OR recipient_staff_id IN ({sid_list})" if sid_list else ""
+        dev_staff_cond = (
+            f" OR (user_type = 'staff' AND user_id IN ({sid_list}))" if sid_list else ""
+        )
+
+        # child rows first ---------------------------------------------------
+        _run("attendance", f"DELETE FROM attendance WHERE court_id = :cid{staff_cond}")
+        _run(
+            "notices",
+            f"DELETE FROM notices WHERE court_id = :cid{staff_cond}{recip_cond}",
+        )
+        _run("feedbacks", "DELETE FROM feedbacks WHERE court_id = :cid")
+        _run("hk_tasks", "DELETE FROM hk_tasks WHERE court_id = :cid")
+        _run("hk_recurring", "DELETE FROM hk_recurring WHERE court_id = :cid")
+        _run("hk_shift", "DELETE FROM hk_shift WHERE court_id = :cid")
+        _run("hk_taskdef", "DELETE FROM hk_taskdef WHERE court_id = :cid")
+        _run("maintenance_issues", "DELETE FROM maintenance_issues WHERE court_id = :cid")
+        _run(
+            "device_tokens",
+            f"DELETE FROM device_tokens WHERE court_id = :cid{dev_staff_cond}",
+        )
+        _run("outlet_applications", "DELETE FROM outlet_applications WHERE court_id = :cid")
+        _run("staff", "DELETE FROM staff WHERE court_id = :cid")
+        # ... court last
+        _run("courts", "DELETE FROM courts WHERE id = :cid")
+
+        db.commit()
+    except Exception as e:  # noqa: BLE001 — atomic: nothing partial survives
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Delete failed, rolled back: {e}")
+
+    return {
+        "deleted": True,
+        "court_id": court_id,
+        "court_name": court_name,
+        "staff_deleted": len(staff_ids),
+        "rows_deleted": counts,
+    }
