@@ -15,6 +15,17 @@ from ..schemas.sale import (
     SalesTrendResponse,
 )
 
+# Friendly POS label shown in the app, derived from Outlet.pos_source (instead
+# of a hardcoded "Petpooja"), so multi-source outlets are labelled correctly.
+_SOURCE_LABELS = {
+    "petpooja_generic": "Petpooja",
+    "petpooja_salesdata": "Petpooja",
+    "royal_pos": "Royal POS",
+}
+
+def _source_label(pos_source: Optional[str]) -> str:
+    # Unknown / legacy (NULL) outlets keep the historical "Petpooja" label.
+    return _SOURCE_LABELS.get((pos_source or "").strip(), "Petpooja")
 
 def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str]) -> tuple[date, date]:
     # Use IST "today" (not the server's UTC date) so "yesterday"/week/month
@@ -48,7 +59,6 @@ def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str
 
     return yesterday, yesterday
 
-
 def _date_label(start: date, end: date) -> str:
     if start == end:
         return start.strftime("%b %d, %Y")
@@ -56,11 +66,10 @@ def _date_label(start: date, end: date) -> str:
         return f"{start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}"
     return f"{start.strftime('%b %d, %Y')} - {end.strftime('%b %d, %Y')}"
 
-
 async def get_sales_summary(
     db: Session,
     court_id: Optional[int] = None,
-    outlet_id: Optional[int] = None, # ✅ Added outlet_id
+    outlet_id: Optional[int] = None, # ✓ Added outlet_id
     period: str = "yesterday",
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -70,7 +79,7 @@ async def get_sales_summary(
     # Base query on Outlet
     query = db.query(Outlet).filter(Outlet.is_active == 1)
 
-    # ✅ Logic: Outlet_id priority par hai, agar wo nahi toh court_id
+    # ✓ Logic: Outlet_id priority par hai, agar wo nahi toh court_id
     if outlet_id:
         query = query.filter(Outlet.id == outlet_id)
     elif court_id:
@@ -94,7 +103,7 @@ async def get_sales_summary(
         vendor_details.append(
             VendorSaleDetail(
                 vendor_name=outlet.vendor_name,
-                source_system="Petpooja",
+                source_system=_source_label(outlet.pos_source),
                 total_sales=round(total_sales, 2),
                 bill_count=bill_count,
                 avg_bill_value=round(total_sales / bill_count, 2) if bill_count else 0.0,
@@ -114,15 +123,14 @@ async def get_sales_summary(
         vendors=vendor_details,
     )
 
-
 async def get_vendor_history(
     db: Session,
-    vendor_name: Optional[str] = None, # ✅ Made Optional
-    court_id: Optional[int] = None,    # ✅ Made Optional
-    outlet_id: Optional[int] = None,   # ✅ Added outlet_id
+    vendor_name: Optional[str] = None, # ✓ Made Optional
+    court_id: Optional[int] = None,    # ✓ Made Optional
+    outlet_id: Optional[int] = None,   # ✓ Added outlet_id
 ) -> VendorHistoryResponse:
     
-    # ✅ Smart routing: Agar outlet_id h toh seedha fetch, warna purana method
+    # ✓ Smart routing: Agar outlet_id h toh seedha fetch, warna purana method
     if outlet_id:
         outlet = db.query(Outlet).filter(
             Outlet.id == outlet_id,
@@ -184,7 +192,7 @@ async def get_vendor_history(
 
     return VendorHistoryResponse(
         vendor_name=outlet.vendor_name,
-        source_system="Petpooja",
+        source_system=_source_label(outlet.pos_source),
         total_sales=latest_cache.total_sales if latest_cache else 0.0,
         bill_count=latest_cache.bill_count if latest_cache else 0,
         avg_bill_value=latest_cache.avg_bill if latest_cache else 0.0,
@@ -195,8 +203,6 @@ async def get_vendor_history(
         daily_history=history,
     )
 
-
-
 def _resolve_outlet_ids(db: Session, court_id: Optional[int], outlet_id: Optional[int]) -> list[int]:
     q = db.query(Outlet).filter(Outlet.is_active == 1)
     if outlet_id:
@@ -204,7 +210,6 @@ def _resolve_outlet_ids(db: Session, court_id: Optional[int], outlet_id: Optiona
     elif court_id:
         q = q.filter(Outlet.court_id == court_id)
     return [o.id for o in q.all()]
-
 
 async def get_sales_trend(
     db: Session,
