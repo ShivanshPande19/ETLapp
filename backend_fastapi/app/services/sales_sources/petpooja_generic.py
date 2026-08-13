@@ -9,8 +9,13 @@ interface. Behaviour is intentionally **identical** to the pre-refactor
 * business day taken from each bill's own ``order_date`` field (Petpooja already
   files post-midnight bills under the previous operational day), falling back to
   the documented ``requested_date - 1`` rule only when that field is missing;
-* every order with a valid ``orderID`` counts (no status filtering — matches the
-  original behaviour, so backfilled totals reconcile exactly).
+* every order is emitted with its REAL ``status``; cancelled bills (Petpooja
+  marks them ``status == "Cancelled"``) are stored but EXCLUDED from the
+  ``DailySaleCache`` total by the persistence layer (see petpooja_service).
+  This is self-healing: a bill cancelled at ANY time (even after a prior sync)
+  drops out of the total on the next sync, instead of staying counted — and
+  makes the app match the Petpooja dashboard (a cancelled bill was previously
+  over-counted).
 """
 
 from __future__ import annotations
@@ -122,6 +127,12 @@ class PetpoojaGenericAdapter(SalesSourceAdapter):
                 if order_id <= 0:
                     continue
 
+                # Emit EVERY order with its real status. Cancelled bills
+                # (Petpooja: status "Cancelled") are stored but excluded from the
+                # cache total in petpooja_service — self-healing, so a bill
+                # cancelled at any time drops out on the next sync. Do NOT skip.
+                raw_status = str(order.get("status", "") or "").strip()
+
                 try:
                     total_amt = float(order.get("total", 0) or 0)
                 except (ValueError, TypeError):
@@ -150,7 +161,7 @@ class PetpoojaGenericAdapter(SalesSourceAdapter):
                         business_date=business_date,
                         created_on=created_on,
                         total_amount=total_amt,
-                        status="completed",
+                        status=raw_status or "Success",
                     )
                 )
                 attributed += 1

@@ -3,10 +3,26 @@ from datetime import date, timedelta, datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from ..models.sale import Outlet, DailySaleCache, Court, SalesOrder
 from .sales_sources import get_adapter
+
+
+# Bill statuses that must NOT count toward revenue (cancelled/void/refunded).
+# Compared case-insensitively. Rows with a NULL status (legacy / pre-status
+# data) still count, so nothing that used to be counted silently disappears.
+_NON_REVENUE_STATUSES = ("cancelled", "canceled", "void", "voided", "refunded", "failed")
+
+
+def _revenue_only(query):
+    """Restrict a SalesOrder query to revenue-counting rows (drop cancelled)."""
+    return query.filter(
+        or_(
+            SalesOrder.status.is_(None),
+            func.lower(SalesOrder.status).notin_(_NON_REVENUE_STATUSES),
+        )
+    )
 
 
 def _upsert(db: Session, table):
@@ -86,12 +102,17 @@ async def sync_outlet_for_dates(
     #    — now summing sales_orders instead of petpooja_orders; identical numbers
     #    after backfill). Scoped to this outlet's rows for this outlet+date.
     for b_date in affected_business_dates:
-        stats = db.query(
-            func.sum(SalesOrder.total_amount).label("tot"),
-            func.count(SalesOrder.id).label("cnt"),
-        ).filter(
-            SalesOrder.outlet_id == outlet.id,
-            SalesOrder.business_date == b_date,
+        # Exclude cancelled/void bills from the cache total (self-healing): a
+        # bill cancelled after an earlier sync had its stored status updated to
+        # "Cancelled" by the upsert above, so it now drops out of the total.
+        stats = _revenue_only(
+            db.query(
+                func.sum(SalesOrder.total_amount).label("tot"),
+                func.count(SalesOrder.id).label("cnt"),
+            ).filter(
+                SalesOrder.outlet_id == outlet.id,
+                SalesOrder.business_date == b_date,
+            )
         ).first()
 
         tot = stats.tot or 0.0
