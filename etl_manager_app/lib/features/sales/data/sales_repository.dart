@@ -27,8 +27,11 @@ class VendorSaleDetail {
       sourceSystem: json['source_system'] ?? 'Petpooja',
       totalSales: (json['total_sales'] ?? 0).toDouble(),
       billCount: json['bill_count'] ?? 0,
-      avgBillValue: (json['avg_bill'] ?? 0).toDouble(),
-      lastSynced: json['fetched_at'] ?? DateTime.now().toIso8601String(),
+      avgBillValue: (json['avg_bill_value'] ?? json['avg_bill'] ?? 0).toDouble(),
+      // Backend sends `last_synced` (real sync time). Was reading `fetched_at`
+      // (never present) → always fell back to now() → card always said
+      // "Just now". Parse the real key so "Synced 5m ago" reflects reality.
+      lastSynced: json['last_synced'] ?? json['fetched_at'] ?? DateTime.now().toIso8601String(),
     );
   }
 }
