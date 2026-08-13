@@ -12,6 +12,21 @@ const _grey = Color(0xFF888888);
 const _lightGrey = Color(0xFFF2F2F2);
 const _border = Color(0xFF1A1A1A);
 
+// Relative "synced Xm ago" from an ISO timestamp (mirrors the sales screen).
+String _timeAgo(String? iso) {
+  if (iso == null || iso.isEmpty) return 'recently';
+  try {
+    final dt = DateTime.parse(iso).toLocal();
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  } catch (_) {
+    return 'recently';
+  }
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 void showVendorDetail({
@@ -263,7 +278,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
                     ),
                   ),
                   Text(
-                    'Data as of yesterday · synced 11 PM',
+                    'Data as of yesterday · synced ${_timeAgo(d.lastSynced)}',
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       color: _grey,
