@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 
 from .core.config import settings
 from .database import get_db
+from .api.deps import get_current_user, CurrentUser
 
 from .api.routes import auth, dashboard, sales, courts
 from .api.routes import housekeeping
@@ -186,7 +187,13 @@ def court_qr_shortlink(court_id: int):
 # ─── SAFE OUTLETS ROUTE (explicit columns only — no phone/PII leak) ──────────
 
 @app.get("/outlets/")
-def get_all_outlets_safe(db: Session = Depends(get_db)):
+def get_all_outlets_safe(
+    db: Session = Depends(get_db),
+    # SECURITY (P0-2): outlet list must not be public. Any authenticated
+    # employee may read it (managers/staff resolve outlet names from it);
+    # anonymous access is now blocked.
+    user: CurrentUser = Depends(get_current_user),
+):
     """Fetch outlets with only the fields the client needs."""
     try:
         result = db.execute(

@@ -67,6 +67,7 @@ class SalesNotifier extends Notifier<SalesState> {
 
   Future<void> fetchSummary({
     int? courtId,
+    int? outletId, // ✅ P0-3: outlet users pass their own outlet id
     bool allCourts = false,
     SalesPeriod period = SalesPeriod.yesterday,
     String? customDateFrom,
@@ -75,7 +76,7 @@ class SalesNotifier extends Notifier<SalesState> {
     final nextCourtId = allCourts ? null : courtId;
     final periodStr = _periodStr(period);
     final key =
-        '$periodStr|${nextCourtId ?? 'all'}|${customDateFrom ?? ''}|${customDateTo ?? ''}';
+        '$periodStr|${nextCourtId ?? 'all'}|o${outletId ?? 'all'}|${customDateFrom ?? ''}|${customDateTo ?? ''}';
     final reqId = ++_reqCounter;
 
     SalesState base({
@@ -116,6 +117,7 @@ class SalesNotifier extends Notifier<SalesState> {
     // 2) Fire summary + trend in parallel. Trend is best-effort.
     final summaryFut = repo.getSalesSummary(
       courtId: nextCourtId,
+      outletId: outletId,
       period: periodStr,
       dateFrom: customDateFrom,
       dateTo: customDateTo,
@@ -123,7 +125,7 @@ class SalesNotifier extends Notifier<SalesState> {
     final Future<SalesTrend?> trendFut = period == SalesPeriod.custom
         ? Future.value(null)
         : repo
-            .getSalesTrend(courtId: nextCourtId, period: periodStr)
+            .getSalesTrend(courtId: nextCourtId, outletId: outletId, period: periodStr)
             .then<SalesTrend?>((t) => t)
             .catchError((_) => null);
 

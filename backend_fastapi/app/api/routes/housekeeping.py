@@ -180,6 +180,34 @@ def _recurring_status(
     }
 
 
+# ─── Tenancy guard ────────────────────────────────────────────────────────────
+
+
+def _resolve_court_or_403(user: CurrentUser, requested: Optional[int]) -> int:
+    """Resolve the court a housekeeping read/write may touch (P0-4 fix).
+
+    Housekeeping is a court-level concept owned by ETL staff. The court MUST be
+    derived from the caller's identity, never trusted from the client body/query
+    — otherwise any authenticated user could submit/overwrite another court's
+    checklist by changing `court_id` (IDOR).
+
+      • ETL manager → may act on any court (admin/builder); uses `requested`.
+      • ETL staff   → hard-locked to their OWN court; `requested` is ignored.
+      • Outlet users→ 403 (outlets have no housekeeping).
+    """
+    if user.is_etl_manager:
+        if requested is None:
+            raise HTTPException(status_code=400, detail="court_id is required.")
+        return requested
+    if user.is_etl_staff:
+        if user.court_id is None:
+            raise HTTPException(status_code=403, detail="No court assigned to your account.")
+        return user.court_id
+    raise HTTPException(
+        status_code=403, detail="Housekeeping is available to court staff only."
+    )
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -205,6 +233,9 @@ def submit_shift(
         raise HTTPException(
             status_code=422, detail="tasks list must not be empty"
         )
+
+    # SECURITY (P0-4): lock the write to the caller's own court.
+    body.court_id = _resolve_court_or_403(user, body.court_id)
 
     for task in body.tasks:
         # Record who completed it (from the JWT, never the client body).
@@ -253,9 +284,22 @@ def get_status(
     date: Optional[str] = None,
     court_id: Optional[int] = None,
     db:   Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     target = date or datetime.now().strftime("%Y-%m-%d")
+
+    # SECURITY (P0-4): ETL staff may only see THEIR court; the client fetches
+    # without a court_id and filters locally, so forcing it here is transparent
+    # to the app but blocks cross-court reads. ETL managers see all (or a
+    # requested court); outlet users have no housekeeping.
+    if user.is_etl_staff:
+        if user.court_id is None:
+            raise HTTPException(status_code=403, detail="No court assigned to your account.")
+        court_id = user.court_id
+    elif not user.is_etl_manager:
+        raise HTTPException(
+            status_code=403, detail="Housekeeping is available to court staff only."
+        )
 
     # Config-driven: real active courts (optionally one), each with its own
     # configured shifts + tasks (legacy default is seeded if a court has none).
@@ -314,6 +358,9 @@ def mark_weekly_done(
     db:   Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
+    # SECURITY (P0-4): lock the write to the caller's own court.
+    body.court_id = _resolve_court_or_403(user, body.court_id)
+
     item = _resolve_recurring_def(db, body.court_id, "weekly", body.task_id)
     if item is None:
         raise HTTPException(status_code=400, detail="No weekly task configured for this court.")
@@ -363,6 +410,9 @@ def mark_monthly_done(
     db:   Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
+    # SECURITY (P0-4): lock the write to the caller's own court.
+    body.court_id = _resolve_court_or_403(user, body.court_id)
+
     item = _resolve_recurring_def(db, body.court_id, "monthly", body.task_id)
     if item is None:
         raise HTTPException(status_code=400, detail="No monthly task configured for this court.")
@@ -467,7 +517,17 @@ def get_checklist_config(
     user: CurrentUser = Depends(get_current_user),
 ):
     """Full checklist config for a court (seeds the legacy default if none).
-    Readable by any authenticated user (staff render their checklist from it)."""
+    ETL managers may read any court's config (builder); ETL staff only their
+    own court. Outlet users have no housekeeping (P0-4)."""
+    if not user.is_etl_manager:
+        if not user.is_etl_staff or user.court_id is None:
+            raise HTTPException(
+                status_code=403, detail="Housekeeping is available to court staff only."
+            )
+        if court_id != user.court_id:
+            raise HTTPException(
+                status_code=403, detail="You can only view your own court's checklist."
+            )
     return get_court_config(db, court_id)
 
 
