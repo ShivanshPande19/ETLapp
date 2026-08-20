@@ -49,7 +49,9 @@ class ApproveRequest(BaseModel):
 class ApproveResponse(BaseModel):
     outlet_id: int
     manager_email: str
-    set_password_link: str
+    # None when the outlet was linked to an EXISTING owner account (no password
+    # to set); a link only for brand-new owner accounts.
+    set_password_link: Optional[str] = None
     email_sent: bool
     message: str
 

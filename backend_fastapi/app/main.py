@@ -33,6 +33,7 @@ from .api.routes import onboarding
 from .api.routes import notices
 from .api.routes import devices
 from .api.routes import legal
+from .api.routes import outlets as outlets_routes
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -44,6 +45,7 @@ from .models import attendance as _attendance_models
 from .models import onboarding as _onboarding_models
 from .models import notice as _notice_models
 from .models import device_token as _device_token_models
+from .models import outlet_membership as _outlet_membership_models
 
 from .services import fcm_service
 from .services.scheduler_service import start_scheduler, stop_scheduler
@@ -67,7 +69,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -109,6 +111,13 @@ async def lifespan(app: FastAPI):
     # ✅ Add FCM device-token columns if the table predates them
     ensure_device_token_columns()
     print("[DB] Device token schema ensured ✓")
+
+    # ✅ Multi-outlet ownership: seed outlet_memberships from the legacy
+    #    Manager.outlet_id (idempotent). The table itself is created by
+    #    create_all above; this just backfills one owner-membership per
+    #    existing outlet_manager so nothing changes for current accounts.
+    backfill_outlet_memberships()
+    print("[DB] Outlet memberships backfill ensured ✓")
 
     _hk_routes._main_loop = asyncio.get_event_loop()
     events._main_loop = asyncio.get_event_loop()
@@ -228,3 +237,7 @@ app.include_router(feedback.router,     prefix="/feedback",     tags=["Feedback"
 app.include_router(notices.router,      prefix="/notices",      tags=["Notices"])
 app.include_router(devices.router,      prefix="/devices",      tags=["Devices"])
 app.include_router(legal.router,                                tags=["Legal"])
+# Multi-outlet ownership: switcher list + manage-access CRUD. Sub-paths only
+# (/outlets/mine, /outlets/{id}/managers); the bare GET /outlets/ list stays
+# defined inline above.
+app.include_router(outlets_routes.router, prefix="/outlets",    tags=["Outlets"])

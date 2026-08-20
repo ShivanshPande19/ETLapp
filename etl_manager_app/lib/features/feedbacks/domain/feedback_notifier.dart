@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 // ✅ FIX: JWT wala dio (pehle app/dio_provider.dart tha jo token nahi bhejta)
 import '../../../core/network/api_client.dart';
 import '../../auth/domain/auth_notifier.dart';
+import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 
 // ─── Data Model ──────────────────────────────────────────────────────────────
 
@@ -154,15 +155,21 @@ class FeedbackNotifier extends Notifier<AsyncValue<FeedbackData>> {
 
   @override
   AsyncValue<FeedbackData> build() {
+    // MULTI-OUTLET: refetch when the owner switches outlet.
+    ref.listen(selectedOutletIdProvider, (prev, next) {
+      if (prev != next) fetchFeedbacks(isRefresh: true);
+    });
     Future.microtask(() => fetchFeedbacks());
     return const AsyncValue.loading();
   }
 
   // Resolves the outlet id for the logged-in user, or null if not allowed.
+  // MULTI-OUTLET: follows the selected outlet (defaults to the primary one for
+  // single-outlet owners and for staff).
   int? _resolveOutletId() {
     final authState = ref.read(authNotifierProvider);
     final canView = authState.isOutletManager || authState.isOutletStaff;
-    return canView ? authState.outletId : null;
+    return canView ? ref.read(selectedOutletIdProvider) : null;
   }
 
   // Converts a selected (local) calendar day into UTC ISO day-boundaries so the

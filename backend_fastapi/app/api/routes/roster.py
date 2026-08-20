@@ -40,7 +40,7 @@ def get_roster(
 ):
     # ✅ Auth: outlet users can only see their own outlet; ETL managers any.
     if user.is_outlet_user:
-        if user.outlet_id != outlet_id:
+        if outlet_id not in user.outlet_ids:  # MULTI-OUTLET
             raise HTTPException(
                 status_code=403,
                 detail="You can only view your own outlet's roster.",

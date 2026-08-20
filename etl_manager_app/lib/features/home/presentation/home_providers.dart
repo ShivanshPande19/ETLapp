@@ -9,6 +9,7 @@ import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../../courts/data/courts_repository.dart';
+import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -204,8 +205,9 @@ final homeMaintenanceProvider = FutureProvider.autoDispose<int>((ref) async {
 
 final outletDashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-      final authState = ref.watch(authNotifierProvider);
-      final outletId = authState.outletId;
+      // MULTI-OUTLET: follow the switcher's selected outlet (defaults to the
+      // manager's primary outlet, so single-outlet owners are unaffected).
+      final outletId = ref.watch(selectedOutletIdProvider);
 
       if (outletId == null) {
         throw Exception("No outlet assigned to this manager");
@@ -236,8 +238,7 @@ final outletDashboardProvider =
 
 final weeklyInsightsProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
   (ref) async {
-    final authState = ref.watch(authNotifierProvider);
-    final outletId = authState.outletId;
+    final outletId = ref.watch(selectedOutletIdProvider); // MULTI-OUTLET
 
     if (outletId == null) {
       throw Exception("No outlet assigned to this manager");
@@ -282,8 +283,7 @@ String _ymd(DateTime d) {
 final dailyRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
   ref,
 ) async {
-  final authState = ref.watch(authNotifierProvider);
-  final outletId = authState.outletId;
+  final outletId = ref.watch(selectedOutletIdProvider); // MULTI-OUTLET
 
   if (outletId == null) throw Exception("No outlet assigned");
 
@@ -348,8 +348,7 @@ final etlRosterProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
 final currentOutletNameProvider = FutureProvider.autoDispose<String?>((
   ref,
 ) async {
-  final authState = ref.watch(authNotifierProvider);
-  final outletId = authState.outletId;
+  final outletId = ref.watch(selectedOutletIdProvider); // MULTI-OUTLET
   if (outletId == null) return null;
 
   try {

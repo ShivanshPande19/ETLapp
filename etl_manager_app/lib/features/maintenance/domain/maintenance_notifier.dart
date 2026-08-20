@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // ✅ FIX: Ye wala dio JWT token attach karta hai (app/dio_provider.dart nahi karta tha)
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/photo_upload_service.dart';
+import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 
 // ─── Data Model ──────────────────────────────────────────────────────────────
 
@@ -97,6 +98,11 @@ class MaintenanceNotifier
     extends Notifier<AsyncValue<List<MaintenanceIssueModel>>> {
   @override
   AsyncValue<List<MaintenanceIssueModel>> build() {
+    // MULTI-OUTLET: refetch when the owner switches outlet (no-op for ETL,
+    // whose selected outlet stays null).
+    ref.listen(selectedOutletIdProvider, (prev, next) {
+      if (prev != next) refresh();
+    });
     Future.microtask(() => refresh());
     return const AsyncValue.loading();
   }
@@ -108,12 +114,14 @@ class MaintenanceNotifier
     try {
       final dio = ref.read(dioProvider);
 
-      // ✅ Backend ab role ke hisaab se khud scope karta hai —
-      //    court_id / outlet_id bhejne ki zaroorat nahi
-      final res = await dio.get(
-        '/maintenance',
-        queryParameters: {'limit': 100, 'offset': 0},
-      );
+      // Backend scopes by role/membership. For a multi-outlet owner we ALSO
+      // pass the selected outlet so the list follows the switcher; the server
+      // validates it belongs to them. ETL managers have no selected outlet
+      // (null), so they still see everything.
+      final selectedOutletId = ref.read(selectedOutletIdProvider);
+      final query = <String, dynamic>{'limit': 100, 'offset': 0};
+      if (selectedOutletId != null) query['outlet_id'] = selectedOutletId;
+      final res = await dio.get('/maintenance', queryParameters: query);
 
       // ✅ New format: { items: [...], total, limit, offset }
       final items = (res.data['items'] as List? ?? [])
@@ -150,7 +158,11 @@ class MaintenanceNotifier
         }
       }
 
-      // ✅ outlet_id / staff_name ab JWT se aate hain — body mein nahi
+      // staff_name comes from the JWT. MULTI-OUTLET: a multi-outlet owner must
+      // say WHICH outlet the ticket is for — send the selected one (the server
+      // validates it belongs to them). Single-outlet users can omit it, but
+      // sending the selected id is harmless (it's their only outlet).
+      final selectedOutletId = ref.read(selectedOutletIdProvider);
       await dio.post(
         '/maintenance/',
         data: {
@@ -158,6 +170,7 @@ class MaintenanceNotifier
           'priority': priority,
           'description': description.trim(),
           if (photoUrl != null) 'photo_url': photoUrl,
+          if (selectedOutletId != null) 'outlet_id': selectedOutletId,
         },
       );
       await refresh();

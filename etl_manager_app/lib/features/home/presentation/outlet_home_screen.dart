@@ -12,6 +12,7 @@ import '../../staff/presentation/view_roster_screen.dart';
 import 'home_providers.dart';
 import 'weekly_insights_screen.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../outlets/presentation/outlet_switcher.dart'; // multi-outlet switcher
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -290,6 +291,11 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                     ),
                   ],
                 ),
+                // MULTI-OUTLET: renders nothing for single-outlet owners, so
+                // there is zero UX change for them. Only a genuine multi-outlet
+                // owner sees this switcher.
+                const SizedBox(height: 14),
+                const OutletSwitcher(),
               ],
             ),
           ),

@@ -310,14 +310,30 @@ def court_calendar(
 @router.get("/calendar/outlet")
 def outlet_calendar(
     month: Optional[str] = None,
+    outlet_id: Optional[int] = None,  # ✅ MULTI-OUTLET: which of my outlets
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Outlet manager: month calendar for every staff in their own outlet."""
-    if user.role != "outlet_manager" or user.outlet_id is None:
+    """Outlet manager: month calendar for staff in one of their outlets.
+
+    A single-outlet manager may omit outlet_id; a multi-outlet owner passes the
+    selected outlet. The target is always validated against their membership.
+    """
+    if user.role != "outlet_manager" or not user.outlet_ids:
         raise HTTPException(status_code=403, detail="Outlet manager access required.")
+    target_outlet_id = outlet_id
+    if target_outlet_id is None:
+        if len(user.outlet_ids) == 1:
+            target_outlet_id = user.outlet_ids[0]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="outlet_id is required — you manage multiple outlets.",
+            )
+    if target_outlet_id not in user.outlet_ids:
+        raise HTTPException(status_code=403, detail="You cannot access that outlet.")
     y, m = _parse_month(month)
-    return build_outlet_calendars(db, y, m, user.outlet_id)
+    return build_outlet_calendars(db, y, m, target_outlet_id)
 
 
 @router.post(

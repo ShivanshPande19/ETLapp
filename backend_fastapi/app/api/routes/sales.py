@@ -16,34 +16,66 @@ from ..deps import get_current_user, require_etl_manager, CurrentUser
 router = APIRouter()
 
 
-def _scope_sales_ids(
+def _scope_outlets(
     user: CurrentUser,
     court_id: Optional[int],
     outlet_id: Optional[int],
-) -> tuple[Optional[int], Optional[int]]:
-    """Constrain (court_id, outlet_id) to what `user` is allowed to read.
+) -> tuple[Optional[int], Optional[int], Optional[list[int]]]:
+    """Constrain a summary/trend request to what `user` may read.
 
-    SECURITY (P0-1 / P0-3): sales revenue is tenant-sensitive. The client must
-    NOT be able to widen its own scope via query params, so we recompute the
-    scope from the JWT identity here — never trust the incoming ids for
-    non-ETL-manager callers.
+    Returns ``(court_id, outlet_id, outlet_ids)`` to pass to the service.
 
-      • ETL manager   → unrestricted; may pass any court_id/outlet_id
-                        (both None = whole company, the ETL dashboard case).
-      • Outlet user   → hard-locked to their OWN outlet (outlet_manager /
-                        outlet_staff). Incoming ids are ignored.
-      • ETL staff     → hard-locked to their OWN court. Incoming ids ignored.
+    SECURITY (P0 + MULTI-OUTLET): the client can never widen its own scope.
+      • ETL manager   → unrestricted; client court_id/outlet_id honored
+                        (both None = whole company).
+      • Outlet user   → if a specific outlet_id is requested it MUST be one of
+                        theirs (else 403); otherwise aggregate across ALL their
+                        outlets (multi-outlet owner "all my outlets" view).
+      • ETL staff     → locked to their own court.
     """
     if user.is_etl_manager:
-        return court_id, outlet_id
+        return court_id, outlet_id, None
     if user.is_outlet_user:
-        if user.outlet_id is None:
+        if not user.outlet_ids:
             raise HTTPException(status_code=403, detail="No outlet assigned to your account.")
-        return None, user.outlet_id
+        if outlet_id is not None:
+            if outlet_id not in user.outlet_ids:
+                raise HTTPException(status_code=403, detail="You cannot access that outlet.")
+            return None, outlet_id, None
+        # No specific selection → all of the owner's outlets, aggregated.
+        return None, None, list(user.outlet_ids)
     if user.is_etl_staff:
         if user.court_id is None:
             raise HTTPException(status_code=403, detail="No court assigned to your account.")
-        return user.court_id, None
+        return user.court_id, None, None
+    raise HTTPException(status_code=403, detail="Access denied.")
+
+
+def _scope_single_outlet(
+    user: CurrentUser,
+    court_id: Optional[int],
+    outlet_id: Optional[int],
+    vendor_name: Optional[str],
+) -> tuple[Optional[int], Optional[int], Optional[str]]:
+    """Vendor history returns ONE vendor's series, so resolve to a single
+    outlet the caller may access."""
+    if user.is_etl_manager:
+        return court_id, outlet_id, vendor_name
+    if user.is_outlet_user:
+        if not user.outlet_ids:
+            raise HTTPException(status_code=403, detail="No outlet assigned to your account.")
+        target = outlet_id
+        if target is None and len(user.outlet_ids) == 1:
+            target = user.outlet_ids[0]
+        if target is None:
+            raise HTTPException(status_code=400, detail="outlet_id is required.")
+        if target not in user.outlet_ids:
+            raise HTTPException(status_code=403, detail="You cannot access that outlet.")
+        return None, target, None
+    if user.is_etl_staff:
+        if user.court_id is None:
+            raise HTTPException(status_code=403, detail="No court assigned to your account.")
+        return user.court_id, None, vendor_name
     raise HTTPException(status_code=403, detail="Access denied.")
 
 
@@ -57,13 +89,12 @@ async def sales_summary(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    # Server-side tenancy scoping — the client cannot read another tenant's
-    # revenue by passing a different court_id/outlet_id.
-    court_id, outlet_id = _scope_sales_ids(user, court_id, outlet_id)
+    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
     return await get_sales_summary(
         db=db,
         court_id=court_id,
         outlet_id=outlet_id, # ✅ Service ko pass kar diya
+        outlet_ids=outlet_ids,
         period=period,
         date_from=date_from,
         date_to=date_to,
@@ -78,11 +109,12 @@ async def sales_trend(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    court_id, outlet_id = _scope_sales_ids(user, court_id, outlet_id)
+    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
     return await get_sales_trend(
         db=db,
         court_id=court_id,
         outlet_id=outlet_id,
+        outlet_ids=outlet_ids,
         period=period,
     )
 
@@ -95,10 +127,9 @@ async def vendor_history(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    # Same tenancy scoping as /summary. For an outlet user the outlet_id path is
-    # forced (vendor_name/court_id are ignored by the service when outlet_id is
-    # set); an ETL staff is locked to their court.
-    court_id, outlet_id = _scope_sales_ids(user, court_id, outlet_id)
+    court_id, outlet_id, vendor_name = _scope_single_outlet(
+        user, court_id, outlet_id, vendor_name
+    )
     try:
         return await get_vendor_history(
             db=db,
@@ -116,8 +147,7 @@ async def sync_sales(
     court_uid: Optional[str] = Query(None, description="Optional court UID; if omitted all active outlets sync"),
     force_refresh: bool = Query(True),
     db: Session = Depends(get_db),
-    # SECURITY (P0-1): triggering a POS fetch is an ETL-manager-only action so
-    # the endpoint can't be used to hammer Petpooja anonymously.
+    # SECURITY (P0-1): triggering a POS fetch is an ETL-manager-only action.
     user: CurrentUser = Depends(require_etl_manager),
 ):
     try:

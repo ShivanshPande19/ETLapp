@@ -73,14 +73,19 @@ async def get_sales_summary(
     period: str = "yesterday",
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    outlet_ids: Optional[list[int]] = None,  # ✓ MULTI-OUTLET: aggregate over a set
 ) -> SalesSummaryResponse:
     start_date, end_date = _get_date_range(period, date_from, date_to)
 
     # Base query on Outlet
     query = db.query(Outlet).filter(Outlet.is_active == 1)
 
-    # ✓ Logic: Outlet_id priority par hai, agar wo nahi toh court_id
-    if outlet_id:
+    # ✓ Priority: explicit outlet_ids set (multi-outlet owner) > single
+    #   outlet_id > court_id. An empty set means "no accessible outlets" and
+    #   must return nothing (the -1 sentinel guarantees an empty IN()).
+    if outlet_ids is not None:
+        query = query.filter(Outlet.id.in_(outlet_ids or [-1]))
+    elif outlet_id:
         query = query.filter(Outlet.id == outlet_id)
     elif court_id:
         query = query.filter(Outlet.court_id == court_id)
@@ -216,13 +221,16 @@ async def get_sales_trend(
     court_id: Optional[int] = None,
     outlet_id: Optional[int] = None,
     period: str = "yesterday",
+    outlet_ids: Optional[list[int]] = None,  # ✓ MULTI-OUTLET: aggregate over a set
 ) -> SalesTrendResponse:
     """Daily/monthly time-series for the sales chart, scoped to all courts, one
-    court, or one outlet. Every series ends at 'yesterday' (IST) so today's
-    in-progress sales never show — consistent with the summary."""
+    court, one outlet, or an explicit set of outlets (a multi-outlet owner).
+    Every series ends at 'yesterday' (IST) so today's in-progress sales never
+    show — consistent with the summary."""
     today = now_ist().date()
     clean = period.lower().replace("this_", "")
-    outlet_ids = _resolve_outlet_ids(db, court_id, outlet_id)
+    # An explicit set wins (multi-outlet owner viewing "all my outlets").
+    outlet_ids = list(outlet_ids) if outlet_ids is not None else _resolve_outlet_ids(db, court_id, outlet_id)
 
     def range_totals(start: date, end: date) -> tuple[float, int]:
         if not outlet_ids:

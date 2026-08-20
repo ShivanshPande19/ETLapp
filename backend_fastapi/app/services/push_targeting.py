@@ -51,6 +51,7 @@ from ..models.manager import Manager
 from ..models.notice import Notice
 from ..models.sale import Outlet
 from ..models.staff import Staff
+from ..models.outlet_membership import OutletMembership
 
 # Legacy rows created by /auth/seed carry the bare value "manager"; treat it as
 # an ETL manager exactly like deps.CurrentUser.is_etl_manager does.
@@ -103,23 +104,26 @@ def _tokens_for_staff_ids(db: Session, staff_ids: Iterable[int]) -> List[str]:
 
 
 def _tokens_for_outlet_managers(db: Session, outlet_id: int) -> List[str]:
-    """Live tokens for the manager(s) of exactly ONE outlet.
+    """Live tokens for EVERY manager linked to exactly ONE outlet.
 
-    The `Manager.outlet_id == outlet_id` filter is the tenancy boundary: a
-    manager of any other outlet cannot match, and an ETL manager (whose
-    `outlet_id` is NULL) cannot match either.
+    MULTI-OUTLET: the tenancy boundary is now `outlet_memberships` — a manager
+    receives an outlet's notices iff they hold a membership (owner OR manager)
+    for that outlet. This covers the same-owner-many-outlets case and any
+    assigned co-managers, while a manager of any other outlet still cannot
+    match, and an ETL manager (no memberships) cannot match either.
     """
     if outlet_id is None:
         return []
     rows = (
         db.query(DeviceToken.fcm_token)
         .join(Manager, Manager.id == DeviceToken.user_id)
+        .join(OutletMembership, OutletMembership.manager_id == Manager.id)
         .filter(
             DeviceToken.user_type == "manager",
             DeviceToken.is_active == True,  # noqa: E712
             Manager.is_active == True,  # noqa: E712
             Manager.role == "outlet_manager",
-            Manager.outlet_id == outlet_id,
+            OutletMembership.outlet_id == outlet_id,
         )
         .all()
     )

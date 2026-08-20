@@ -502,7 +502,7 @@ def get_outlet_feedbacks(
     end: Optional[datetime] = Query(None),
 ):
     if user.is_outlet_user:
-        if user.outlet_id != outlet_id:
+        if outlet_id not in user.outlet_ids:  # MULTI-OUTLET: any of their outlets
             raise HTTPException(
                 status_code=403,
                 detail="You can only view your own outlet's feedbacks.",
@@ -535,7 +535,7 @@ def get_outlet_analytics(
     user: CurrentUser = Depends(get_current_user),
 ):
     if user.is_outlet_user:
-        if user.outlet_id != outlet_id:
+        if outlet_id not in user.outlet_ids:  # MULTI-OUTLET
             raise HTTPException(status_code=403, detail="Access denied.")
     elif not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="Access denied.")
