@@ -13,6 +13,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../domain/outlet_providers.dart';
 import '../data/outlets_repository.dart';
+import '../../../core/ui/nav_visibility.dart';
 
 class OutletSwitcher extends ConsumerWidget {
   /// When true (dark headers), text is light. When false (light surfaces),
@@ -65,67 +66,109 @@ class OutletSwitcher extends ConsumerWidget {
     );
   }
 
-  void _openPicker(
+  Future<void> _openPicker(
     BuildContext context,
     WidgetRef ref,
     List<MyOutlet> outlets,
     int? selectedId,
-  ) {
+  ) async {
     HapticFeedback.selectionClick();
-    showModalBottomSheet<void>(
+    // Slide the floating nav bar away so it can't cover the sheet's content.
+    ref.read(navBarVisibleProvider.notifier).state = false;
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true, // allow a tall, scrollable list
       backgroundColor: const Color(0xFF141414),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-                child: Text(
-                  'Switch outlet',
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              ...outlets.map((o) {
-                final isSel = o.outletId == selectedId;
-                return ListTile(
-                  onTap: () {
-                    ref.read(selectedOutletIdProvider.notifier).select(o.outletId);
-                    Navigator.of(ctx).pop();
-                  },
-                  leading: Icon(
-                    isSel ? Icons.check_circle_rounded : Icons.storefront_outlined,
-                    color: isSel ? const Color(0xFFDEFF9A) : Colors.white54,
-                    size: 22,
-                  ),
-                  title: Text(
-                    o.vendorName,
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+          child: ConstrainedBox(
+            // Cap the height so a long list (5-8+ outlets) scrolls instead of
+            // shoving the sheet to full screen.
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 10, bottom: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
-                  subtitle: Text(
-                    o.courtName + (o.isOwner ? '  ·  Owner' : '  ·  Manager'),
-                    style: GoogleFonts.inter(fontSize: 12, color: Colors.white54),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.storefront_rounded, size: 18, color: Colors.white70),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Switch outlet',
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              }),
-              const SizedBox(height: 12),
-            ],
+                ),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    itemCount: outlets.length,
+                    itemBuilder: (_, i) {
+                      final o = outlets[i];
+                      final isSel = o.outletId == selectedId;
+                      return ListTile(
+                        onTap: () {
+                          ref
+                              .read(selectedOutletIdProvider.notifier)
+                              .select(o.outletId);
+                          Navigator.of(ctx).pop();
+                        },
+                        leading: Icon(
+                          isSel
+                              ? Icons.check_circle_rounded
+                              : Icons.storefront_outlined,
+                          color: isSel ? const Color(0xFFDEFF9A) : Colors.white54,
+                          size: 22,
+                        ),
+                        title: Text(
+                          o.vendorName,
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                        subtitle: Text(
+                          o.courtName + (o.isOwner ? '  ·  Owner' : '  ·  Manager'),
+                          style: GoogleFonts.inter(fontSize: 12, color: Colors.white54),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
           ),
         );
       },
     );
+    // Restore the nav bar once the sheet is dismissed (selection or tap-away).
+    ref.read(navBarVisibleProvider.notifier).state = true;
   }
 }
