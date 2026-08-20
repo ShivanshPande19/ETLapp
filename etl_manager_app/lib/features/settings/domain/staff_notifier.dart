@@ -140,6 +140,10 @@ class StaffNotifier extends Notifier<StaffState> {
         'name': name,
         'email': email,
         'password': password,
+        // MULTI-OUTLET: tell the backend which outlet this staff belongs to.
+        // Required when the owner manages multiple outlets; harmless otherwise.
+        // The server validates the outlet is one the caller is linked to.
+        'outlet_id': outletId,
         if (phone != null && phone.isNotEmpty) 'phone': phone,
         if (photoPath != null && photoPath.isNotEmpty)
           'photo': await MultipartFile.fromFile(

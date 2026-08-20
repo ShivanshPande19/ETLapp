@@ -50,6 +50,10 @@ class RaiseTicketInput(BaseModel):
     priority:    IssuePriority = IssuePriority.medium
     description: str = Field(..., min_length=5, max_length=1000)
     photo_url:   Optional[str] = Field(None, max_length=500)
+    # MULTI-OUTLET: which of the caller's outlets this ticket is for. Optional —
+    # staff and single-outlet owners can omit it (their only outlet is used); a
+    # multi-outlet owner MUST specify. Always validated against membership.
+    outlet_id:   Optional[int] = None
 
     @field_validator("description")
     @classmethod
@@ -153,7 +157,8 @@ def _get_issue_or_404(db: Session, issue_id: int) -> MaintenanceIssue:
 
 
 def _assert_outlet_owns(user: CurrentUser, issue: MaintenanceIssue):
-    if issue.outlet_id != user.outlet_id:
+    # MULTI-OUTLET: the ticket must belong to one of the caller's outlets.
+    if issue.outlet_id not in user.outlet_ids:
         raise HTTPException(status_code=403, detail="This ticket belongs to another outlet.")
 
 
@@ -236,9 +241,26 @@ async def raise_ticket(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_outlet_user),
 ):
-    """Outlet staff/manager raises a ticket for THEIR OWN outlet (from JWT)."""
+    """Outlet staff/manager raises a ticket for one of THEIR OWN outlets.
+
+    The outlet is resolved from the caller's membership (never trusted blindly):
+    a single-outlet caller can omit `outlet_id`; a multi-outlet owner must send
+    one, and it must be an outlet they belong to.
+    """
+    target_outlet_id = body.outlet_id
+    if target_outlet_id is None:
+        if len(user.outlet_ids) == 1:
+            target_outlet_id = user.outlet_ids[0]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="outlet_id is required — you manage multiple outlets.",
+            )
+    if target_outlet_id not in user.outlet_ids:
+        raise HTTPException(status_code=403, detail="You cannot raise a ticket for that outlet.")
+
     outlet = db.query(Outlet).filter(
-        Outlet.id == user.outlet_id, Outlet.is_active == 1
+        Outlet.id == target_outlet_id, Outlet.is_active == 1
     ).first()
     if not outlet:
         raise HTTPException(status_code=404, detail="Your outlet was not found or is inactive.")
@@ -287,21 +309,30 @@ async def list_issues(
     status_filter: Optional[IssueStatus] = Query(None, alias="status"),
     priority: Optional[IssuePriority] = Query(None),
     court_id: Optional[int] = Query(None),
+    outlet_id: Optional[int] = Query(None),  # ✅ MULTI-OUTLET: optional outlet filter (switcher)
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Role-scoped listing. Outlet users see only their outlet; ETL managers see all courts."""
+    """Role-scoped listing. Outlet users see only their outlet(s); ETL managers see all courts."""
     q = db.query(MaintenanceIssue)
 
     if user.is_outlet_user:
-        if user.outlet_id is None:
+        if not user.outlet_ids:
             raise HTTPException(status_code=403, detail="No outlet assigned.")
-        q = q.filter(MaintenanceIssue.outlet_id == user.outlet_id)
+        if outlet_id is not None:
+            # A specific selection must be one of the caller's outlets.
+            if outlet_id not in user.outlet_ids:
+                raise HTTPException(status_code=403, detail="You cannot access that outlet.")
+            q = q.filter(MaintenanceIssue.outlet_id == outlet_id)
+        else:
+            q = q.filter(MaintenanceIssue.outlet_id.in_(user.outlet_ids))
     elif user.is_etl_manager:
         if court_id:
             q = q.filter(MaintenanceIssue.court_id == court_id)
+        if outlet_id:
+            q = q.filter(MaintenanceIssue.outlet_id == outlet_id)
     elif user.is_etl_staff:
         if user.court_id is None:
             raise HTTPException(status_code=403, detail="No court assigned.")

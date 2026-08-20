@@ -8,6 +8,7 @@ from ..core.security import decode_token
 from ..database import get_db
 from ..models.manager import Manager
 from ..models.staff import Staff
+from ..models.outlet_membership import OutletMembership
 
 
 class CurrentUser:
@@ -22,13 +23,28 @@ class CurrentUser:
         court_id: int | None = None,
         outlet_id: int | None = None,
         user_type: str = "manager",
+        outlet_ids: list[int] | None = None,
     ):
         self.id = id
         self.name = name
         self.email = email
         self.role = role
         self.court_id = court_id
+        # `outlet_id` = the PRIMARY/default outlet (legacy single-outlet column).
+        # Kept for backward compatibility and as the default selection.
         self.outlet_id = outlet_id
+        # `outlet_ids` = the FULL set of outlets this identity may access.
+        #
+        # MULTI-OUTLET (Option A): an outlet_manager can own/manage many outlets
+        # via `outlet_memberships`. ALL tenancy scoping must use this set
+        # (membership check), never the single `outlet_id`. Falls back to
+        # [outlet_id] when no explicit set is given (staff, legacy).
+        if outlet_ids is not None:
+            self.outlet_ids = list(outlet_ids)
+        elif outlet_id is not None:
+            self.outlet_ids = [outlet_id]
+        else:
+            self.outlet_ids = []
         # Which table this identity came from: "manager" | "staff".
         #
         # The JWT carries no type claim and `id` is only unique WITHIN a table
@@ -60,8 +76,40 @@ class CurrentUser:
         """True when this identity is a row in `staff`."""
         return self.user_type == "staff"
 
+    def can_access_outlet(self, outlet_id: int | None) -> bool:
+        """Tenancy gate: may this user read/act on the given outlet?
+
+        ETL managers are unrestricted (they oversee every court/outlet).
+        Everyone else must have the outlet in their membership set.
+        """
+        if outlet_id is None:
+            return False
+        if self.is_etl_manager:
+            return True
+        return outlet_id in self.outlet_ids
+
 
 _bearer = HTTPBearer(auto_error=False)
+
+
+def _resolve_outlet_ids(db: Session, manager: Manager) -> list[int]:
+    """All outlets an outlet_manager may access, from `outlet_memberships`.
+
+    Falls back to the legacy primary `Manager.outlet_id` if the membership row
+    hasn't been backfilled yet (belt-and-braces; the boot backfill normally
+    seeds it). ETL managers have no memberships and get an empty set.
+    """
+    if manager.role != "outlet_manager":
+        return []
+    rows = (
+        db.query(OutletMembership.outlet_id)
+        .filter(OutletMembership.manager_id == manager.id)
+        .all()
+    )
+    ids = [r[0] for r in rows]
+    if not ids and manager.outlet_id is not None:
+        ids = [manager.outlet_id]
+    return ids
 
 
 def get_current_user(
@@ -92,12 +140,18 @@ def get_current_user(
     ).first()
 
     if user:
+        outlet_ids = _resolve_outlet_ids(db, user)
+        # Primary = the manager's own column, else the first accessible outlet.
+        primary = user.outlet_id if user.outlet_id is not None else (
+            outlet_ids[0] if outlet_ids else None
+        )
         return CurrentUser(
             id=user.id,
             name=user.name,
             email=user.email,
             role=user.role,
-            outlet_id=user.outlet_id,
+            outlet_id=primary,
+            outlet_ids=outlet_ids,
             user_type="manager",
         )
 
@@ -106,6 +160,8 @@ def get_current_user(
     ).first()
 
     if staff:
+        # Staff remain single-outlet (their own outlet only).
+        staff_outlets = [staff.outlet_id] if staff.outlet_id is not None else []
         return CurrentUser(
             id=staff.id,
             name=staff.name,
@@ -113,6 +169,7 @@ def get_current_user(
             role=staff.role,
             court_id=staff.court_id,
             outlet_id=staff.outlet_id,
+            outlet_ids=staff_outlets,
             user_type="staff",
         )
 
@@ -128,6 +185,7 @@ def require_etl_manager(user: CurrentUser = Depends(get_current_user)) -> Curren
 def require_outlet_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if not user.is_outlet_user:
         raise HTTPException(status_code=403, detail="Outlet access required.")
-    if user.outlet_id is None:
+    # MULTI-OUTLET: an outlet user must be linked to at least one outlet.
+    if not user.outlet_ids:
         raise HTTPException(status_code=403, detail="No outlet assigned to your account.")
     return user

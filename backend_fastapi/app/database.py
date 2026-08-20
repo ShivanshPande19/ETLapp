@@ -213,6 +213,42 @@ def backfill_sales_orders() -> None:
         print(f"[MIGRATION] backfill_sales_orders skipped: {e}")
 
 
+def backfill_outlet_memberships() -> None:
+    """One-time, idempotent seed of ``outlet_memberships`` from the legacy
+    ``Manager.outlet_id`` column.
+
+    Every existing outlet_manager becomes an ``owner`` of their current outlet,
+    so multi-outlet scoping (which reads memberships) behaves EXACTLY as the
+    old single-``outlet_id`` scoping did for current accounts — zero behaviour
+    change on deploy. Rows already present are skipped via the
+    ``(manager_id, outlet_id)`` unique key, so this is safe on every boot.
+    """
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            tables = set(insp.get_table_names())
+            if "managers" not in tables or "outlet_memberships" not in tables:
+                return  # fresh DB — create_all just made the table
+
+            conflict = "OR IGNORE " if _is_sqlite else ""
+            tail = (
+                "" if _is_sqlite
+                else "ON CONFLICT (manager_id, outlet_id) DO NOTHING"
+            )
+            conn.execute(
+                text(
+                    f"INSERT {conflict}INTO outlet_memberships "
+                    "(manager_id, outlet_id, membership_role) "
+                    "SELECT id, outlet_id, 'owner' FROM managers "
+                    "WHERE role = 'outlet_manager' AND outlet_id IS NOT NULL "
+                    f"{tail}"
+                )
+            )
+        print("[MIGRATION] backfill_outlet_memberships ran ✓")
+    except Exception as e:
+        print(f"[MIGRATION] backfill_outlet_memberships skipped: {e}")
+
+
 def ensure_staff_columns() -> None:
     """Add profile columns (phone, photo_url) to an existing `staff` table.
     Best-effort + idempotent."""

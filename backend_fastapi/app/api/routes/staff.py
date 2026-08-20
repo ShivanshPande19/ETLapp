@@ -89,7 +89,7 @@ def list_staff_by_outlet(
     # ETL manager (any outlet) or the outlet's own manager/staff.
     if user.is_etl_manager:
         pass
-    elif user.is_outlet_user and user.outlet_id == outlet_id:
+    elif user.is_outlet_user and outlet_id in user.outlet_ids:  # MULTI-OUTLET
         pass
     else:
         raise HTTPException(status_code=403, detail="Access denied.")
@@ -143,16 +143,30 @@ async def add_outlet_staff(
     email: str = Form(...),
     password: str = Form(...),
     phone: Optional[str] = Form(None),
+    outlet_id: Optional[int] = Form(None),  # ✅ MULTI-OUTLET: which of my outlets
     photo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    # Only an outlet manager can add staff — and only to their OWN outlet
-    # (outlet_id is taken from the token, never the client).
-    if user.role != "outlet_manager" or user.outlet_id is None:
+    # Only an outlet manager can add staff — and only to an outlet they are
+    # linked to (resolved from membership, never trusted blindly). A single-
+    # outlet manager may omit outlet_id; a multi-outlet owner must send one.
+    if user.role != "outlet_manager" or not user.outlet_ids:
         raise HTTPException(
             status_code=403, detail="Outlet manager access required."
         )
+
+    target_outlet_id = outlet_id
+    if target_outlet_id is None:
+        if len(user.outlet_ids) == 1:
+            target_outlet_id = user.outlet_ids[0]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="outlet_id is required — you manage multiple outlets.",
+            )
+    if target_outlet_id not in user.outlet_ids:
+        raise HTTPException(status_code=403, detail="You cannot add staff to that outlet.")
 
     name = name.strip()
     email = email.strip().lower()
@@ -169,7 +183,7 @@ async def add_outlet_staff(
         email=email,
         password=password,
         role="outlet_staff",
-        outlet_id=user.outlet_id,
+        outlet_id=target_outlet_id,
         phone=(phone or "").strip() or None,
         photo_url=photo_url,
     )
@@ -192,8 +206,8 @@ def remove_staff_access(
     # ETL manager can remove any; an outlet manager only their own outlet's staff.
     if user.is_etl_manager:
         pass
-    elif user.role == "outlet_manager" and user.outlet_id is not None:
-        if staff.outlet_id != user.outlet_id:
+    elif user.role == "outlet_manager" and user.outlet_ids:
+        if staff.outlet_id not in user.outlet_ids:  # MULTI-OUTLET
             raise HTTPException(
                 status_code=403,
                 detail="You can only remove your own outlet's staff.",
@@ -304,8 +318,8 @@ def set_shift(
     # own outlet's staff.
     if user.is_etl_manager:
         pass
-    elif user.role == "outlet_manager" and user.outlet_id is not None:
-        if staff.outlet_id != user.outlet_id:
+    elif user.role == "outlet_manager" and user.outlet_ids:
+        if staff.outlet_id not in user.outlet_ids:  # MULTI-OUTLET
             raise HTTPException(
                 status_code=403,
                 detail="You can only set shifts for your own outlet's staff.",

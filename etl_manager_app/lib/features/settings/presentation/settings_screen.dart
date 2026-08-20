@@ -14,6 +14,8 @@ import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../../home/presentation/home_providers.dart' show currentOutletNameProvider;
 import '../presentation/manage_courts_screen.dart';
 import 'outlet_staff_management_screen.dart';
+import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
+import '../../outlets/presentation/manage_access_screen.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
 import '../../attendance_calendar/presentation/manager_attendance_screen.dart';
@@ -159,6 +161,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             : 'Staff Access';
     final outletName =
         ref.watch(currentOutletNameProvider).value ?? 'Your Outlet';
+    // MULTI-OUTLET: act on the currently-selected outlet (defaults to the
+    // manager's primary, so single-outlet owners are unaffected). Manage Access
+    // is shown only when the caller is an OWNER of the selected outlet.
+    final selectedOutlet = ref.watch(selectedOutletProvider);
+    final effectiveOutletId =
+        ref.watch(selectedOutletIdProvider) ?? auth.outletId ?? 0;
+    final isOwnerOfSelected = selectedOutlet?.isOwner ?? false;
 
     return Scaffold(
       backgroundColor: _bg,
@@ -455,12 +464,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                     MaterialPageRoute(
                                       builder: (_) =>
                                           OutletStaffManagementScreen(
-                                        outletId: auth.outletId ?? 0,
+                                        outletId: effectiveOutletId,
                                         outletName: outletName,
                                       ),
                                     ),
                                   ),
                                 ),
+                                // MULTI-OUTLET: owners can add/remove co-managers
+                                // for the selected outlet. Hidden for limited
+                                // co-managers (and until ownership is known).
+                                if (isOwnerOfSelected) ...[
+                                  _GroupDivider(),
+                                  _NavTile(
+                                    icon: Icons.admin_panel_settings_rounded,
+                                    label: 'Manage Access',
+                                    subtitle: 'Add or remove co-managers',
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ManageAccessScreen(
+                                          outletId: effectiveOutletId,
+                                          outletName: outletName,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 _GroupDivider(),
                                 Consumer(
                                   builder: (context, ref, _) {

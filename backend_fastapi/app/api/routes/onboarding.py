@@ -23,6 +23,7 @@ from ...database import get_db
 from ...models.sale import Court, Outlet
 from ...models.manager import Manager
 from ...models.onboarding import OutletApplication
+from ...models.outlet_membership import OutletMembership, MEMBERSHIP_OWNER
 from ...schemas.onboarding import (
     ApplicationOut, ApplicationListResponse, ApproveRequest, ApproveResponse,
     RejectRequest, OutletWithDocs,
@@ -263,10 +264,15 @@ async def approve_application(
         raise HTTPException(
             status_code=409, detail="An outlet with this rest_id already exists."
         )
-    if db.query(Manager).filter(Manager.email == app.owner_email).first():
+    # MULTI-OUTLET: an existing account with this email is NO LONGER an error.
+    # The same owner can run outlets across several courts under ONE login, so
+    # we LINK the new outlet to their existing account instead of rejecting it.
+    existing_owner = db.query(Manager).filter(Manager.email == app.owner_email).first()
+    if existing_owner and existing_owner.role != "outlet_manager":
+        # Collision with an ETL manager / other account — refuse to link.
         raise HTTPException(
             status_code=409,
-            detail="An account with this email already exists. Use a different email.",
+            detail="That email belongs to a non-outlet account. Use a different email.",
         )
 
     # 1. Create the outlet (joins the court + cron sync immediately)
@@ -284,17 +290,69 @@ async def approve_application(
     db.add(outlet)
     db.flush()  # get outlet.id
 
+    # ─── Path A: EXISTING owner → link the new outlet, no new login ──────────
+    if existing_owner:
+        db.add(OutletMembership(
+            manager_id=existing_owner.id,
+            outlet_id=outlet.id,
+            membership_role=MEMBERSHIP_OWNER,
+        ))
+        app.status = "approved"
+        app.created_outlet_id = outlet.id
+        app.reviewed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(outlet)
+
+        # Durable notice + push to the owner (targeted to the new outlet, which
+        # they now own) telling them it's available in the outlet switcher.
+        try:
+            create_notice(
+                db,
+                audience="manager",
+                type="outlet_added",
+                title="New outlet added to your account",
+                body=(
+                    f"“{app.outlet_name}” has been added to your account. Open the "
+                    f"app and switch outlets to manage it."
+                ),
+                court_id=None,
+                outlet_id=outlet.id,
+            )
+        except Exception as e:  # noqa: BLE001 — never fail approval on a notice
+            print(f"[ONBOARDING] outlet-added notice failed for outlet {outlet.id}: {e}")
+
+        email_sent = await send_email(
+            to=existing_owner.email,
+            subject="A new outlet was added to your ETL account",
+            html=_outlet_added_email_html(existing_owner.name, app.outlet_name),
+        )
+        return ApproveResponse(
+            outlet_id=outlet.id,
+            manager_email=existing_owner.email,
+            set_password_link=None,  # existing account — no password to set
+            email_sent=email_sent,
+            message="Outlet approved and linked to the existing owner account.",
+        )
+
+    # ─── Path B: BRAND-NEW owner → create login + owner membership ───────────
     # 2. Create the outlet-manager login (pending password — unusable until set)
     manager = Manager(
         name=app.owner_name,
         email=app.owner_email,
         hashed_password=hash_password(secrets.token_urlsafe(24)),
         role="outlet_manager",
-        outlet_id=outlet.id,
+        outlet_id=outlet.id,  # primary/default outlet
         is_active=True,
     )
     db.add(manager)
     db.flush()
+
+    # Owner membership — the source of truth for what this account can access.
+    db.add(OutletMembership(
+        manager_id=manager.id,
+        outlet_id=outlet.id,
+        membership_role=MEMBERSHIP_OWNER,
+    ))
 
     app.status = "approved"
     app.created_outlet_id = outlet.id
@@ -475,5 +533,24 @@ def _set_password_email_html(owner_name: str, outlet_name: str, link: str) -> st
       <p style="color:#888; font-size:13px;">This link is valid for 7 days. If
          the button doesn't work, copy and paste this URL:</p>
       <p style="color:#888; font-size:12px; word-break:break-all;">{link}</p>
+    </div>
+    """
+
+
+
+def _outlet_added_email_html(owner_name: str, outlet_name: str) -> str:
+    """Sent when a NEW outlet is linked to an EXISTING owner account.
+
+    No set-password link here — the owner already has a working login. They
+    just open the app and switch to the new outlet from the outlet switcher.
+    """
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+      <h2 style="color:#0A0A0A;">A new outlet was added 🎉</h2>
+      <p>Hi {owner_name or 'there'},</p>
+      <p><b>{outlet_name}</b> has been approved and linked to your existing ETL
+         account. You don't need a new login — just open the ETL Manager app and
+         use the <b>outlet switcher</b> at the top to select it.</p>
+      <p style="color:#888; font-size:13px; margin-top:28px;">— ETL Food Court Team</p>
     </div>
     """

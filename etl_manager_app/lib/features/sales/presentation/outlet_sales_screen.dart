@@ -8,7 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../domain/sales_notifier.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../home/presentation/home_providers.dart'; // ✅ Imported for Real Graph Data
-import '../../auth/domain/auth_notifier.dart'; // ✅ P0-3: own outlet id for scoped sales
+import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 
 // ─── Premium Palette ─────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -85,7 +85,7 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     // outlet manager we must scope to THEIR outlet, so kick off an explicit
     // outlet-scoped fetch on mount (supersedes the default all-courts load).
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final oid = ref.read(authNotifierProvider).outletId;
+      final oid = ref.read(selectedOutletIdProvider);
       if (oid != null) {
         ref
             .read(salesNotifierProvider.notifier)
@@ -94,8 +94,9 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     });
   }
 
-  // Own outlet id from the JWT-backed auth state (never client-selectable).
-  int? get _outletId => ref.read(authNotifierProvider).outletId;
+  // The currently-selected outlet (defaults to the manager's primary outlet,
+  // so single-outlet owners behave exactly as before). Server still validates.
+  int? get _outletId => ref.read(selectedOutletIdProvider);
 
   @override
   void dispose() {
@@ -184,6 +185,20 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     ref.listen<SalesState>(salesNotifierProvider, (prev, next) {
       if (next.status == SalesLoadStatus.loaded && next.summary != null) {
         _triggerFade();
+      }
+    });
+
+    // MULTI-OUTLET: when the owner switches outlet, refetch sales + insights
+    // for the newly-selected outlet.
+    ref.listen<int?>(selectedOutletIdProvider, (prev, next) {
+      if (next != null && prev != next) {
+        ref.read(salesNotifierProvider.notifier).fetchSummary(
+              outletId: next,
+              period: salesState.period,
+              customDateFrom: salesState.customDateFrom,
+              customDateTo: salesState.customDateTo,
+            );
+        ref.invalidate(weeklyInsightsProvider);
       }
     });
 

@@ -26,10 +26,11 @@ def _scoped_query(db: Session, user: CurrentUser):
             Notice.audience == "manager",
             Notice.outlet_id.is_(None),
         )
-    if user.role == "outlet_manager" and user.outlet_id is not None:
+    if user.role == "outlet_manager" and user.outlet_ids:
+        # MULTI-OUTLET: notices for ANY of the outlets this manager is linked to.
         return db.query(Notice).filter(
             Notice.audience == "manager",
-            Notice.outlet_id == user.outlet_id,
+            Notice.outlet_id.in_(user.outlet_ids),
         )
     if user.is_etl_staff or user.role == "outlet_staff":
         return db.query(Notice).filter(
