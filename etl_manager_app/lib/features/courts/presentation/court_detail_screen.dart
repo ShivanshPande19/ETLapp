@@ -17,6 +17,10 @@ import '../../maintenance/domain/maintenance_notifier.dart'
 import '../../feedbacks/domain/etl_feedback_notifier.dart'
     show EtlFeedbackModel;
 
+// ✅ Shared loading polish: animated shimmer skeleton + mount entrance fade
+import '../../../core/widgets/skeleton.dart';
+import '../../../core/widgets/appear_fade.dart';
+
 // ─── Palette (matches app exactly) ───────────────────────────────────────────
 
 const _bg = Color(0xFF080808);
@@ -213,7 +217,9 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                         salesAsync.when(
                           loading: () => _skeletonCard(100),
                           error: (_, __) => _errorCard('Sales unavailable'),
-                          data: (s) => _SalesCard(summary: s, fmt: _fmt),
+                          data: (s) => AppearFade(
+                            child: _SalesCard(summary: s, fmt: _fmt),
+                          ),
                         ),
                         const SizedBox(height: 24),
 
@@ -224,12 +230,15 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                           loading: () => _skeletonCard(120),
                           error: (_, __) =>
                               _errorCard('Housekeeping unavailable'),
-                          data: (rows) => rows.isEmpty
-                              ? _emptyCard(
-                                  Icons.cleaning_services_rounded,
-                                  'No housekeeping data',
-                                )
-                              : _HkCard(rows: rows),
+                          data: (rows) => AppearFade(
+                            delayMs: 60,
+                            child: rows.isEmpty
+                                ? _emptyCard(
+                                    Icons.cleaning_services_rounded,
+                                    'No housekeeping data',
+                                  )
+                                : _HkCard(rows: rows),
+                          ),
                         ),
                         const SizedBox(height: 24),
 
@@ -247,12 +256,15 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                           loading: () => _skeletonCard(110),
                           error: (_, __) =>
                               _errorCard('Feedbacks unavailable'),
-                          data: (list) => list.isEmpty
-                              ? _emptyCard(
-                                  Icons.reviews_outlined,
-                                  'No feedback for this court yet',
-                                )
-                              : _FeedbackSection(items: list),
+                          data: (list) => AppearFade(
+                            delayMs: 120,
+                            child: list.isEmpty
+                                ? _emptyCard(
+                                    Icons.reviews_outlined,
+                                    'No feedback for this court yet',
+                                  )
+                                : _FeedbackSection(items: list),
+                          ),
                         ),
                         const SizedBox(height: 24),
 
@@ -270,12 +282,15 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
                           loading: () => _skeletonCard(110),
                           error: (_, __) =>
                               _errorCard('Maintenance unavailable'),
-                          data: (list) => list.isEmpty
-                              ? _emptyCard(
-                                  Icons.build_outlined,
-                                  'No maintenance issues for this court',
-                                )
-                              : _MaintenanceSection(items: list),
+                          data: (list) => AppearFade(
+                            delayMs: 180,
+                            child: list.isEmpty
+                                ? _emptyCard(
+                                    Icons.build_outlined,
+                                    'No maintenance issues for this court',
+                                  )
+                                : _MaintenanceSection(items: list),
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Center(
@@ -432,11 +447,35 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
     ),
   );
 
-  Widget _skeletonCard(double h) => Container(
-    height: h,
-    decoration: BoxDecoration(
-      color: const Color(0xFFEEEEEC),
-      borderRadius: BorderRadius.circular(18),
+  // Animated shimmer placeholder (light variant — this area sits on the white
+  // card). Structured shapes read as "content loading" instead of a dead grey
+  // block, and the sweeping highlight makes the wait feel alive/premium.
+  Widget _skeletonCard(double h) => Shimmer.light(
+    child: SizedBox(
+      height: h,
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: const [
+              Expanded(child: SkeletonBox(height: 34, radius: 10)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonBox(height: 34, radius: 10)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonBox(height: 34, radius: 10)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const SkeletonBox(height: 12, radius: 6),
+          const SizedBox(height: 10),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: SkeletonBox(width: 150, height: 12, radius: 6),
+          ),
+          const Spacer(),
+        ],
+      ),
     ),
   );
 
