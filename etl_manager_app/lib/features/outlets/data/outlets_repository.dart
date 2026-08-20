@@ -105,6 +105,29 @@ class OutletsRepository {
   Future<void> removeManager(int outletId, int managerId) async {
     await _dio.delete('/outlets/$outletId/managers/$managerId');
   }
+
+  /// ETL admin: correct an outlet owner's name / email / phone.
+  Future<Map<String, dynamic>> updateOutletOwner(
+    int outletId, {
+    String? name,
+    String? email,
+    String? phone,
+  }) async {
+    final res = await _dio.patch(
+      '/outlets/$outletId/owner',
+      data: {
+        if (name != null) 'name': name,
+        if (email != null) 'email': email,
+        if (phone != null) 'phone': phone,
+      },
+    );
+    return Map<String, dynamic>.from(res.data as Map);
+  }
+
+  /// ETL admin: permanently delete an outlet and all its data.
+  Future<void> deleteOutlet(int outletId) async {
+    await _dio.delete('/outlets/$outletId');
+  }
 }
 
 final outletsRepositoryProvider = Provider<OutletsRepository>((ref) {

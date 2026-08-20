@@ -18,20 +18,23 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
+from sqlalchemy import text, inspect
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...core.config import settings
 from ...core.security import create_token, hash_password
 from ...models.manager import Manager
+from ...models.staff import Staff
 from ...models.sale import Outlet, Court
+from ...models.onboarding import OutletApplication
 from ...models.outlet_membership import (
     OutletMembership,
     MEMBERSHIP_OWNER,
     MEMBERSHIP_MANAGER,
 )
 from ...services.email_service import send_email
-from ..deps import get_current_user, CurrentUser
+from ..deps import get_current_user, require_etl_manager, CurrentUser
 
 router = APIRouter()
 
@@ -328,3 +331,169 @@ def remove_outlet_manager(
 
     db.commit()
     return {"removed": True, "outlet_id": outlet_id, "manager_id": manager_id}
+
+
+
+# ─── ETL admin: update an outlet's owner details ─────────────────────────────
+#
+# TEMPORARY/ADMIN: outlets onboarded with placeholder owner details need their
+# real name/email/phone filled in. Gated to ETL managers only. Updating the
+# email changes the owner's LOGIN — safe here because these accounts haven't
+# been used yet. Can be removed after the initial data cleanup if desired.
+
+class UpdateOwnerRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    email: Optional[str] = Field(None, min_length=3, max_length=200)
+    phone: Optional[str] = Field(None, max_length=30)
+
+
+@router.patch("/{outlet_id}/owner")
+def update_outlet_owner(
+    body: UpdateOwnerRequest,
+    outlet_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """ETL manager: correct an outlet owner's name / email / phone."""
+    outlet = db.query(Outlet).filter(Outlet.id == outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Outlet not found.")
+
+    owners = (
+        db.query(OutletMembership)
+        .filter(
+            OutletMembership.outlet_id == outlet_id,
+            OutletMembership.membership_role == MEMBERSHIP_OWNER,
+        )
+        .all()
+    )
+    if not owners:
+        raise HTTPException(status_code=404, detail="This outlet has no owner on record.")
+    if len(owners) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="This outlet has multiple owners — edit via the manager list instead.",
+        )
+
+    mgr = db.get(Manager, owners[0].manager_id)
+    if mgr is None:
+        raise HTTPException(status_code=404, detail="Owner account not found.")
+
+    if body.name is not None:
+        name = body.name.strip()
+        if name:
+            mgr.name = name
+
+    new_email = None
+    if body.email is not None:
+        new_email = body.email.strip().lower()
+        if "@" not in new_email or "." not in new_email.split("@")[-1]:
+            raise HTTPException(status_code=400, detail="Please provide a valid email address.")
+        # Uniqueness: no OTHER manager and no staff may already use this email.
+        clash_mgr = (
+            db.query(Manager)
+            .filter(Manager.email == new_email, Manager.id != mgr.id)
+            .first()
+        )
+        clash_staff = db.query(Staff).filter(Staff.email == new_email).first()
+        if clash_mgr or clash_staff:
+            raise HTTPException(status_code=409, detail="That email is already in use.")
+        mgr.email = new_email
+
+    # Keep the onboarding application record (what the ETL UI shows) in sync.
+    appn = (
+        db.query(OutletApplication)
+        .filter(OutletApplication.created_outlet_id == outlet_id)
+        .first()
+    )
+    if appn is not None:
+        if body.name is not None and body.name.strip():
+            appn.owner_name = body.name.strip()
+        if new_email is not None:
+            appn.owner_email = new_email
+        if body.phone is not None:
+            appn.owner_phone = body.phone.strip()
+
+    db.commit()
+    db.refresh(mgr)
+    return {
+        "outlet_id": outlet_id,
+        "manager_id": mgr.id,
+        "name": mgr.name,
+        "email": mgr.email,
+        "message": "Owner details updated.",
+    }
+
+
+# ─── ETL admin: delete an outlet from a court ────────────────────────────────
+#
+# Removes the outlet and every row tied to it, child-first, in ONE transaction
+# (prod is Postgres with FK enforcement, and the schema uses create_all — not
+# migrations guaranteeing ON DELETE CASCADE — so we delete explicitly, exactly
+# like the court delete does). Managers linked to this outlet are NOT deleted
+# (they may run other outlets); we just remove their membership here and clear a
+# primary outlet_id that pointed at it, so the deps layer recomputes access from
+# their remaining memberships.
+
+@router.delete("/{outlet_id}")
+def delete_outlet(
+    outlet_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """ETL manager: permanently delete an outlet and all its data."""
+    outlet = db.query(Outlet).filter(Outlet.id == outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Outlet not found.")
+    outlet_name = outlet.vendor_name
+
+    # Outlet staff (scoped by outlet_id). Their attendance/notices/tokens go too.
+    staff_ids = [r[0] for r in db.query(Staff.id).filter(Staff.outlet_id == outlet_id).all()]
+    sid_list = ",".join(str(int(s)) for s in staff_ids)
+
+    existing_tables = set(inspect(db.get_bind()).get_table_names())
+    counts: dict[str, int] = {}
+
+    def _run(table: str, sql: str) -> None:
+        if table not in existing_tables:
+            return
+        res = db.execute(text(sql), {"oid": outlet_id})
+        counts[table] = res.rowcount if res.rowcount is not None else 0
+
+    try:
+        staff_cond = f" OR staff_id IN ({sid_list})" if sid_list else ""
+        recip_cond = f" OR recipient_staff_id IN ({sid_list})" if sid_list else ""
+        dev_staff_cond = (
+            f"user_type = 'staff' AND user_id IN ({sid_list})" if sid_list else "1=0"
+        )
+
+        # child rows first ---------------------------------------------------
+        _run("attendance", f"DELETE FROM attendance WHERE outlet_id = :oid{staff_cond}")
+        _run("notices", f"DELETE FROM notices WHERE outlet_id = :oid{staff_cond}{recip_cond}")
+        _run("feedbacks", "DELETE FROM feedbacks WHERE outlet_id = :oid")
+        _run("maintenance_issues", "DELETE FROM maintenance_issues WHERE outlet_id = :oid")
+        _run("daily_sale_cache", "DELETE FROM daily_sale_cache WHERE outlet_id = :oid")
+        _run("sales_orders", "DELETE FROM sales_orders WHERE outlet_id = :oid")
+        _run("petpooja_orders", "DELETE FROM petpooja_orders WHERE outlet_id = :oid")
+        _run("device_tokens", f"DELETE FROM device_tokens WHERE {dev_staff_cond}")
+        _run("outlet_memberships", "DELETE FROM outlet_memberships WHERE outlet_id = :oid")
+        _run("staff", "DELETE FROM staff WHERE outlet_id = :oid")
+        # detach the onboarding application (keep the record, drop the FK link)
+        _run("outlet_applications", "UPDATE outlet_applications SET created_outlet_id = NULL WHERE created_outlet_id = :oid")
+        # clear any manager whose PRIMARY outlet pointed here (don't delete them)
+        _run("managers", "UPDATE managers SET outlet_id = NULL WHERE outlet_id = :oid")
+        # ... outlet last
+        _run("outlets", "DELETE FROM outlets WHERE id = :oid")
+
+        db.commit()
+    except Exception as e:  # noqa: BLE001 — atomic: nothing partial survives
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Delete failed, rolled back: {e}")
+
+    return {
+        "deleted": True,
+        "outlet_id": outlet_id,
+        "outlet_name": outlet_name,
+        "staff_deleted": len(staff_ids),
+        "rows_deleted": counts,
+    }
