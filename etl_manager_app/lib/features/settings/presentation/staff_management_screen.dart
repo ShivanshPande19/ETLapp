@@ -1,11 +1,14 @@
 // lib/features/staff/presentation/staff_management_screen.dart
 
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../outlets/data/outlets_repository.dart'; // ETL admin: edit owner / delete outlet
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
@@ -526,6 +529,20 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
               if (o.ownerEmail != null)
                 _docOwnerRow(Icons.email_rounded, 'Login Email', o.ownerEmail!),
 
+              const SizedBox(height: 18),
+              Text('ADMIN',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: _grey,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 10),
+              _adminBtn(Icons.edit_rounded, 'Edit Owner Details', _black,
+                  () => _editOwnerDialog(o)),
+              const SizedBox(height: 10),
+              _adminBtn(Icons.delete_forever_rounded, 'Delete Outlet',
+                  AppTheme.danger, () => _confirmDeleteOutlet(o)),
+
               const SizedBox(height: 16),
               Text('STAFF',
                   style: GoogleFonts.inter(
@@ -591,6 +608,280 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
         ),
       ),
     );
+  }
+
+  // ─── ETL admin actions on an outlet (edit owner / delete) ─────────────────
+
+  Widget _adminBtn(IconData icon, String label, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        decoration: BoxDecoration(
+          color: _white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.28), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Text(label,
+                style: GoogleFonts.inter(
+                    fontSize: 14, fontWeight: FontWeight.w700, color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _adminErr(Object e) {
+    if (e is DioException) {
+      final d = e.response?.data;
+      if (d is Map && d['detail'] is String) return d['detail'] as String;
+      if (e.response?.statusCode == 409) return 'That value is already in use.';
+    }
+    return 'Something went wrong. Try again.';
+  }
+
+  Future<void> _editOwnerDialog(OutletWithDocs o) async {
+    final nameCtrl = TextEditingController(text: o.ownerName ?? '');
+    final emailCtrl = TextEditingController(text: o.ownerEmail ?? '');
+    final phoneCtrl = TextEditingController(text: o.ownerPhone ?? '');
+
+    InputDecoration deco(String h) => InputDecoration(
+          hintText: h,
+          hintStyle: GoogleFonts.inter(color: _grey, fontSize: 13),
+          filled: true,
+          fillColor: const Color(0xFFF5F5F5),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        );
+
+    final saved = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (_) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: AlertDialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          contentPadding: EdgeInsets.zero,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          content: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Edit Owner Details',
+                    style: GoogleFonts.antonSc(
+                        fontSize: 22, color: _black, letterSpacing: -0.3)),
+                const SizedBox(height: 4),
+                Text('Updating the email changes the owner\u2019s login.',
+                    style: GoogleFonts.inter(fontSize: 12.5, color: _grey)),
+                const SizedBox(height: 18),
+                TextField(controller: nameCtrl, decoration: deco('Full name'),
+                    style: GoogleFonts.inter(color: _black)),
+                const SizedBox(height: 10),
+                TextField(controller: emailCtrl, keyboardType: TextInputType.emailAddress,
+                    decoration: deco('Login email'),
+                    style: GoogleFonts.inter(color: _black)),
+                const SizedBox(height: 10),
+                TextField(controller: phoneCtrl, keyboardType: TextInputType.phone,
+                    decoration: deco('Phone'),
+                    style: GoogleFonts.inter(color: _black)),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context, false),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F5F5),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE5E5E5)),
+                          ),
+                          child: Center(
+                            child: Text('Cancel',
+                                style: GoogleFonts.inter(
+                                    fontSize: 14, fontWeight: FontWeight.w600, color: _grey)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context, true),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: _black,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Center(
+                            child: Text('Save',
+                                style: GoogleFonts.inter(
+                                    fontSize: 14, fontWeight: FontWeight.w700, color: _white)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (saved != true) return;
+
+    final name = nameCtrl.text.trim();
+    final email = emailCtrl.text.trim();
+    final phone = phoneCtrl.text.trim();
+    try {
+      await ref.read(outletsRepositoryProvider).updateOutletOwner(
+            o.outletId,
+            name: name.isEmpty ? null : name,
+            email: email.isEmpty ? null : email,
+            phone: phone.isEmpty ? null : phone,
+          );
+      if (!mounted) return;
+      ref.invalidate(courtOutletsProvider(widget.courtId));
+      Navigator.of(context).pop(); // close the outlet sheet so it reopens fresh
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Owner details updated.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_adminErr(e))));
+    }
+  }
+
+  Future<void> _confirmDeleteOutlet(OutletWithDocs o) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (_) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: AlertDialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          contentPadding: EdgeInsets.zero,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+          content: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.18),
+                  blurRadius: 40,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: AppTheme.danger.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.danger.withOpacity(0.2)),
+                  ),
+                  child: Icon(Icons.delete_forever_rounded,
+                      color: AppTheme.danger, size: 22),
+                ),
+                const SizedBox(height: 16),
+                Text('Delete Outlet?',
+                    style: GoogleFonts.antonSc(
+                        fontSize: 22, color: _black, letterSpacing: -0.3)),
+                const SizedBox(height: 8),
+                Text(
+                  '“${o.vendorName}” and ALL its data — sales, feedback, maintenance, staff and access — will be permanently removed. This cannot be undone.',
+                  style: GoogleFonts.inter(fontSize: 14, color: _grey, height: 1.5),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context, false),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F5F5),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE5E5E5)),
+                          ),
+                          child: Center(
+                            child: Text('Cancel',
+                                style: GoogleFonts.inter(
+                                    fontSize: 14, fontWeight: FontWeight.w600, color: _grey)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context, true),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: AppTheme.danger,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Center(
+                            child: Text('Delete',
+                                style: GoogleFonts.inter(
+                                    fontSize: 14, fontWeight: FontWeight.w700, color: _white)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(outletsRepositoryProvider).deleteOutlet(o.outletId);
+      if (!mounted) return;
+      ref.invalidate(courtOutletsProvider(widget.courtId));
+      Navigator.of(context).pop(); // close the outlet sheet
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${o.vendorName} deleted.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Delete failed: ${_adminErr(e)}')));
+    }
   }
 
   Widget _outletStaffFallback(String msg) => Container(
