@@ -74,7 +74,7 @@ class OutletSwitcher extends ConsumerWidget {
   ) async {
     HapticFeedback.selectionClick();
     // Slide the floating nav bar away so it can't cover the sheet's content.
-    ref.read(navBarVisibleProvider.notifier).state = false;
+    ref.read(navBarVisibleProvider.notifier).hide();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true, // allow a tall, scrollable list
@@ -169,6 +169,6 @@ class OutletSwitcher extends ConsumerWidget {
       },
     );
     // Restore the nav bar once the sheet is dismissed (selection or tap-away).
-    ref.read(navBarVisibleProvider.notifier).state = true;
+    ref.read(navBarVisibleProvider.notifier).show();
   }
 }
