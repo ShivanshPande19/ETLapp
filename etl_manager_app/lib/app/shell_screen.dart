@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/domain/auth_notifier.dart';
 import '../core/widgets/liquid_nav_bar.dart';
+import '../core/ui/nav_visibility.dart';
 
 class NavItem {
   final IconData icon;
@@ -106,6 +107,9 @@ class ShellScreen extends ConsumerWidget {
     final authState = ref.watch(authNotifierProvider);
     final items = _getNavItems(authState);
     final selectedIndex = _selectedIndex(context, items);
+    // Hidden while a screen shows a bottom sheet (e.g. the outlet switcher), so
+    // the floating bar never covers the sheet's content.
+    final navVisible = ref.watch(navBarVisibleProvider);
 
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
@@ -120,13 +124,22 @@ class ShellScreen extends ConsumerWidget {
             left: 16,
             right: 16,
             bottom: bottomPadding + 12,
-            child: LiquidNavBar(
-              items: items
-                  .map((e) => LiquidNavItem(icon: e.icon, label: e.label))
-                  .toList(),
-              selectedIndex: selectedIndex,
-              onTap: (i) => context.go(items[i].route),
-              accent: const Color(0xFFFF4444),
+            child: AnimatedSlide(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              // Slide fully off-screen (2x its own height) when hidden.
+              offset: navVisible ? Offset.zero : const Offset(0, 2),
+              child: IgnorePointer(
+                ignoring: !navVisible,
+                child: LiquidNavBar(
+                  items: items
+                      .map((e) => LiquidNavItem(icon: e.icon, label: e.label))
+                      .toList(),
+                  selectedIndex: selectedIndex,
+                  onTap: (i) => context.go(items[i].route),
+                  accent: const Color(0xFFFF4444),
+                ),
+              ),
             ),
           ),
         ],
