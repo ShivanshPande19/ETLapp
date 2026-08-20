@@ -195,6 +195,7 @@ class SalesRepository {
 
   Future<SalesSummary> getSalesSummary({
     int? courtId,
+    int? outletId, // ✅ P0-3: outlet-scoped read for outlet users
     String period = 'yesterday',
     String? dateFrom,
     String? dateTo,
@@ -204,6 +205,7 @@ class SalesRepository {
       queryParameters: <String, dynamic>{
         'period': period,
         if (courtId != null) 'court_id': courtId,
+        if (outletId != null) 'outlet_id': outletId,
         if (dateFrom != null) 'date_from': dateFrom,
         if (dateTo != null) 'date_to': dateTo,
       },
@@ -214,6 +216,7 @@ class SalesRepository {
 
   Future<SalesTrend> getSalesTrend({
     int? courtId,
+    int? outletId, // ✅ P0-3
     String period = 'yesterday',
   }) async {
     final response = await _dio.get(
@@ -221,6 +224,7 @@ class SalesRepository {
       queryParameters: <String, dynamic>{
         'period': period,
         if (courtId != null) 'court_id': courtId,
+        if (outletId != null) 'outlet_id': outletId,
       },
     );
     return SalesTrend.fromJson(response.data as Map<String, dynamic>);

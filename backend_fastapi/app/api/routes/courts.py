@@ -42,7 +42,14 @@ def _court_out(court: Court) -> dict:
 
 
 @router.get("/", response_model=CourtsResponse)
-def list_courts(db: Session = Depends(get_db)):
+def list_courts(
+    db: Session = Depends(get_db),
+    # SECURITY (P0-2): court list includes addresses + geofence coordinates
+    # (the coords that gate staff attendance), so it must not be public.
+    # Any authenticated employee may read it — every role legitimately needs to
+    # resolve court names/geofences — but anonymous access is now blocked.
+    user: CurrentUser = Depends(get_current_user),
+):
     return get_all_courts(db)
 
 

@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../domain/sales_notifier.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../home/presentation/home_providers.dart'; // ✅ Imported for Real Graph Data
+import '../../auth/domain/auth_notifier.dart'; // ✅ P0-3: own outlet id for scoped sales
 
 // ─── Premium Palette ─────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -79,7 +80,22 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
       curve: const Interval(0.3, 1.0, curve: Curves.easeOutCubic),
     );
     _switchCtrl.value = 1.0;
+
+    // ✅ P0-3: the shared SalesNotifier's build() defaults to allCourts. For an
+    // outlet manager we must scope to THEIR outlet, so kick off an explicit
+    // outlet-scoped fetch on mount (supersedes the default all-courts load).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final oid = ref.read(authNotifierProvider).outletId;
+      if (oid != null) {
+        ref
+            .read(salesNotifierProvider.notifier)
+            .fetchSummary(outletId: oid, period: SalesPeriod.yesterday);
+      }
+    });
   }
+
+  // Own outlet id from the JWT-backed auth state (never client-selectable).
+  int? get _outletId => ref.read(authNotifierProvider).outletId;
 
   @override
   void dispose() {
@@ -120,13 +136,16 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
       ref
           .read(salesNotifierProvider.notifier)
           .fetchSummary(
+            outletId: _outletId,
             period: SalesPeriod.custom,
             customDateFrom: dateStr,
             customDateTo: dateStr,
           );
     } else {
       HapticFeedback.selectionClick();
-      ref.read(salesNotifierProvider.notifier).fetchSummary(period: period);
+      ref
+          .read(salesNotifierProvider.notifier)
+          .fetchSummary(outletId: _outletId, period: period);
     }
   }
 
@@ -296,6 +315,7 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                         ref
                             .read(salesNotifierProvider.notifier)
                             .fetchSummary(
+                              outletId: _outletId,
                               period: salesState.period,
                               customDateFrom: salesState.customDateFrom,
                               customDateTo: salesState.customDateTo,
