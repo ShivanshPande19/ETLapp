@@ -80,6 +80,11 @@ dependencies:
   firebase_core: ^4.12.1
   firebase_messaging: ^16.4.3
 
+  # App-icon badge control (iOS + Android launcher badge). Used to CLEAR the
+  # badge when the app is opened/resumed and when the notices inbox is opened,
+  # and to set it to the real unread count — fixes the badge getting stuck.
+  app_badge_plus: ^1.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
