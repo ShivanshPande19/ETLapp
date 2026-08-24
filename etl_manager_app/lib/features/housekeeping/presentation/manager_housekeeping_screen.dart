@@ -103,15 +103,6 @@ class _ManagerHousekeepingScreenState
       ..forward();
   }
 
-  Animation<double> _itemAnim(int i) => CurvedAnimation(
-    parent: _listCtrl,
-    curve: Interval(
-      (i * 0.08).clamp(0.0, 0.7),
-      ((i * 0.08) + 0.4).clamp(0.0, 1.0),
-      curve: Curves.easeOutCubic,
-    ),
-  );
-
   // Shifts for the currently selected court (from status data).
   List<hk.ShiftStatus> _courtShifts(hk.FullStatusResponse? data) {
     if (data == null || _court == null) return const [];

@@ -1,11 +1,22 @@
 # app/models/attendance.py
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
 from app.database import Base
 
 class Attendance(Base):
     __tablename__ = "attendance"
+
+    # One attendance row per staff per business day. This makes the check-in
+    # handler's `except IntegrityError` a REAL guard against a double-submit
+    # race (two concurrent check-ins). On fresh DBs create_all builds this;
+    # existing DBs get the equivalent unique index from
+    # database.ensure_attendance_columns() (with a dedup-then-retry). NULL
+    # business_date rows are treated as distinct on both SQLite & Postgres, so
+    # legacy rows are unaffected.
+    __table_args__ = (
+        UniqueConstraint("staff_id", "business_date", name="uq_attendance_staff_bizdate"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     

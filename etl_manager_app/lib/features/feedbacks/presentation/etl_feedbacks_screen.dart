@@ -115,15 +115,6 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
     }
   }
 
-  Animation<double> _itemAnim(int i) => CurvedAnimation(
-    parent: _listCtrl,
-    curve: Interval(
-      (i * 0.06).clamp(0.0, 0.7),
-      ((i * 0.06) + 0.4).clamp(0.0, 1.0),
-      curve: Curves.easeOutCubic,
-    ),
-  );
-
   void _restartListAnim() {
     _listCtrl
       ..reset()
