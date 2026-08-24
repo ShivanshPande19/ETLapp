@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../auth/domain/auth_notifier.dart';
+import '../../notices/presentation/notice_bell.dart';
 import '../../staff/presentation/view_roster_screen.dart';
 import 'home_providers.dart';
 import 'weekly_insights_screen.dart';
@@ -298,6 +299,8 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
               ],
             ),
           ),
+          const NoticeBell(),
+          const SizedBox(width: 10),
           _ProfileButton(firstName: firstName),
         ],
       ),
