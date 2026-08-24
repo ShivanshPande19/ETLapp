@@ -1,0 +1,46 @@
+name: Backend Tests
+
+# Runs the FastAPI backend pytest suite automatically. Triggers on:
+#  - every push to main that touches the backend (or this workflow)
+#  - every pull request that touches the backend (or this workflow)
+# so a change that breaks a covered behaviour is caught before merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend_fastapi/**'
+      - '.github/workflows/backend-tests.yml'
+  pull_request:
+    paths:
+      - 'backend_fastapi/**'
+      - '.github/workflows/backend-tests.yml'
+
+jobs:
+  pytest:
+    name: pytest (backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend_fastapi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend_fastapi/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Run tests
+        env:
+          # conftest sets these via setdefault, but pin them for CI too.
+          SECRET_KEY: ci-test-secret
+          DATABASE_URL: sqlite:///./_ci_ignore.db
+        run: python -m pytest tests/ -q
