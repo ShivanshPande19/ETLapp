@@ -62,3 +62,12 @@ __pycache__/
 # left over from a prototype and has been removed from tracking.)
 .spotify_cache
 **/.spotify_cache
+
+# ─── Python test tooling ─────────────────────────────────────────────────────
+.venv-test/
+**/.venv-test/
+.pytest_cache/
+**/.pytest_cache/
+__pycache__/
+**/__pycache__/
+_pytest_ignore.db
