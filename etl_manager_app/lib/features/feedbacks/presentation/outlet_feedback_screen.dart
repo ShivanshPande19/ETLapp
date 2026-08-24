@@ -346,7 +346,8 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                         message: err.toString(),
                         onRetry: () => notifier.fetchFeedbacks(isRefresh: true),
                       ),
-                      data: (data) => _buildContent(data, notifier),
+                      data: (data) =>
+                          AppearFade(child: _buildContent(data, notifier)),
                     ),
                   ),
                 ),
@@ -412,13 +413,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
         if (data.feedbacks.isEmpty)
           _EmptyState(hasDateFilter: data.selectedDate != null)
         else
-          ...data.feedbacks.asMap().entries.map((e) {
-            return AppearFade(
-              delayMs: (e.key.clamp(0, 12)) * 55,
-              slide: 0.08,
-              child: _FeedbackCard(feedback: e.value),
-            );
-          }),
+          ...data.feedbacks.map((f) => _FeedbackCard(feedback: f)),
 
         // ─── Pagination footer ───
         _PaginationFooter(

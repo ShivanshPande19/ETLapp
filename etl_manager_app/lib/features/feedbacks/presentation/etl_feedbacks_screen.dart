@@ -490,7 +490,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                           message: err.toString(),
                           onRetry: () => notifier.fetchEtlData(isRefresh: true),
                         ),
-                        data: (data) => _buildContent(data),
+                        data: (data) => AppearFade(child: _buildContent(data)),
                       ),
                   ),
                 ),
@@ -557,15 +557,13 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
                 data.selectedDate != null,
           )
         else
-          ...data.feedbacks.asMap().entries.map((e) {
-            return AppearFade(
-              delayMs: (e.key.clamp(0, 12)) * 55,
-              slide: 0.08,
-              child: _EtlFeedbackCard(
-                feedback: e.value,
-                courts: data.courts,
-                outlets: data.outlets,
-              ),
+          // One uniform fade for the whole content (above) replaces the old
+          // per-card staggered slide (0.08) which looked jumpy/rough.
+          ...data.feedbacks.map((f) {
+            return _EtlFeedbackCard(
+              feedback: f,
+              courts: data.courts,
+              outlets: data.outlets,
             );
           }),
 
