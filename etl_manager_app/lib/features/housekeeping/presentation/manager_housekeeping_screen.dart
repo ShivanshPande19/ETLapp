@@ -66,7 +66,12 @@ class _ManagerHousekeepingScreenState
       duration: const Duration(milliseconds: 900),
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
-    _fadeCtrl.forward();
+    // Start FULLY visible (opacity 1) instead of fading the whole body in from
+    // 0. The body sits on the dark scaffold, so a 0->1 fade briefly showed the
+    // dark background = a "whole screen goes black then white" flash on entry.
+    // go_router already provides the page transition; content easing is handled
+    // by the per-section AppearFade, so no black flash and still smooth.
+    _fadeCtrl.value = 1.0;
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _listCtrl.forward();
     });
