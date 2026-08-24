@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/token_storage.dart';
 import '../../courts/domain/courts_notifier.dart';
+import '../../notices/presentation/notice_bell.dart';
 import 'home_providers.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -935,7 +936,12 @@ class _TopRowState extends State<_TopRow> {
           fontWeight: FontWeight.w500,
         ),
       ),
-      GestureDetector(
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const NoticeBell(),
+          const SizedBox(width: 10),
+          GestureDetector(
         onTapDown: (_) {
           HapticFeedback.selectionClick();
           setState(() => _pressed = true);
@@ -971,6 +977,8 @@ class _TopRowState extends State<_TopRow> {
             ),
           ),
         ),
+      ),
+        ],
       ),
     ],
   );
