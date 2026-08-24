@@ -386,9 +386,16 @@ class _CourtDetailScreenState extends ConsumerState<CourtDetailScreen>
             children: [
               const Icon(Icons.location_on_rounded, size: 12, color: _grey),
               const SizedBox(width: 4),
-              Text(
-                widget.court.location,
-                style: GoogleFonts.inter(fontSize: 12, color: _grey),
+              // Flexible + ellipsis: long locations (e.g. "Bennett University,
+              // Greater Noida") would otherwise push the status dot off-screen
+              // and trigger a RenderFlex right-overflow.
+              Flexible(
+                child: Text(
+                  widget.court.location,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(fontSize: 12, color: _grey),
+                ),
               ),
               const SizedBox(width: 10),
               _StatusDot(status: widget.court.isActive ? 'Active' : 'Inactive'),
