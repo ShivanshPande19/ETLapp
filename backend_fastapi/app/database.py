@@ -124,16 +124,37 @@ def ensure_attendance_columns() -> None:
     # Best-effort: prevent duplicate check-ins for the same staff+business day
     # (defends against a double-submit race). NULL business_date rows are
     # treated as distinct on both dialects, so legacy rows are unaffected.
+    #
+    # IMPORTANT: if the table ALREADY contains duplicate (staff_id,
+    # business_date) rows (from before this index existed), CREATE UNIQUE INDEX
+    # fails and — because it was swallowed — the index was never created, so
+    # the race stayed unguarded forever. We now dedup on failure and retry:
+    # keep the newest row per (staff_id, business_date) (matching how the app
+    # reads "today's record" — latest check_in first) and drop the older
+    # orphans, then build the index.
+    _idx_sql = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_staff_bizdate "
+        "ON attendance (staff_id, business_date)"
+    )
+    _dedup_sql = (
+        "DELETE FROM attendance WHERE business_date IS NOT NULL AND id NOT IN ("
+        "SELECT MAX(id) FROM attendance WHERE business_date IS NOT NULL "
+        "GROUP BY staff_id, business_date)"
+    )
     try:
         with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_staff_bizdate "
-                    "ON attendance (staff_id, business_date)"
-                )
-            )
+            conn.execute(text(_idx_sql))
     except Exception as e:
-        print(f"[MIGRATION] attendance unique index skipped: {e}")
+        print(f"[MIGRATION] attendance unique index blocked ({e}); deduping…")
+        try:
+            with engine.begin() as conn:
+                result = conn.execute(text(_dedup_sql))
+                print(f"[MIGRATION] removed {result.rowcount} duplicate attendance row(s)")
+            with engine.begin() as conn:
+                conn.execute(text(_idx_sql))
+            print("[MIGRATION] attendance unique index created after dedup ✓")
+        except Exception as e2:
+            print(f"[MIGRATION] attendance unique index still skipped: {e2}")
 
 
 def ensure_outlet_columns() -> None:

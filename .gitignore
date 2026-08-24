@@ -54,3 +54,11 @@ __pycache__/
 # NOTE: android/app/google-services.json and ios/Runner/GoogleService-Info.plist
 # are deliberately NOT ignored. They contain no secrets (they ship inside every
 # app binary) and the build needs them present.
+
+
+# ─── Spotify OAuth cache ─────────────────────────────────────────────────────
+# spotipy writes the access/refresh token bundle here. It is a live credential
+# and must NEVER be committed. (The music feature is not shipped; this file was
+# left over from a prototype and has been removed from tracking.)
+.spotify_cache
+**/.spotify_cache

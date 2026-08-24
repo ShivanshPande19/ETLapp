@@ -449,9 +449,13 @@ async def check_out(
     # 🚫 Mock/spoofed GPS.
     _reject_if_mocked(is_mocked)
 
-    # ✅ Geofence on check-out too — must be at the court to clock out.
-    _enforce_geofence(db, staff, lat, lng, accuracy)
-
+    # NOTE: geofence is intentionally NOT enforced on check-OUT.
+    # Check-IN keeps the hard geofence (you must be at the court to start a
+    # shift), but blocking check-OUT strands a staff member who has already
+    # left the premises — they physically cannot clock out, so the hourly
+    # sweep auto-closes their shift and flags a false "forgot to check out".
+    # We still record the check-out coordinates + address below, so a manager
+    # can always see where the shift was ended.
     photo_path = await _save_selfie(photo, "out") if photo is not None else None
     real_address = await get_address_from_coords(lat, lng)
 

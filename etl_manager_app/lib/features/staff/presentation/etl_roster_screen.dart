@@ -1130,49 +1130,6 @@ class _AttendancePhoto extends StatelessWidget {
 }
 
 
-class _DetailTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-  const _DetailTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.06),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: color.withOpacity(0.15)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(height: 10),
-        Text(
-          value,
-          style: GoogleFonts.antonSc(fontSize: 22, color: _black, height: 1.0),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 11,
-            color: _grey,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 // ─── Empty + Error ──────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {

@@ -19,7 +19,6 @@ class BiometricGate extends ConsumerStatefulWidget {
 
 class _BiometricGateState extends ConsumerState<BiometricGate> {
   bool _checking = true;
-  bool _failed = false;
 
   @override
   void initState() {
@@ -30,7 +29,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
   Future<void> _check() async {
     setState(() {
       _checking = true;
-      _failed = false;
     });
 
     final prefs = await SharedPreferences.getInstance();
@@ -64,7 +62,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
       if (mounted) {
         setState(() {
           _checking = false;
-          _failed = true;
         });
       }
     }

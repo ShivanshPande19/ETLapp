@@ -1700,12 +1700,10 @@ class _OutlineCard extends StatelessWidget {
 
 class _FilledCard extends StatelessWidget {
   final Widget child;
-  final double? height;
-  const _FilledCard({required this.child, this.height});
+  const _FilledCard({required this.child});
 
   @override
   Widget build(BuildContext context) => Container(
-    height: height,
     width: double.infinity,
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
