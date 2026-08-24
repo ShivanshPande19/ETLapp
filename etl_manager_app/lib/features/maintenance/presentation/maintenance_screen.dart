@@ -178,15 +178,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
       ..forward();
   }
 
-  Animation<double> _itemAnim(int i) => CurvedAnimation(
-    parent: _listCtrl,
-    curve: Interval(
-      (i * 0.07).clamp(0.0, 0.7),
-      ((i * 0.07) + 0.4).clamp(0.0, 1.0),
-      curve: Curves.easeOutCubic,
-    ),
-  );
-
   void _showRaiseSheet() {
     HapticFeedback.lightImpact();
     showModalBottomSheet(

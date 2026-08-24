@@ -15,8 +15,6 @@ const _bg = Color(0xFF080808);
 const _black = Color(0xFF0A0A0A);
 const _white = Color(0xFFFFFFFF);
 const _grey = Color(0xFF888888);
-const _border = Color(0xFF1A1A1A);
-const _ok = Color(0xFF22C55E);
 const _blue = Color(0xFF60A5FA);
 const _warn = Color(0xFFF59E0B);
 const _accent = Color(0xFFDEFF9A); // Lime green
@@ -297,13 +295,18 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                             ),
                             duration: const Duration(milliseconds: 900),
                             curve: Curves.easeOutCubic,
-                            builder: (_, val, __) => Text(
-                              '₹${_fmtFull(val)}',
-                              style: GoogleFonts.antonSc(
-                                fontSize: 78,
-                                color: _white,
-                                height: 1.0,
-                                letterSpacing: -1.5,
+                            builder: (_, val, __) => FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '₹${_fmtFull(val)}',
+                                maxLines: 1,
+                                style: GoogleFonts.antonSc(
+                                  fontSize: 78,
+                                  color: _white,
+                                  height: 1.0,
+                                  letterSpacing: -1.5,
+                                ),
                               ),
                             ),
                           ),

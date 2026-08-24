@@ -429,6 +429,8 @@ def get_court_analytics(
 def get_my_court_feedbacks(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
+    # ETL managers have no single court — they may optionally focus one court.
+    court_id: Optional[int] = Query(None),
     # ✅ Pagination so the staff list never loads every row at once.
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -443,16 +445,23 @@ def get_my_court_feedbacks(
     if not (user.is_etl_staff or user.is_etl_manager):
         raise HTTPException(status_code=403, detail="Court staff access required.")
 
-    if user.court_id is None:
+    # ETL staff are locked to their assigned court. An ETL MANAGER has no single
+    # court (court_id is always None for a manager identity) — previously that
+    # made this endpoint always 403 for managers. They now see court feedback
+    # across all courts (matching their company-wide scope), or a single court
+    # when ?court_id= is supplied.
+    court_filter = user.court_id
+    if user.is_etl_manager and not user.is_etl_staff:
+        court_filter = court_id
+    elif user.court_id is None:
         raise HTTPException(
             status_code=403,
             detail="No court assigned to your account.",
         )
 
-    query = db.query(Feedback).filter(
-        Feedback.court_id == user.court_id,
-        Feedback.court_rating.isnot(None),
-    )
+    query = db.query(Feedback).filter(Feedback.court_rating.isnot(None))
+    if court_filter is not None:
+        query = query.filter(Feedback.court_id == court_filter)
     query = _apply_date_range(query, start, end)
 
     feedbacks = (
@@ -468,22 +477,27 @@ def get_my_court_feedbacks(
 def get_my_court_analytics(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
+    # ETL managers have no single court — they may optionally focus one court.
+    court_id: Optional[int] = Query(None),
 ):
-    """Overall court-feedback analytics for the staff's assigned court."""
+    """Overall court-feedback analytics for the staff's assigned court (or, for
+    an ETL manager, across all courts / an optional ?court_id=)."""
     if not (user.is_etl_staff or user.is_etl_manager):
         raise HTTPException(status_code=403, detail="Court staff access required.")
 
-    if user.court_id is None:
+    court_filter = user.court_id
+    if user.is_etl_manager and not user.is_etl_staff:
+        court_filter = court_id
+    elif user.court_id is None:
         raise HTTPException(
             status_code=403,
             detail="No court assigned to your account.",
         )
 
-    feedbacks = db.query(Feedback).filter(
-        Feedback.court_id == user.court_id,
-        Feedback.court_rating.isnot(None),
-    ).all()
-    return _analytics(feedbacks)
+    query = db.query(Feedback).filter(Feedback.court_rating.isnot(None))
+    if court_filter is not None:
+        query = query.filter(Feedback.court_id == court_filter)
+    return _analytics(query.all())
 
 
 # ─── PROTECTED: Outlet Manager/Staff — own outlet only ───────────────────────

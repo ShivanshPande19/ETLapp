@@ -119,15 +119,6 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
     }
   }
 
-  Animation<double> _itemAnim(int i) => CurvedAnimation(
-    parent: _listCtrl,
-    curve: Interval(
-      (i * 0.07).clamp(0.0, 0.7),
-      ((i * 0.07) + 0.4).clamp(0.0, 1.0),
-      curve: Curves.easeOutCubic,
-    ),
-  );
-
   Future<void> _pickDate(FeedbackNotifier notifier, DateTime? current) async {
     final picked = await showDatePicker(
       context: context,

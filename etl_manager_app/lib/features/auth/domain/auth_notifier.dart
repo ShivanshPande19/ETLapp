@@ -33,9 +33,13 @@ class AuthState {
   });
 
   // ✅ Naye Roles ke helpers
-  bool get isEtlManager => role == 'etl_manager';
+  // NOTE: legacy accounts may still carry role == 'manager' / 'staff'. The
+  // backend treats {etl_manager, manager} and {etl_staff, staff} as the same
+  // ETL identities, so we MUST mirror that here — otherwise a legacy 'manager'
+  // logs in fine but every ETL-only screen hides itself client-side.
+  bool get isEtlManager => role == 'etl_manager' || role == 'manager';
   bool get isOutletManager => role == 'outlet_manager';
-  bool get isEtlStaff => role == 'etl_staff';
+  bool get isEtlStaff => role == 'etl_staff' || role == 'staff';
   bool get isOutletStaff => role == 'outlet_staff';
 
   // ✅ CORRECTION: isStaff sirf ETL/Housekeeping staff ke liye true hoga, outlet_staff ke liye nahi!

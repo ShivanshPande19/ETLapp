@@ -1,9 +1,16 @@
 from datetime import date
+
+from sqlalchemy.orm import Session
+
 from ..schemas.dashboard import DashboardSummary, VendorSale
 from .sales_service import get_sales_summary
 
-def get_dashboard_summary() -> DashboardSummary:
-    sales = get_sales_summary(court_id=None)
+
+async def get_dashboard_summary(db: Session) -> DashboardSummary:
+    # get_sales_summary is async and requires a DB session — the previous
+    # version called it without `db` and without `await`, so this endpoint
+    # always 500'd. court_id=None → whole-company aggregate (ETL dashboard).
+    sales = await get_sales_summary(db, court_id=None)
     vendor_breakdown = [
         VendorSale(
             vendor_name=v.vendor_name,
