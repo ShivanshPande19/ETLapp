@@ -6,8 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../sales/data/sales_repository.dart';
 import '../../staff/data/housekeeping_repository.dart';
-import '../../staff/domain/housekeeping_models.dart';
-import '../../auth/domain/auth_notifier.dart';
 import '../../courts/data/courts_repository.dart';
 import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 
