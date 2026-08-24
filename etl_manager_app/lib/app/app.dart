@@ -88,6 +88,22 @@ class _ETLAppState extends ConsumerState<ETLApp> {
       scaffoldMessengerKey: scaffoldMessengerKey,
       theme: AppTheme.dark,
       routerConfig: router,
+      // Clamp the system text scale. The UI is dense and number-heavy with
+      // large fixed font sizes (big ₹ hero figures, headers). A very large
+      // accessibility font setting would otherwise overflow those layouts.
+      // We still honour scaling up to 1.3x for readability.
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: mq.textScaler.clamp(
+              minScaleFactor: 1.0,
+              maxScaleFactor: 1.3,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
   }
 }
