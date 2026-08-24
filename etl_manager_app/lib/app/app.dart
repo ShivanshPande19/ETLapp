@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/services/badge_service.dart';
 import '../core/services/push_service.dart';
 import '../core/theme/app_theme.dart';
+import '../features/notices/domain/notices_notifier.dart';
 import 'router.dart';
 
 /// Lets PushService show an in-app banner from outside the widget tree (an
@@ -15,10 +17,12 @@ class ETLApp extends ConsumerStatefulWidget {
   ConsumerState<ETLApp> createState() => _ETLAppState();
 }
 
-class _ETLAppState extends ConsumerState<ETLApp> {
+class _ETLAppState extends ConsumerState<ETLApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Give PushService a way to navigate and to surface foreground pushes.
     //
     // Done here rather than inside PushService so that push_service.dart never
@@ -33,7 +37,32 @@ class _ETLAppState extends ConsumerState<ETLApp> {
         (route) => ref.read(routerProvider).go(route),
         _showBanner,
       );
+      // Sync the app-icon badge to the real unread count on launch.
+      _syncBadge();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // On resume, re-sync the app-icon badge to the real unread count. This is
+    // the key fix for the badge getting "stuck" — opening/returning to the app
+    // now always reflects reality (and drops to 0 once notices are read).
+    if (state == AppLifecycleState.resumed) {
+      _syncBadge();
+    }
+  }
+
+  void _syncBadge() {
+    // Force a re-fetch of the unread count; the ref.listen in build() pushes
+    // the resolved value onto the app-icon badge. Kept decoupled so nothing
+    // else (notifier / push service) needs to know about the badge.
+    ref.invalidate(unreadCountProvider);
   }
 
   void _showBanner(String title, String? body, String route) {
@@ -81,6 +110,13 @@ class _ETLAppState extends ConsumerState<ETLApp> {
 
   @override
   Widget build(BuildContext context) {
+    // Single source of truth for the app-icon badge: whenever the unread count
+    // resolves (on read/push/SSE/open — each of which invalidates the provider)
+    // mirror it onto the launcher badge. Fixes the badge getting stuck.
+    ref.listen(unreadCountProvider, (prev, next) {
+      next.whenData((count) => BadgeService.setCount(count));
+    });
+
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
       title: 'ETL Manager',
