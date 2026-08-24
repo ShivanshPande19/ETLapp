@@ -138,28 +138,42 @@ def _build_message(
     body: Optional[str],
     data: Optional[Dict[str, Any]],
     android_channel_id: str,
+    badge: Optional[int] = None,
 ) -> Dict[str, Any]:
     """One FCM v1 message envelope.
 
     `data` values must all be strings — FCM rejects non-string values, and a
     silent 400 here is very hard to debug.
+
+    `badge` is the recipient's REAL unread count. Previously this was hardcoded
+    to 1, so the iOS app-icon badge got stuck showing "1" forever regardless of
+    how many notices were unread and never reflected reads. When provided we
+    send the exact count on both platforms (iOS `aps.badge`, Android
+    `notification_count`); the client also clears it to 0 on open/read.
     """
+    aps: Dict[str, Any] = {"sound": "default"}
+    android_notif: Dict[str, Any] = {
+        "channel_id": android_channel_id,
+        # Lets a newer notice for the same thing replace the old one in the
+        # tray instead of stacking duplicates.
+        "tag": str((data or {}).get("type", "general")),
+    }
+    if badge is not None:
+        b = max(0, int(badge))
+        aps["badge"] = b
+        android_notif["notification_count"] = b
+
     payload: Dict[str, Any] = {
         "message": {
             "token": token,
             "notification": {"title": title, "body": body or ""},
             "android": {
                 "priority": "high",
-                "notification": {
-                    "channel_id": android_channel_id,
-                    # Lets a newer notice for the same thing replace the old one
-                    # in the tray instead of stacking duplicates.
-                    "tag": str((data or {}).get("type", "general")),
-                },
+                "notification": android_notif,
             },
             "apns": {
                 "headers": {"apns-priority": "10"},
-                "payload": {"aps": {"sound": "default", "badge": 1}},
+                "payload": {"aps": aps},
             },
         }
     }
@@ -191,6 +205,7 @@ async def send_push(
     body: Optional[str] = None,
     data: Optional[Dict[str, Any]] = None,
     android_channel_id: str = "etl_default",
+    badge: Optional[int] = None,
 ) -> Tuple[int, List[str]]:
     """Deliver to every token. Returns ``(sent_count, dead_tokens)``.
 
@@ -240,6 +255,7 @@ async def send_push(
                             body=body,
                             data=data,
                             android_channel_id=android_channel_id,
+                            badge=badge,
                         ),
                     )
                 except Exception as e:  # noqa: BLE001 — one device must not fail the batch

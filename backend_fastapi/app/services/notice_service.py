@@ -30,6 +30,27 @@ from .push_targeting import resolve_notice_targets
 _ANDROID_CHANNEL_ID = "etl_default"
 
 
+def _unread_badge_for(db: Session, notice: Notice) -> int:
+    """Recipient's TOTAL unread count in this notice's scope (mirrors
+    api/routes/notices.py::_scoped_query). Sent as the app-icon badge so it
+    reflects reality instead of the old hardcoded 1."""
+    q = db.query(Notice).filter(Notice.is_read == False)  # noqa: E712
+    if notice.audience == "staff":
+        return q.filter(
+            Notice.audience == "staff",
+            Notice.recipient_staff_id == notice.recipient_staff_id,
+        ).count()
+    if notice.outlet_id is not None:
+        return q.filter(
+            Notice.audience == "manager",
+            Notice.outlet_id == notice.outlet_id,
+        ).count()
+    return q.filter(
+        Notice.audience == "manager",
+        Notice.outlet_id.is_(None),
+    ).count()
+
+
 def _dispatch_push(db: Session, notice: Notice) -> None:
     """Resolve recipients and hand them to FCM. Never raises.
 
@@ -42,6 +63,8 @@ def _dispatch_push(db: Session, notice: Notice) -> None:
         tokens = resolve_notice_targets(db, notice)
         if not tokens:
             return
+
+        badge = _unread_badge_for(db, notice)
 
         data = {
             "type": notice.type,
@@ -59,6 +82,7 @@ def _dispatch_push(db: Session, notice: Notice) -> None:
                 title=notice.title,
                 body=notice.body,
                 data=data,
+                badge=badge,
             )
 
         fcm_service.fire_push(_factory)
@@ -66,7 +90,7 @@ def _dispatch_push(db: Session, notice: Notice) -> None:
         print(f"[PUSH] dispatch failed for notice#{getattr(notice, 'id', '?')}: {e}")
 
 
-async def _send_and_prune(tokens, *, title, body, data) -> None:
+async def _send_and_prune(tokens, *, title, body, data, badge=None) -> None:
     """Send, then soft-disable any token FCM reported as permanently dead.
 
     Uses its own short-lived session: by the time this runs the request that
@@ -78,6 +102,7 @@ async def _send_and_prune(tokens, *, title, body, data) -> None:
         body=body,
         data=data,
         android_channel_id=_ANDROID_CHANNEL_ID,
+        badge=badge,
     )
 
     if not dead:
