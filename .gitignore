@@ -54,3 +54,13 @@ __pycache__/
 # NOTE: android/app/google-services.json and ios/Runner/GoogleService-Info.plist
 # are deliberately NOT ignored. They contain no secrets (they ship inside every
 # app binary) and the build needs them present.
+
+
+# ─── Python test tooling ─────────────────────────────────────────────────────
+.venv-test/
+**/.venv-test/
+.pytest_cache/
+**/.pytest_cache/
+__pycache__/
+**/__pycache__/
+_pytest_ignore.db
