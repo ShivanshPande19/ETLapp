@@ -295,13 +295,18 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                             ),
                             duration: const Duration(milliseconds: 900),
                             curve: Curves.easeOutCubic,
-                            builder: (_, val, __) => Text(
-                              '₹${_fmtFull(val)}',
-                              style: GoogleFonts.antonSc(
-                                fontSize: 78,
-                                color: _white,
-                                height: 1.0,
-                                letterSpacing: -1.5,
+                            builder: (_, val, __) => FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '₹${_fmtFull(val)}',
+                                maxLines: 1,
+                                style: GoogleFonts.antonSc(
+                                  fontSize: 78,
+                                  color: _white,
+                                  height: 1.0,
+                                  letterSpacing: -1.5,
+                                ),
                               ),
                             ),
                           ),
