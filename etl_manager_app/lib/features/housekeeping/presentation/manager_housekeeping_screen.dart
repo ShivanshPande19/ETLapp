@@ -15,6 +15,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/widgets/appear_fade.dart'; // smooth fade-in after skeleton
 import '../../staff/data/housekeeping_repository.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 
@@ -180,10 +181,16 @@ class _ManagerHousekeepingScreenState
                             }
                             if (_court == null) return const SizedBox.shrink();
 
-                            return _buildContent(
-                              data,
-                              selectedShiftKey,
-                              navClearance,
+                            // Smooth fade + slide-up when data first lands after
+                            // the skeleton — instead of an abrupt pop. AppearFade
+                            // animates once on mount; court/shift switches reuse
+                            // its state, so they DON'T replay the animation.
+                            return AppearFade(
+                              child: _buildContent(
+                                data,
+                                selectedShiftKey,
+                                navClearance,
+                              ),
                             );
                           },
                         );
