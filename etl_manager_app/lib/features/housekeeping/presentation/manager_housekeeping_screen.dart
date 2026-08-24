@@ -150,6 +150,15 @@ class _ManagerHousekeepingScreenState
               _buildHeader(courtsAsync, courtShifts, selectedShiftKey),
               Expanded(
                 child: Container(
+                  // width:infinity is the real fix for the "screen goes black"
+                  // flash: this Container uses a `decoration` (not `color`), so
+                  // when its child briefly collapses (e.g. the SizedBox.shrink
+                  // frame while the first court auto-selects, or an empty state)
+                  // the Container would shrink to the child's width in the
+                  // Column's loose cross-axis and STOP painting white — exposing
+                  // the dark Scaffold behind across the whole area. Forcing full
+                  // width keeps it solid white at all times.
+                  width: double.infinity,
                   decoration: const BoxDecoration(
                     color: _white,
                     borderRadius: BorderRadius.vertical(
@@ -184,7 +193,9 @@ class _ManagerHousekeepingScreenState
                                 }
                               });
                             }
-                            if (_court == null) return const SizedBox.shrink();
+                            // Keep the shimmer for the single frame while the
+                            // first court auto-selects — never a blank frame.
+                            if (_court == null) return const _Loader();
 
                             // Smooth fade + slide-up when data first lands after
                             // the skeleton — instead of an abrupt pop. AppearFade
