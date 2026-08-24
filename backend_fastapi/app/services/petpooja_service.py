@@ -112,6 +112,11 @@ async def sync_outlet_for_dates(
             ).filter(
                 SalesOrder.outlet_id == outlet.id,
                 SalesOrder.business_date == b_date,
+                # Scope to THIS outlet's current POS source. Without this, if an
+                # outlet ever has rows under two sources (e.g. after a
+                # pos_source migration where old rows were never purged), the
+                # cache would SUM both sources → double-counted revenue.
+                SalesOrder.source == source,
             )
         ).first()
 
