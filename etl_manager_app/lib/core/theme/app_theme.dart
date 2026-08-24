@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+// CupertinoPageTransitionsBuilder lives in the cupertino library and is not
+// re-exported by material.dart on Flutter 3.44+, so it must be imported here
+// (used by pageTransitionsTheme below). `show` keeps it conflict-free.
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
