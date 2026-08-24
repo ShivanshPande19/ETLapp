@@ -452,6 +452,21 @@ def delete_outlet(
     sid_list = ",".join(str(int(s)) for s in staff_ids)
 
     existing_tables = set(inspect(db.get_bind()).get_table_names())
+
+    # Managers who belong to this outlet TODAY. After we strip their membership
+    # below, any of them left with ZERO memberships becomes a "zombie": still
+    # is_active + role='outlet_manager' but every outlet endpoint 403s ("no
+    # outlet assigned"), with no cleanup. We deactivate those + prune their
+    # device tokens after the deletes (see below). Captured BEFORE the delete.
+    member_manager_ids: list[int] = []
+    if "outlet_memberships" in existing_tables:
+        member_manager_ids = [
+            int(r[0])
+            for r in db.execute(
+                text("SELECT manager_id FROM outlet_memberships WHERE outlet_id = :oid"),
+                {"oid": outlet_id},
+            ).all()
+        ]
     counts: dict[str, int] = {}
 
     def _run(table: str, sql: str) -> None:
@@ -482,6 +497,38 @@ def delete_outlet(
         _run("outlet_applications", "UPDATE outlet_applications SET created_outlet_id = NULL WHERE created_outlet_id = :oid")
         # clear any manager whose PRIMARY outlet pointed here (don't delete them)
         _run("managers", "UPDATE managers SET outlet_id = NULL WHERE outlet_id = :oid")
+
+        # Deactivate now-membershipless outlet managers (avoid zombie accounts)
+        # and prune their manager device tokens. Only outlet_manager rows are
+        # ever touched — an ETL manager is never affected. Managers who still
+        # own/manage another outlet are skipped.
+        zombie_deactivated = 0
+        for mid in member_manager_ids:
+            remaining = db.execute(
+                text("SELECT COUNT(*) FROM outlet_memberships WHERE manager_id = :mid"),
+                {"mid": mid},
+            ).scalar()
+            if remaining and int(remaining) > 0:
+                continue
+            res = db.execute(
+                text(
+                    "UPDATE managers SET is_active = :inactive, outlet_id = NULL "
+                    "WHERE id = :mid AND role = 'outlet_manager'"
+                ),
+                {"mid": mid, "inactive": False},
+            )
+            if res.rowcount:
+                zombie_deactivated += int(res.rowcount)
+            if "device_tokens" in existing_tables:
+                db.execute(
+                    text(
+                        "DELETE FROM device_tokens "
+                        "WHERE user_type = 'manager' AND user_id = :mid"
+                    ),
+                    {"mid": mid},
+                )
+        counts["managers_deactivated"] = zombie_deactivated
+
         # ... outlet last
         _run("outlets", "DELETE FROM outlets WHERE id = :oid")
 
