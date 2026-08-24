@@ -142,11 +142,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         } else if (role == 'outlet_staff') {
           if (loc == '/staff/mark-attendance') return null;
 
+          // ETL-only routes (attendance roster, complaints, court detail) are
+          // now redirected too — previously they fell through and loaded an
+          // ETL screen that just 403'd the outlet user with an error screen.
           if (loc == '/home' ||
               loc == '/outlet-home' ||
               loc == '/sales' ||
               loc == '/outlet-sales' ||
               loc == '/housekeeping' ||
+              loc == '/attendance-roster' ||
+              loc == '/complaints' ||
+              loc.startsWith('/court/') ||
               loc.startsWith('/staff/') ||
               loc == '/') {
             return '/outlet-staff-home';
@@ -155,6 +161,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           if (loc == '/home') return '/outlet-home';
           if (loc == '/sales') return '/outlet-sales';
           if (loc == '/housekeeping' ||
+              loc == '/attendance-roster' ||
+              loc == '/complaints' ||
+              loc.startsWith('/court/') ||
               loc.startsWith('/staff') ||
               loc == '/outlet-staff-home') {
             return '/outlet-home';
@@ -163,6 +172,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           if (loc == '/outlet-home' || loc == '/outlet-staff-home')
             return '/home';
           if (loc == '/outlet-sales') return '/sales';
+          // ETL managers use /attendance-roster, not the ETL-staff shell.
+          if (loc.startsWith('/staff')) return '/home';
         }
       }
       return null;
