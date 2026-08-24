@@ -77,10 +77,12 @@ def client_factory(db):
 
     from app.api.routes import feedback as feedback_routes
     from app.api.routes import outlets as outlet_routes
+    from app.api.routes import notices as notice_routes
 
     app = FastAPI()
     app.include_router(feedback_routes.router, prefix="/feedback")
     app.include_router(outlet_routes.router, prefix="/outlets")
+    app.include_router(notice_routes.router, prefix="/notices")
 
     def _override_db():
         yield db
@@ -177,3 +179,29 @@ def seed_feedback(db, court_id, outlet_id=None, court_rating=None, outlet_rating
     db.commit()
     db.refresh(f)
     return f
+
+
+
+def seed_notice(db, audience="manager", type_="generic", title="Notice",
+                body="body", court_id=None, outlet_id=None,
+                recipient_staff_id=None, is_read=False, created_at=None):
+    from app.models.notice import Notice
+    n = Notice(
+        audience=audience,
+        type=type_,
+        title=title,
+        body=body,
+        court_id=court_id,
+        outlet_id=outlet_id,
+        recipient_staff_id=recipient_staff_id,
+        is_read=is_read,
+    )
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    if created_at is not None:
+        # override the server-default timestamp for date-filter tests
+        n.created_at = created_at
+        db.commit()
+        db.refresh(n)
+    return n

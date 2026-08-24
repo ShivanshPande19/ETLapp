@@ -34,7 +34,8 @@ class NoticeOut(BaseModel):
 
 class NoticeListResponse(BaseModel):
     notices: List[NoticeOut]
-    unread_count: int
+    unread_count: int          # TOTAL unread in scope (not just this page/date)
+    has_more: bool = False     # more rows exist beyond this page (for the filter)
 
 
 class UnreadCountResponse(BaseModel):
