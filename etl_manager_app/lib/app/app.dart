@@ -10,6 +10,18 @@ import 'router.dart';
 /// Android foreground push has no BuildContext of its own).
 final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
+/// Clamps the system text scale to [1.0, 1.3] and returns a **linear** scaler.
+///
+/// This intentionally does NOT use `base.clamp(...)`: on a non-linear system
+/// scaler (iOS/Android accessibility fonts) that produces a `_ClampedTextScaler`
+/// which crashes when a widget re-clamps text scaling internally (Material
+/// date/time pickers via `MediaQuery.withClampedTextScaling`) and the composed
+/// bounds collapse — tripping `assert(maxScale > minScale)`. That's exactly the
+/// crash the notices date picker hit. A plain linear scaler re-clamps safely on
+/// every Flutter version.
+TextScaler clampedAppTextScaler(TextScaler base) =>
+    TextScaler.linear(base.scale(1.0).clamp(1.0, 1.3).toDouble());
+
 class ETLApp extends ConsumerStatefulWidget {
   const ETLApp({super.key});
 
@@ -128,15 +140,19 @@ class _ETLAppState extends ConsumerState<ETLApp>
       // large fixed font sizes (big ₹ hero figures, headers). A very large
       // accessibility font setting would otherwise overflow those layouts.
       // We still honour scaling up to 1.3x for readability.
+      //
+      // IMPORTANT: return a LINEAR scaler, not TextScaler.clamp(). On devices
+      // with a non-linear system text scaler (iOS/Android accessibility fonts),
+      // TextScaler.clamp() produces a _ClampedTextScaler. When a widget that
+      // re-clamps text scaling internally — e.g. the Material date/time pickers
+      // via MediaQuery.withClampedTextScaling — composes another clamp on top,
+      // the bounds can collapse and trip `assert(maxScale > minScale)`,
+      // crashing the picker (this is what made the notices date picker throw).
+      // A plain linear scaler composes safely with those internal clamps.
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(
-          data: mq.copyWith(
-            textScaler: mq.textScaler.clamp(
-              minScaleFactor: 1.0,
-              maxScaleFactor: 1.3,
-            ),
-          ),
+          data: mq.copyWith(textScaler: clampedAppTextScaler(mq.textScaler)),
           child: child!,
         );
       },
