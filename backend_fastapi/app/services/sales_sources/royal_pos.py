@@ -26,7 +26,11 @@ async def fetch_raw(
         "end_date": end_date,
     }
     print(f"[ROYALPOS START] restaurant_id={restaurant_id} {start_date} -> {end_date}")
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # Royal POS's get_completed_orders API is SLOW — even a 2-day range regularly
+    # takes ~45-60s. The old 30s timeout made most Royal POS syncs raise
+    # ReadTimeout → the adapter returned [] → silent gaps in the outlet's daily
+    # sales (e.g. Chatpata Affair was missing Aug 1-2 etc.). 120s gives it room.
+    async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(ROYAL_POS_URL, data=data)
         print(f"[ROYALPOS HTTP] restaurant_id={restaurant_id} status={resp.status_code}")
         resp.raise_for_status()
