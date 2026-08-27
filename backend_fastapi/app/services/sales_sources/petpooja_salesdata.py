@@ -5,10 +5,15 @@ the `get_sales_data` endpoint (e.g. **Coffee Vault** ``r6h4cd0k2sfi``). Unlike
 flavour A this endpoint:
 
 * authenticates with **query params** (no ``Cookie`` header);
-* returns a bill's **calendar** ``Receipt Date`` + ``Transaction Time`` (it does
-  NOT pre-group post-midnight bills), so we apply the court's
-  ``day_cutoff_hour`` ourselves — a bill whose time-of-day hour is ``< cutoff``
-  belongs to the previous operational day. This fixes "raat ke bills galat din";
+* returns a bill's ``Receipt Date`` + ``Transaction Time``. Petpooja files each
+  bill under this Receipt Date — the SAME day its own reports / "yesterday
+  sales" emails use (verified against Coffee Vault: post-midnight bills carry
+  the calendar date, e.g. a 02:00 bill on the 24th has Receipt Date = 24). So
+  we attribute strictly by Receipt Date. (Earlier we re-applied the court's
+  ``day_cutoff_hour`` here — that double-shifted post-midnight bills to the
+  previous operational day and made the app disagree with the Petpooja email on
+  late-night/weekend sales. ``cutoff_hour`` is therefore NOT used by this
+  source.);
 * keys bills by a per-outlet sequential ``Receipt number`` (safe here because
   ``sales_orders`` is unique on ``(outlet_id, source, external_ref)``);
 * reports the final amount in ``Net sale``;
@@ -19,8 +24,9 @@ Enabling Coffee Vault does NOT require any Petpooja remap: it uses this outlet's
 OWN per-outlet credentials (``outlet.pp_app_key/pp_app_secret/pp_access_token``)
 — the exact creds already proven to return this outlet's sales via
 `get_sales_data`. Go-live is just data/config: store those creds on the outlet
-row, set ``pos_source='petpooja_salesdata'``, and set the court's
-``day_cutoff_hour`` (~5-6). See PROGRESS_MULTISOURCE.md, Phase 2.
+row and set ``pos_source='petpooja_salesdata'``. (The court's
+``day_cutoff_hour`` does NOT affect this source — attribution follows Petpooja's
+Receipt Date.) See PROGRESS_MULTISOURCE.md, Phase 2.
 
 The records array lives under the top-level ``"Records"`` key (confirmed against
 a live response during investigation); :func:`_extract_records` keeps a few
@@ -29,7 +35,7 @@ fallbacks for safety.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import List
 
 import httpx
@@ -99,23 +105,6 @@ async def fetch_raw(
     return raw
 
 
-def _business_date_for(receipt_date: date, txn_time: str, cutoff_hour: int) -> date:
-    """Shift a calendar receipt date to the previous operational day when the
-    bill's hour-of-day falls before the court's overnight cutoff."""
-    if cutoff_hour and cutoff_hour > 0:
-        hour = 0
-        try:
-            hour = datetime.strptime(txn_time.strip(), "%H:%M:%S").hour
-        except (ValueError, AttributeError):
-            try:
-                hour = datetime.strptime(txn_time.strip(), "%H:%M").hour
-            except (ValueError, AttributeError):
-                hour = cutoff_hour  # unknown time → don't shift
-        if hour < cutoff_hour:
-            return receipt_date - timedelta(days=1)
-    return receipt_date
-
-
 class PetpoojaSalesDataAdapter(SalesSourceAdapter):
     source_key = "petpooja_salesdata"
 
@@ -130,11 +119,12 @@ class PetpoojaSalesDataAdapter(SalesSourceAdapter):
 
         lo = min(api_fetch_dates)
         hi = max(api_fetch_dates)
-        # Over-fetch into the next morning so post-midnight bills that belong to
-        # `hi` (once the cutoff is applied) are included. Composite upsert makes
-        # any slight over-fetch harmless (idempotent).
+        # Attribution is by Petpooja's calendar Receipt Date (no cutoff shift),
+        # so fetch exactly the requested days end-to-end. No next-morning
+        # over-fetch is needed — and skipping it avoids populating the next
+        # day's cache with a partial (incomplete) total.
         from_date = f"{lo.strftime('%Y-%m-%d')} 00:00:00"
-        to_date = f"{(hi + timedelta(days=1)).strftime('%Y-%m-%d')} 06:00:00"
+        to_date = f"{hi.strftime('%Y-%m-%d')} 23:59:59"
 
         try:
             raw = await fetch_raw(
@@ -173,7 +163,11 @@ class PetpoojaSalesDataAdapter(SalesSourceAdapter):
             except ValueError:
                 continue  # cannot attribute without a date
 
-            business_date = _business_date_for(receipt_date, txn_time, cutoff_hour)
+            # Attribute strictly by Petpooja's Receipt Date — this matches the
+            # day Petpooja's own reports/emails use. The court's cutoff_hour is
+            # intentionally ignored here (re-applying it double-shifted
+            # post-midnight bills to the previous day and broke reconciliation).
+            business_date = receipt_date
 
             try:
                 created_on = datetime.strptime(
