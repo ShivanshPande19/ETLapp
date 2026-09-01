@@ -16,9 +16,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from .core.config import settings
+from .core.config import settings, INSECURE_DEFAULT_SECRET
 from .database import get_db
-from .api.deps import get_current_user, CurrentUser
+from .api.deps import get_current_user, CurrentUser, require_etl_manager
 
 from .api.routes import auth, dashboard, sales, courts
 from .api.routes import housekeeping
@@ -172,6 +172,54 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads"
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/config", include_in_schema=False)
+def health_config(user: CurrentUser = Depends(require_etl_manager)):
+    """Read-only production-readiness check (ETL-manager only).
+
+    Returns ONLY booleans / non-sensitive values so it can be shared safely —
+    never the actual SECRET_KEY, DATABASE_URL or PUBLIC_BASE_URL. Lets an admin
+    confirm the Railway ops setup (secret, debug, Postgres, uploads volume,
+    email) in one call instead of digging through the dashboard.
+    """
+    from .database import engine
+
+    upload_dir = settings.UPLOAD_DIR
+
+    # Is the upload dir actually writable? (best-effort probe)
+    upload_writable = False
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        _probe = os.path.join(upload_dir, ".write_probe")
+        with open(_probe, "w") as _f:
+            _f.write("ok")
+        os.remove(_probe)
+        upload_writable = True
+    except Exception:
+        upload_writable = False
+
+    # Does the upload dir live on the mounted Railway volume?
+    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    on_volume = bool(volume_path) and os.path.abspath(upload_dir).startswith(
+        os.path.abspath(volume_path)
+    )
+
+    return {
+        "on_railway": bool(os.getenv("RAILWAY_ENVIRONMENT_NAME")),
+        "debug": settings.DEBUG,
+        # false == secure (a strong SECRET_KEY env is set)
+        "secret_key_is_default": settings.SECRET_KEY == INSECURE_DEFAULT_SECRET,
+        "db_dialect": engine.dialect.name,          # "postgresql" or "sqlite"
+        "using_postgres": engine.dialect.name.startswith("postgre"),
+        "upload_dir": upload_dir,
+        "upload_dir_writable": upload_writable,
+        "railway_volume_mount_path": volume_path,
+        "uploads_on_railway_volume": on_volume,
+        "public_base_url_set": bool(settings.PUBLIC_BASE_URL),
+        "resend_email_configured": bool(settings.RESEND_API_KEY),
+        "fcm_push_configured": fcm_service.is_configured(),
+    }
 
 
 # ─── PRINTED QR SHORT LINK ───────────────────────────────────────────────────
