@@ -1,61 +1,61 @@
 # backend_fastapi/app/services/auth_service.py
 
+import logging
+
 from sqlalchemy.orm import Session
 from ..models.manager import Manager
 from ..models.staff import Staff
 from ..core.security import verify_password, create_access_token
 from ..schemas.auth import LoginRequest, TokenResponse
 
-def login_manager(request: LoginRequest, db: Session) -> TokenResponse | None:
-    print(f"[LOGIN] Trying email: '{request.email}'")
+logger = logging.getLogger("auth")
 
-    # 1. Pehle managers mein dhundo
+
+def login_manager(request: LoginRequest, db: Session) -> TokenResponse | None:
+    # 1. Look in managers first
     user = db.query(Manager).filter(
         Manager.email == request.email,
-        Manager.is_active == True
+        Manager.is_active == True,
     ).first()
 
-    # 2. Nahi mila toh staff mein dhundo
+    # 2. Fall back to staff
     if not user:
         user = db.query(Staff).filter(
             Staff.email == request.email,
-            Staff.is_active == True
+            Staff.is_active == True,
         ).first()
-
-    print(f"[LOGIN] User found: {user}")
 
     if not user:
         return None
 
-    # 3. Password verify karo
-    result = verify_password(request.password, user.hashed_password)
-    print(f"[LOGIN] Password match: {result}")
-
-    if not result:
+    # 3. Verify password
+    #
+    # NOTE: never log the email, the looked-up user, or the password-match
+    # result — that writes account identifiers / auth internals into the server
+    # logs on every single login. The caller turns a None return into a generic
+    # 401, so nothing sensitive needs to be logged here.
+    if not verify_password(request.password, user.hashed_password):
         return None
 
-    # 4. Token banao
+    # 4. Mint the access token
     token = create_access_token({
         "sub": user.email,
         "name": user.name,
         "role": user.role,
     })
 
-    # 5. TokenResponse build karo (Yahan fix hai)
+    # 5. Build the response
     try:
-        # getattr ka use isliye kar rahe hain taaki agar object mein 
-        # field na ho toh code crash na ho, balki None mil jaye
-        response = TokenResponse(
+        return TokenResponse(
             access_token=token,
             token_type="bearer",
             manager_name=user.name,
             manager_email=user.email,
             role=user.role,
-            zone=getattr(user, "court_id", None), 
-            outlet_id=getattr(user, "outlet_id", None)  # ✅ FIX YAHAN HAI
+            # getattr keeps this resilient if a user type lacks these columns.
+            zone=getattr(user, "court_id", None),
+            outlet_id=getattr(user, "outlet_id", None),
         )
-        print(f"[LOGIN] TokenResponse built: {response}")
-        return response
-    except Exception as e:
-        print(f"[LOGIN] TokenResponse FAILED: {e}")
+    except Exception as e:  # noqa: BLE001 — log server-side, surface generic 500
+        logger.exception("Failed to build login response: %s", e)
         return None
