@@ -130,6 +130,17 @@ def get_current_user(
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token.")
 
+    # SECURITY: only genuine login tokens may authenticate an API request. The
+    # set-password / reset-password magic-link tokens are signed with the SAME
+    # secret and carry a valid `sub`, so without this check they would double as
+    # a full API bearer credential for the whole of their (multi-day) lifetime —
+    # i.e. a leaked set-password email would grant live account access, not just
+    # the ability to set a password. Login tokens (create_access_token) carry no
+    # `purpose` claim; purpose-scoped tokens are validated only by their own
+    # dedicated endpoints (/auth/set-password, /auth/reset-password).
+    if payload.get("purpose"):
+        raise HTTPException(status_code=401, detail="Invalid token.")
+
     email = payload.get("sub")
     if not email:
         raise HTTPException(status_code=401, detail="Invalid token payload.")
