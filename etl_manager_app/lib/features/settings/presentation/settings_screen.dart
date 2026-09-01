@@ -13,6 +13,7 @@ import '../../auth/domain/auth_notifier.dart';
 import '../../courts/domain/courts_notifier.dart'; // NEW IMPORT
 import '../../home/presentation/home_providers.dart' show currentOutletNameProvider;
 import '../presentation/manage_courts_screen.dart';
+import 'manage_etl_managers_screen.dart';
 import 'outlet_staff_management_screen.dart';
 import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 import '../../outlets/presentation/manage_access_screen.dart';
@@ -402,6 +403,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                   label: 'POS Integrations',
                                   subtitle: 'GoFrugal, Petpooja, Vyapar',
                                   onTap: () {},
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          _StaggerItem(
+                            anim: _itemAnim(5),
+                            child: const _SectionLabel('TEAM'),
+                          ),
+                          const SizedBox(height: 10),
+                          _StaggerItem(
+                            anim: _itemAnim(5),
+                            child: _SettingsGroup(
+                              children: [
+                                _NavTile(
+                                  icon: Icons.admin_panel_settings_rounded,
+                                  label: 'Manage ETL Managers',
+                                  subtitle: 'Add & manage full-access admins',
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ManageEtlManagersScreen(),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),

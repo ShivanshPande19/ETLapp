@@ -34,6 +34,7 @@ from .api.routes import notices
 from .api.routes import devices
 from .api.routes import legal
 from .api.routes import outlets as outlets_routes
+from .api.routes import managers as managers_routes
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -243,3 +244,5 @@ app.include_router(legal.router,                                tags=["Legal"])
 # (/outlets/mine, /outlets/{id}/managers); the bare GET /outlets/ list stays
 # defined inline above.
 app.include_router(outlets_routes.router, prefix="/outlets",    tags=["Outlets"])
+# ETL-manager account administration (create/list/deactivate other ETL managers).
+app.include_router(managers_routes.router, prefix="/managers",  tags=["Managers"])
