@@ -152,8 +152,10 @@ app.state.limiter = feedback.limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ✅ CORS: '*' + allow_credentials=True is invalid/insecure.
-# Use explicit origins from settings (add ALLOWED_ORIGINS in config).
-_allowed = getattr(settings, "ALLOWED_ORIGINS", None) or ["*"]
+# Origins come from settings.ALLOWED_ORIGINS (comma-separated env var); empty
+# => wildcard "*", which is safe for the native app (no Origin header, no
+# cookies). allow_credentials is forced off whenever we're on wildcard.
+_allowed = settings.allowed_origins_list
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed,

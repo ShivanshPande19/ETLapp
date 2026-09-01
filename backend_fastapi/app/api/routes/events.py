@@ -1,8 +1,10 @@
 # app/api/routes/events.py
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
+
+from ..deps import get_current_user, CurrentUser
 
 router = APIRouter()
 
@@ -49,7 +51,17 @@ async def notify_clients(event: dict):
 
 
 @router.get("/stream")
-async def event_stream(court_id: int = 0):
+async def event_stream(
+    court_id: int = 0,
+    # SECURITY (P1): this stream used to be fully anonymous — anyone could
+    # subscribe to court_id=0 (the manager firehose) and watch live cross-tenant
+    # activity, plus open unlimited connections. Now a valid login is required.
+    # The Flutter SSE client already sends `Authorization: Bearer <token>`, so
+    # this adds no client-side change. Channel routing below is intentionally
+    # left as-is (payloads are only IDs; the app re-fetches via tenancy-scoped
+    # endpoints), so existing real-time updates behave exactly as before.
+    user: CurrentUser = Depends(get_current_user),
+):
     queue: asyncio.Queue = asyncio.Queue()
 
     if court_id not in _clients:
