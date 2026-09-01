@@ -163,24 +163,45 @@ class AuthNotifier extends Notifier<AuthState> {
         outletId: parsedOutletId,
       );
     } on DioException catch (e) {
+      // Give the user a clear idea of WHERE the problem is, so a network issue
+      // (their connection / server unreachable) is never mistaken for a wrong
+      // password — and so they don't blame the app for something outside it.
+      final status = e.response?.statusCode;
       String message;
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
           e.type == DioExceptionType.sendTimeout) {
-        message = 'Connection timeout — check internet';
-      } else if (e.type == DioExceptionType.connectionError) {
-        message = 'Cannot connect to server: ${e.message}';
-      } else if (e.response?.statusCode == 401) {
-        message = 'Invalid email or password';
-      } else {
+        // We reached out but the server was too slow to answer.
         message =
-            'Error ${e.response?.statusCode}: ${e.response?.data ?? e.message}';
+            'Network is slow — the server didn\'t respond in time. Please check '
+            'your internet and try again.';
+      } else if (e.type == DioExceptionType.connectionError ||
+          e.response == null) {
+        // No response at all = we never reached the server (offline, no signal,
+        // blocked/unreachable host, server down). This is NOT a wrong password.
+        message =
+            'Can\'t reach the server. Please check your internet connection and '
+            'try again.';
+      } else if (status == 401) {
+        // The server answered and rejected the credentials.
+        message = 'Incorrect email or password. Please try again.';
+      } else if (status != null && status >= 500) {
+        // The server was reached but errored on its side — not the user's fault.
+        message =
+            'The server is having trouble right now. Please try again in a moment.';
+      } else {
+        // Any other 4xx — show the server's own message if it sent one.
+        final data = e.response?.data;
+        final detail = (data is Map && data['detail'] is String)
+            ? data['detail'] as String
+            : null;
+        message = detail ?? 'Login failed. Please try again.';
       }
       state = state.copyWith(status: AuthStatus.error, errorMessage: message);
-    } catch (e) {
+    } catch (_) {
       state = state.copyWith(
         status: AuthStatus.error,
-        errorMessage: 'Unexpected error: $e',
+        errorMessage: 'Something went wrong. Please try again.',
       );
     }
   }
