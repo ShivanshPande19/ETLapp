@@ -17,6 +17,7 @@ from ...models.manager import Manager
 from ...models.staff import Staff
 from ...core.config import settings
 from ...core.security import hash_password, decode_token, create_token
+from ..deps import require_etl_manager, CurrentUser
 from pydantic import BaseModel
 
 logger = logging.getLogger("auth")
@@ -50,7 +51,15 @@ class SeedRequest(BaseModel):
     role: str = "manager"
 
 @router.post("/seed", include_in_schema=False)
-def seed_user(req: SeedRequest, db: Session = Depends(get_db)):
+def seed_user(
+    req: SeedRequest,
+    db: Session = Depends(get_db),
+    # SECURITY (P0): this endpoint creates a Manager account. It used to be
+    # fully public — anyone on the internet could POST /auth/seed and mint
+    # themselves a manager login. It is now gated behind an authenticated ETL
+    # manager, which is the only role that should ever bootstrap accounts.
+    _admin: CurrentUser = Depends(require_etl_manager),
+):
     exists = db.query(Manager).filter(Manager.email == req.email).first()
     if exists:
         raise HTTPException(status_code=400, detail="Already exists")

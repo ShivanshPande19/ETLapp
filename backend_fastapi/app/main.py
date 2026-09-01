@@ -34,6 +34,7 @@ from .api.routes import notices
 from .api.routes import devices
 from .api.routes import legal
 from .api.routes import outlets as outlets_routes
+from .api.routes import managers as managers_routes
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -152,8 +153,10 @@ app.state.limiter = feedback.limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ✅ CORS: '*' + allow_credentials=True is invalid/insecure.
-# Use explicit origins from settings (add ALLOWED_ORIGINS in config).
-_allowed = getattr(settings, "ALLOWED_ORIGINS", None) or ["*"]
+# Origins come from settings.ALLOWED_ORIGINS (comma-separated env var); empty
+# => wildcard "*", which is safe for the native app (no Origin header, no
+# cookies). allow_credentials is forced off whenever we're on wildcard.
+_allowed = settings.allowed_origins_list
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed,
@@ -241,3 +244,5 @@ app.include_router(legal.router,                                tags=["Legal"])
 # (/outlets/mine, /outlets/{id}/managers); the bare GET /outlets/ list stays
 # defined inline above.
 app.include_router(outlets_routes.router, prefix="/outlets",    tags=["Outlets"])
+# ETL-manager account administration (create/list/deactivate other ETL managers).
+app.include_router(managers_routes.router, prefix="/managers",  tags=["Managers"])
