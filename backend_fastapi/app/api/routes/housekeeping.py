@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -20,6 +21,8 @@ from ...core.uploads import save_upload_image
 from ...services.housekeeping_config_service import get_court_config
 from ..deps import CurrentUser, get_current_user
 from .events import notify_clients
+
+logger = logging.getLogger("housekeeping")
 
 router = APIRouter()
 
@@ -75,7 +78,7 @@ def _fire_notify(event: dict) -> None:
             return
         asyncio.run_coroutine_threadsafe(notify_clients(event), _main_loop)
     except Exception as e:
-        print(f"[SSE] notify failed: {e}")
+        logger.warning("SSE notify failed: %s", e)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

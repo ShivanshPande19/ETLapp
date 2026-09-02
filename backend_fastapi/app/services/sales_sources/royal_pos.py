@@ -6,8 +6,11 @@ from datetime import date, datetime
 from typing import List
 
 import httpx
+import logging
 
 from .base import NormalizedOrder, SalesSourceAdapter, register
+
+logger = logging.getLogger("sales.royal_pos")
 
 ROYAL_POS_URL = (
     "https://royalpos.in/royalpos/public/get_completed_orders_item_wise_dynamic"
@@ -25,20 +28,20 @@ async def fetch_raw(
         "start_date": start_date,
         "end_date": end_date,
     }
-    print(f"[ROYALPOS START] restaurant_id={restaurant_id} {start_date} -> {end_date}")
+    logger.info(f"[ROYALPOS START] restaurant_id={restaurant_id} {start_date} -> {end_date}")
     # Royal POS's get_completed_orders API is SLOW — even a 2-day range regularly
     # takes ~45-60s. The old 30s timeout made most Royal POS syncs raise
     # ReadTimeout → the adapter returned [] → silent gaps in the outlet's daily
     # sales (e.g. Chatpata Affair was missing Aug 1-2 etc.). 120s gives it room.
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(ROYAL_POS_URL, data=data)
-        print(f"[ROYALPOS HTTP] restaurant_id={restaurant_id} status={resp.status_code}")
+        logger.info(f"[ROYALPOS HTTP] restaurant_id={restaurant_id} status={resp.status_code}")
         resp.raise_for_status()
         raw = resp.json()
     if not isinstance(raw, list):
-        print(f"[ROYALPOS WARN] non-list response: {str(raw)[:200]}")
+        logger.warning(f"[ROYALPOS WARN] non-list response: {str(raw)[:200]}")
         return []
-    print(f"[ROYALPOS SUCCESS] restaurant_id={restaurant_id} records={len(raw)}")
+    logger.info(f"[ROYALPOS SUCCESS] restaurant_id={restaurant_id} records={len(raw)}")
     return raw
 
 def _is_sale(rec: dict) -> bool:
@@ -67,7 +70,7 @@ class RoyalPosAdapter(SalesSourceAdapter):
                 end_date=hi,
             )
         except Exception as e:
-            print(f"[ROYALPOS ERROR] {outlet.rest_id} {lo}->{hi}: {e}")
+            logger.warning(f"[ROYALPOS ERROR] {outlet.rest_id} {lo}->{hi}: {e}")
             return []
 
         normalized: List[NormalizedOrder] = []
@@ -110,7 +113,7 @@ class RoyalPosAdapter(SalesSourceAdapter):
                 )
             )
 
-        print(f"[ROYALPOS ATTRIBUTE] restaurant_id={outlet.rest_id} counted={len(normalized)}")
+        logger.info(f"[ROYALPOS ATTRIBUTE] restaurant_id={outlet.rest_id} counted={len(normalized)}")
         return normalized
 
 register(RoyalPosAdapter())

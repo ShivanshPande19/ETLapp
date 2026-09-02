@@ -18,6 +18,7 @@ from ...models.staff import Staff
 from ...core.config import settings
 from ...core.security import hash_password, decode_token, create_token
 from ..deps import require_etl_manager, CurrentUser
+from .feedback import limiter  # shared slowapi limiter (also wired in main.py)
 from pydantic import BaseModel
 
 logger = logging.getLogger("auth")
@@ -28,9 +29,14 @@ _templates_dir = os.path.join(os.getcwd(), "app", "templates")
 templates = Jinja2Templates(directory=_templates_dir)
 
 @router.post("/login", response_model=TokenResponse)
-def login(request: LoginRequest, db: Session = Depends(get_db)):
+# SECURITY: throttle login by client IP to blunt password brute-forcing. The
+# shared limiter's 429 handler is registered in main.py. `request: Request` is
+# required by slowapi to read the caller IP (it also renamed the body param to
+# `credentials` to avoid clashing with it).
+@limiter.limit("10/minute")
+def login(request: Request, credentials: LoginRequest, db: Session = Depends(get_db)):
     try:
-        result = login_manager(request, db)
+        result = login_manager(credentials, db)
         if not result:
             raise HTTPException(status_code=401, detail="Invalid email or password")
         return result

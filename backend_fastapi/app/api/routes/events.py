@@ -3,8 +3,11 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
+import logging
 
 from ..deps import get_current_user, CurrentUser
+
+logger = logging.getLogger("events")
 
 router = APIRouter()
 
@@ -25,7 +28,7 @@ def fire_notify(event: dict) -> None:
             return
         asyncio.run_coroutine_threadsafe(notify_clients(event), _main_loop)
     except Exception as e:
-        print(f"[SSE] fire_notify failed: {e}")
+        logger.warning("fire_notify failed: %s", e)
 
 
 async def notify_clients(event: dict):

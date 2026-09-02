@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, text, inspect
 from sqlalchemy.orm import Session
@@ -16,6 +18,8 @@ from ...models.sale import Court, Outlet
 from ...models.staff import Staff
 from ...database import get_db
 from ..deps import get_current_user, CurrentUser
+
+logger = logging.getLogger("courts")
 
 router = APIRouter()
 
@@ -129,9 +133,9 @@ def _notify_court_staff_geofence(db: Session, court: Court) -> None:
                 court_id=court.id,
                 recipient_staff_id=sid,
             )
-        print(f"[COURT] geofence change notified to {len(staff_ids)} staff at court {court.id}")
+        logger.info("geofence change notified to %d staff at court %s", len(staff_ids), court.id)
     except Exception as e:  # noqa: BLE001 — never fail the update over a notice
-        print(f"[COURT] geofence notice fan-out failed for court {court.id}: {e}")
+        logger.warning("geofence notice fan-out failed for court %s: %s", court.id, e)
 
 
 @router.patch("/{court_id}/location")
@@ -323,9 +327,13 @@ def delete_court(
         _run("courts", "DELETE FROM courts WHERE id = :cid")
 
         db.commit()
-    except Exception as e:  # noqa: BLE001 — atomic: nothing partial survives
+    except Exception:  # noqa: BLE001 — atomic: nothing partial survives
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Delete failed, rolled back: {e}")
+        # Log the real cause server-side; never leak internal/DB text to client.
+        logger.exception("Court delete failed and was rolled back")
+        raise HTTPException(
+            status_code=500, detail="Could not delete the court. Please try again."
+        )
 
     return {
         "deleted": True,

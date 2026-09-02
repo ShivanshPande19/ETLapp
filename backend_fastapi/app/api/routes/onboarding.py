@@ -178,7 +178,7 @@ async def submit_application(
             outlet_id=None,
         )
     except Exception as e:  # noqa: BLE001 — never break the public form
-        print(f"[ONBOARDING] submit notice failed for #{application.id}: {e}")
+        logger.warning("submit notice failed for #%s: %s", application.id, e)
 
     return templates.TemplateResponse(
         request=request,
@@ -319,7 +319,7 @@ async def approve_application(
                 outlet_id=outlet.id,
             )
         except Exception as e:  # noqa: BLE001 — never fail approval on a notice
-            print(f"[ONBOARDING] outlet-added notice failed for outlet {outlet.id}: {e}")
+            logger.warning("outlet-added notice failed for outlet %s: %s", outlet.id, e)
 
         email_sent = await send_email(
             to=existing_owner.email,
@@ -426,7 +426,7 @@ async def reject_application(
                 ),
             )
         except Exception as e:  # noqa: BLE001 — rejection must still succeed
-            print(f"[ONBOARDING] rejection email failed for #{app.id}: {e}")
+            logger.warning("rejection email failed for #%s: %s", app.id, e)
 
     return {"message": "Application rejected.", "email_sent": email_sent}
 
