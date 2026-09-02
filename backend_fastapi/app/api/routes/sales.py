@@ -157,17 +157,29 @@ async def sync_sales(
 
     try:
         if court_uid:
-            return await sync_court_by_fetch_date(
+            result = await sync_court_by_fetch_date(
                 db=db,
                 court_uid=court_uid,
                 fetch_for_date=parsed_fetch_date,
                 force_refresh=force_refresh,
             )
-
-        return await sync_all_active_outlets_by_fetch_date(
-            db=db,
-            fetch_for_date=parsed_fetch_date,
-            force_refresh=force_refresh,
-        )
+        else:
+            result = await sync_all_active_outlets_by_fetch_date(
+                db=db,
+                fetch_for_date=parsed_fetch_date,
+                force_refresh=force_refresh,
+            )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    # If we attempted outlets and EVERY one failed, this is a real failure —
+    # don't report it as a 200 "success" (which is what used to happen). The
+    # per-outlet details still show which ones failed.
+    attempted = result.get("outlets_synced", 0)
+    failed = result.get("outlets_failed", 0)
+    if attempted > 0 and failed >= attempted:
+        raise HTTPException(
+            status_code=502,
+            detail="Sales sync failed for all outlets — check POS credentials / connectivity.",
+        )
+    return result

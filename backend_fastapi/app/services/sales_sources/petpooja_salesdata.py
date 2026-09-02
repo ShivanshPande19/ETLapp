@@ -39,9 +39,12 @@ from datetime import date, datetime
 from typing import List
 
 import httpx
+import logging
 
 from ...core.config import settings
 from .base import NormalizedOrder, SalesSourceAdapter, register
+
+logger = logging.getLogger("sales.petpooja_salesdata")
 
 PETPOOJA_SALESDATA_URL = "https://api.petpooja.com/V1/orders/get_sales_data/"
 
@@ -89,16 +92,16 @@ async def fetch_raw(
         "to_date": to_date,
     }
 
-    print(f"[PETPOOJA SALESDATA START] rest_id={rest_id} {from_date} -> {to_date}")
+    logger.info(f"[PETPOOJA SALESDATA START] rest_id={rest_id} {from_date} -> {to_date}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(PETPOOJA_SALESDATA_URL, params=params)
-        print(f"[PETPOOJA SALESDATA HTTP] rest_id={rest_id} status_code={resp.status_code}")
+        logger.info(f"[PETPOOJA SALESDATA HTTP] rest_id={rest_id} status_code={resp.status_code}")
         resp.raise_for_status()
         raw = resp.json()
 
     recs = _extract_records(raw)
-    print(
+    logger.info(
         f"[PETPOOJA SALESDATA SUCCESS] rest_id={rest_id} "
         f"success={raw.get('success')} code={raw.get('code')} rows={len(recs)}"
     )
@@ -136,7 +139,7 @@ class PetpoojaSalesDataAdapter(SalesSourceAdapter):
                 access_token=outlet.pp_access_token,
             )
         except Exception as e:
-            print(f"[PETPOOJA SALESDATA ERROR] {outlet.rest_id} {from_date}->{to_date}: {e}")
+            logger.warning(f"[PETPOOJA SALESDATA ERROR] {outlet.rest_id} {from_date}->{to_date}: {e}")
             return []
 
         if not _is_success(raw):
@@ -186,7 +189,7 @@ class PetpoojaSalesDataAdapter(SalesSourceAdapter):
                 )
             )
 
-        print(f"[PETPOOJA SALESDATA ATTRIBUTE] rest_id={outlet.rest_id} counted={len(normalized)}")
+        logger.info(f"[PETPOOJA SALESDATA ATTRIBUTE] rest_id={outlet.rest_id} counted={len(normalized)}")
         return normalized
 
 

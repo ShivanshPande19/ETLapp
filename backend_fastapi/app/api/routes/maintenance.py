@@ -1,6 +1,7 @@
 # app/api/routes/maintenance.py
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
@@ -16,6 +17,8 @@ from ...core.uploads import save_upload_image
 from ...services.notice_service import create_notice
 from ..deps import CurrentUser, get_current_user, require_etl_manager, require_outlet_user
 from .events import notify_clients
+
+logger = logging.getLogger("maintenance")
 
 router = APIRouter()
 
@@ -199,7 +202,7 @@ def _notify_etl(db: Session, issue: MaintenanceIssue, *, type: str, title: str, 
             outlet_id=None,
         )
     except Exception as e:  # noqa: BLE001 — notifications must not break the API
-        print(f"[MAINTENANCE] ETL notice failed for #{issue.id}: {e}")
+        logger.warning("ETL notice failed for #%s: %s", issue.id, e)
 
 
 def _notify_outlet(db: Session, issue: MaintenanceIssue, *, type: str, title: str, body: str) -> None:
@@ -215,7 +218,7 @@ def _notify_outlet(db: Session, issue: MaintenanceIssue, *, type: str, title: st
             outlet_id=issue.outlet_id,
         )
     except Exception as e:  # noqa: BLE001
-        print(f"[MAINTENANCE] outlet notice failed for #{issue.id}: {e}")
+        logger.warning("outlet notice failed for #%s: %s", issue.id, e)
 
 
 def _ticket_label(issue: MaintenanceIssue) -> str:
@@ -369,6 +372,14 @@ async def get_issue(
     issue = _get_issue_or_404(db, issue_id)
     if user.is_outlet_user:
         _assert_outlet_owns(user, issue)
+    elif user.is_etl_staff:
+        # Scope ETL staff to their own court (mirrors list_issues); without this
+        # any ETL staff could read any court's ticket by guessing its id.
+        if user.court_id is None or issue.court_id != user.court_id:
+            raise HTTPException(
+                status_code=403, detail="This ticket belongs to another court."
+            )
+    # ETL managers are unrestricted (they oversee every court).
     return _to_out(issue)
 
 

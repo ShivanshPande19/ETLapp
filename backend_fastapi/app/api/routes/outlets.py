@@ -13,6 +13,7 @@
 #   manager → view/operate the outlet, but CANNOT manage access.
 # Only an owner (or an ETL manager) may call the manage-access endpoints.
 
+import logging
 import secrets
 from typing import List, Optional
 
@@ -35,6 +36,8 @@ from ...models.outlet_membership import (
 )
 from ...services.email_service import send_email
 from ..deps import get_current_user, require_etl_manager, CurrentUser
+
+logger = logging.getLogger("outlets")
 
 router = APIRouter()
 
@@ -533,9 +536,13 @@ def delete_outlet(
         _run("outlets", "DELETE FROM outlets WHERE id = :oid")
 
         db.commit()
-    except Exception as e:  # noqa: BLE001 — atomic: nothing partial survives
+    except Exception:  # noqa: BLE001 — atomic: nothing partial survives
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Delete failed, rolled back: {e}")
+        # Log the real cause server-side; never leak internal/DB text to client.
+        logger.exception("Outlet delete failed and was rolled back")
+        raise HTTPException(
+            status_code=500, detail="Could not delete the outlet. Please try again."
+        )
 
     return {
         "deleted": True,

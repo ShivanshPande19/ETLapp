@@ -6,7 +6,7 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, Depends, status
+from fastapi import FastAPI, File, UploadFile, Depends, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -254,21 +254,20 @@ def get_all_outlets_safe(
     # anonymous access is now blocked.
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Fetch outlets with only the fields the client needs."""
+    """Fetch outlets with only the fields the client needs (no PII)."""
+    from .models.sale import Outlet
+
     try:
-        result = db.execute(
-            text("SELECT id, vendor_name, court_id FROM outlets")
-        ).mappings().all()
-        return [dict(row) for row in result]
-    except Exception as e1:
-        try:
-            result = db.execute(
-                text("SELECT id, vendor_name, court_id FROM outlet")
-            ).mappings().all()
-            return [dict(row) for row in result]
-        except Exception as e2:
-            print(f"SQL Error fetching outlets: {e2}")
-            return []
+        rows = db.query(Outlet.id, Outlet.vendor_name, Outlet.court_id).all()
+        return [
+            {"id": r.id, "vendor_name": r.vendor_name, "court_id": r.court_id}
+            for r in rows
+        ]
+    except Exception:
+        # Never mask a real DB failure as an empty list — that silently blanks
+        # every outlet name across the app. Log it and surface a 500 instead.
+        logging.getLogger("etl.main").exception("Failed to fetch outlets")
+        raise HTTPException(status_code=500, detail="Could not load outlets.")
 
 
 # ─── Routers ─────────────────────────────────────────────────────────────────

@@ -41,6 +41,7 @@ TWO RULES THAT MUST NOT BE BROKEN
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable, List, Optional
 
 from sqlalchemy import or_
@@ -60,6 +61,9 @@ STAFF_ROLES = ("etl_staff", "staff", "outlet_staff")
 
 
 # ─── Manager routing: which manager tier owns an event about this staff? ──────
+
+logger = logging.getLogger("push")
+
 
 def manager_scope_for_staff(staff: Optional[Staff]) -> tuple[Optional[int], Optional[int]]:
     """Return ``(court_id, outlet_id)`` to stamp on a manager-audience notice.
@@ -170,9 +174,9 @@ def resolve_notice_targets(db: Session, notice: Notice) -> List[str]:
         # recipient_staff_id is a bug at the call site — deliver to nobody
         # rather than falling back to something broader.
         if notice.recipient_staff_id is None:
-            print(
-                f"[PUSH] notice#{notice.id} type={notice.type} has "
-                f"audience='staff' but no recipient_staff_id — dropped"
+            logger.warning(
+                "notice#%s type=%s has audience='staff' but no recipient_staff_id — dropped",
+                notice.id, notice.type,
             )
             return []
         tokens = _tokens_for_staff_ids(db, [notice.recipient_staff_id])
@@ -184,7 +188,7 @@ def resolve_notice_targets(db: Session, notice: Notice) -> List[str]:
             tokens = _tokens_for_etl_managers(db)
 
     else:
-        print(f"[PUSH] notice#{notice.id} unknown audience={notice.audience!r} — dropped")
+        logger.warning("notice#%s unknown audience=%r — dropped", notice.id, notice.audience)
         return []
 
     # One user may have several devices; a token could also theoretically be

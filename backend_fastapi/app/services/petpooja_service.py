@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta, datetime
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from sqlalchemy import func, or_
 
 from ..models.sale import Outlet, DailySaleCache, Court, SalesOrder
 from .sales_sources import get_adapter
+
+logger = logging.getLogger("sales.sync")
 
 
 # Bill statuses that must NOT count toward revenue (cancelled/void/refunded).
@@ -58,19 +61,25 @@ async def sync_outlet_for_dates(
     try:
         adapter = get_adapter(source)
     except KeyError as e:
-        print(f"[SYNC ERROR] outlet={outlet.id} unknown pos_source: {e}")
-        return []
+        # Misconfigured outlet — surface it (the caller records a per-outlet
+        # failure) instead of silently returning "0 orders".
+        logger.error("outlet=%s unknown pos_source: %s", outlet.id, e)
+        raise RuntimeError(f"Unknown POS source '{source}' for outlet {outlet.id}") from e
 
     try:
         orders = await adapter.fetch_normalized_orders(
             outlet, api_fetch_dates, cutoff_hour=cutoff_hour
         )
     except NotImplementedError as e:
-        print(f"[SYNC SKIP] outlet={outlet.id} source={source}: {e}")
+        # Adapter deliberately has no fetch (stub) — a legitimate skip, not a
+        # failure. Report zero affected dates.
+        logger.info("outlet=%s source=%s not implemented, skipping: %s", outlet.id, source, e)
         return []
     except Exception as e:
-        print(f"[SYNC ERROR] outlet={outlet.id} source={source} fetch failed: {e}")
-        return []
+        # A real fetch failure (network/POS/credentials). Do NOT swallow it as
+        # an empty result — raise so /sales/sync can report the outlet failed.
+        logger.exception("outlet=%s source=%s fetch failed", outlet.id, source)
+        raise RuntimeError(f"Sync failed for outlet {outlet.id}") from e
 
     affected_business_dates = set()
 
@@ -164,19 +173,35 @@ async def sync_court_by_fetch_date(
     outlets = db.query(Outlet).filter(Outlet.court_id == court.id, Outlet.is_active == 1).all()
 
     results = []
+    failed = 0
     for outlet in outlets:
-        affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
-        results.append({
-            "outlet_id": outlet.id,
-            "vendor_name": outlet.vendor_name,
-            "updated_business_dates": [str(d) for d in affected_dates]
-        })
+        try:
+            affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
+            results.append({
+                "outlet_id": outlet.id,
+                "vendor_name": outlet.vendor_name,
+                "updated_business_dates": [str(d) for d in affected_dates],
+                "ok": True,
+            })
+        except Exception as e:
+            # One outlet failing must not abort the rest — record it and move on.
+            db.rollback()
+            failed += 1
+            logger.error("sync failed for outlet %s (%s): %s", outlet.id, outlet.vendor_name, e)
+            results.append({
+                "outlet_id": outlet.id,
+                "vendor_name": outlet.vendor_name,
+                "updated_business_dates": [],
+                "ok": False,
+                "error": "sync failed",
+            })
 
     return {
         "court_uid": court.court_uid,
         "court_name": court.name,
         "sync_trigger_date": str(fetch_for_date),
         "outlets_synced": len(outlets),
+        "outlets_failed": failed,
         "details": results
     }
 
@@ -191,19 +216,35 @@ async def sync_all_active_outlets_by_fetch_date(
 
     outlets = db.query(Outlet).filter(Outlet.is_active == 1).all()
     results = []
+    failed = 0
 
     for outlet in outlets:
-        affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
-        results.append({
-            "outlet_id": outlet.id,
-            "vendor_name": outlet.vendor_name,
-            "updated_business_dates": [str(d) for d in affected_dates]
-        })
+        try:
+            affected_dates = await sync_outlet_for_dates(db, outlet, dates_to_fetch)
+            results.append({
+                "outlet_id": outlet.id,
+                "vendor_name": outlet.vendor_name,
+                "updated_business_dates": [str(d) for d in affected_dates],
+                "ok": True,
+            })
+        except Exception as e:
+            # One outlet failing must not abort the rest — record it and move on.
+            db.rollback()
+            failed += 1
+            logger.error("sync failed for outlet %s (%s): %s", outlet.id, outlet.vendor_name, e)
+            results.append({
+                "outlet_id": outlet.id,
+                "vendor_name": outlet.vendor_name,
+                "updated_business_dates": [],
+                "ok": False,
+                "error": "sync failed",
+            })
 
     return {
         "sync_trigger_date": str(fetch_for_date),
         "petpooja_api_date": str(fetch_for_date), # Keeping for backwards compatibility with scheduler
         "business_date": str(fetch_for_date - timedelta(days=1)), # Keeping for backwards compatibility
         "outlets_synced": len(outlets),
+        "outlets_failed": failed,
         "details": results
     }

@@ -24,9 +24,12 @@ from datetime import date, datetime, timedelta
 from typing import List
 
 import httpx
+import logging
 
 from ...core.config import settings
 from .base import NormalizedOrder, SalesSourceAdapter, register
+
+logger = logging.getLogger("sales.petpooja_generic")
 
 PETPOOJA_URL = "https://api.petpooja.com/V1/thirdparty/generic_get_orders/"
 
@@ -54,7 +57,7 @@ async def fetch_raw(
         "Cookie": f"PETPOOJA_API={cookie or settings.PETPOOJA_COOKIE}",
     }
 
-    print(f"[PETPOOJA FETCH START] rest_id={rest_id} order_date={order_date}")
+    logger.info(f"[PETPOOJA FETCH START] rest_id={rest_id} order_date={order_date}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.request(
@@ -63,12 +66,12 @@ async def fetch_raw(
             headers=headers,
             json=payload,
         )
-        print(f"[PETPOOJA FETCH HTTP] rest_id={rest_id} status_code={resp.status_code}")
+        logger.info(f"[PETPOOJA FETCH HTTP] rest_id={rest_id} status_code={resp.status_code}")
         resp.raise_for_status()
         raw = resp.json()
 
     orders = raw.get("order_json", []) or raw.get("orderjson", []) or []
-    print(
+    logger.info(
         f"[PETPOOJA FETCH SUCCESS] rest_id={rest_id} "
         f"success={raw.get('success')} code={raw.get('code')} orders={len(orders)}"
     )
@@ -96,7 +99,7 @@ class PetpoojaGenericAdapter(SalesSourceAdapter):
 
         for api_date in api_fetch_dates:
             api_date_str = api_date.strftime("%Y-%m-%d")
-            print(f"[FETCHING] vendor={outlet.vendor_name} date={api_date_str}")
+            logger.info(f"[FETCHING] vendor={outlet.vendor_name} date={api_date_str}")
 
             try:
                 raw = await fetch_raw(
@@ -108,7 +111,7 @@ class PetpoojaGenericAdapter(SalesSourceAdapter):
                     cookie=outlet.pp_cookie,
                 )
             except Exception as e:
-                print(f"[PETPOOJA ERROR] Exception while fetching {outlet.rest_id} on {api_date_str}: {e}")
+                logger.warning(f"[PETPOOJA ERROR] Exception while fetching {outlet.rest_id} on {api_date_str}: {e}")
                 continue
 
             if not is_success(raw):
@@ -166,7 +169,7 @@ class PetpoojaGenericAdapter(SalesSourceAdapter):
                 )
                 attributed += 1
 
-            print(f"[ATTRIBUTE] request_order_date={api_date_str} | bills={attributed}")
+            logger.info(f"[ATTRIBUTE] request_order_date={api_date_str} | bills={attributed}")
 
         return normalized
 

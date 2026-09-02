@@ -14,6 +14,7 @@ a real cross-tenant leak, not a theoretical one.
 outcome rather than something we have to remember to do.
 """
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
@@ -30,6 +31,8 @@ from ...schemas.device import (
 from ...services import fcm_service
 from ...services.push_targeting import deactivate_tokens_for_user
 from ..deps import CurrentUser, get_current_user
+
+logger = logging.getLogger("devices")
 
 router = APIRouter()
 
@@ -59,9 +62,9 @@ def register_device(
             existing.user_type == user.user_type and existing.user_id == user.id
         )
         if transferred:
-            print(
-                f"[DEVICE] token transferred "
-                f"{existing.user_type}:{existing.user_id} -> {user.user_type}:{user.id}"
+            logger.info(
+                "token transferred %s:%s -> %s:%s",
+                existing.user_type, existing.user_id, user.user_type, user.id,
             )
 
         existing.user_type = user.user_type

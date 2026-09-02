@@ -1,4 +1,5 @@
 # backend_fastapi/app/api/routes/staff.py
+import logging
 import os
 import uuid
 from typing import Optional
@@ -18,6 +19,8 @@ from ...models.staff import Staff
 from ...models.sale import Court
 from ...core.config import settings
 from ..deps import get_current_user, CurrentUser
+
+logger = logging.getLogger("staff")
 
 router = APIRouter()
 
@@ -238,7 +241,7 @@ def remove_staff_access(
             recipient_staff_id=staff.id,
         )
     except Exception as e:  # noqa: BLE001
-        print(f"[STAFF] deactivation notice failed for {staff_id}: {e}")
+        logger.warning("deactivation notice failed for %s: %s", staff_id, e)
 
     success = deactivate_staff(staff_id, db)
     if not success:
@@ -249,10 +252,10 @@ def remove_staff_access(
         n = deactivate_tokens_for_user(db, user_type="staff", user_id=staff_id)
         db.commit()
         if n:
-            print(f"[STAFF] disabled {n} device token(s) for staff {staff_id}")
+            logger.info("disabled %s device token(s) for staff %s", n, staff_id)
     except Exception as e:  # noqa: BLE001
         db.rollback()
-        print(f"[STAFF] token cleanup failed for {staff_id}: {e}")
+        logger.warning("token cleanup failed for %s: %s", staff_id, e)
 
     return {"message": "Access removed successfully"}
 
@@ -296,7 +299,7 @@ def assign_court(
             recipient_staff_id=staff.id,
         )
     except Exception as e:  # noqa: BLE001
-        print(f"[STAFF] court-change notice failed for {staff_id}: {e}")
+        logger.warning("court-change notice failed for %s: %s", staff_id, e)
 
     return staff
 

@@ -16,6 +16,7 @@ api/routes/notices.py::_scoped_query uses for reads, so a user can always open
 what they were pushed.
 """
 
+import logging
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -28,6 +29,9 @@ from .push_targeting import resolve_notice_targets
 # Keep in sync with the Android channel created in the Flutter app
 # (core/services/push_service.dart).
 _ANDROID_CHANNEL_ID = "etl_default"
+
+
+logger = logging.getLogger("notice")
 
 
 def _unread_badge_for(db: Session, notice: Notice) -> int:
@@ -87,7 +91,7 @@ def _dispatch_push(db: Session, notice: Notice) -> None:
 
         fcm_service.fire_push(_factory)
     except Exception as e:  # noqa: BLE001 — a push must never break the caller
-        print(f"[PUSH] dispatch failed for notice#{getattr(notice, 'id', '?')}: {e}")
+        logger.error("dispatch failed for notice#%s: %s", getattr(notice, "id", "?"), e)
 
 
 async def _send_and_prune(tokens, *, title, body, data, badge=None) -> None:
@@ -115,10 +119,10 @@ async def _send_and_prune(tokens, *, title, body, data, badge=None) -> None:
     try:
         n = deactivate_tokens(db, dead)
         db.commit()
-        print(f"[PUSH] disabled {n} dead token(s)")
+        logger.info("disabled %s dead token(s)", n)
     except Exception as e:  # noqa: BLE001
         db.rollback()
-        print(f"[PUSH] could not disable dead tokens: {e}")
+        logger.warning("could not disable dead tokens: %s", e)
     finally:
         db.close()
 

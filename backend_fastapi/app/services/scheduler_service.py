@@ -1,11 +1,14 @@
 # app/services/scheduler_service.py
 import asyncio
+import logging
 from datetime import date, datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..core.query_utils import now_ist
 from .petpooja_service import sync_all_active_outlets_by_fetch_date
+
+logger = logging.getLogger("scheduler")
 
 scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
 
@@ -22,13 +25,18 @@ async def run_sync_job():
         # still "yesterday", which would shrink the window and drop the
         # after-midnight bills that belong to the business day being finalized.
         fetch_for_date = now_ist().date()
-        print(f"[AUTO SYNC] Starting Deep Sync for: {fetch_for_date}")
+        logger.info("[AUTO SYNC] Starting Deep Sync for: %s", fetch_for_date)
         result = await sync_all_active_outlets_by_fetch_date(
             db=db, fetch_for_date=fetch_for_date, force_refresh=True
         )
-        print(f"[AUTO SYNC] Completed | Outlets Synced={result['outlets_synced']}")
-    except Exception as e:
-        print(f"[AUTO SYNC] Failed | Error: {e}")
+        synced = result.get("outlets_synced", 0)
+        failed = result.get("outlets_failed", 0)
+        if failed:
+            logger.warning("[AUTO SYNC] Completed WITH FAILURES | synced=%s failed=%s", synced, failed)
+        else:
+            logger.info("[AUTO SYNC] Completed | outlets=%s", synced)
+    except Exception:
+        logger.exception("[AUTO SYNC] Failed")
     finally:
         db.close()
 
@@ -50,7 +58,7 @@ async def auto_close_expired_tickets():
         for ticket in expired:
             ticket.status = "CLOSED"
             ticket.closed_at = datetime.utcnow()
-            print(f"[AUTO_CLOSE] Ticket #{ticket.id} closed after {VERIFICATION_WINDOW_HOURS}h window.")
+            logger.info("[AUTO_CLOSE] Ticket #%s closed after %sh window.", ticket.id, VERIFICATION_WINDOW_HOURS)
 
         if expired:
             db.commit()
@@ -95,10 +103,10 @@ async def auto_close_expired_tickets():
                         outlet_id=None,
                     )
                 except Exception as ne:
-                    print(f"[AUTO_CLOSE] notice failed for #{ticket.id}: {ne}")
+                    logger.warning("[AUTO_CLOSE] notice failed for #%s: %s", ticket.id, ne)
     except Exception as e:
         db.rollback()
-        print(f"[AUTO_CLOSE] Error: {e}")
+        logger.exception("[AUTO_CLOSE] Error")
     finally:
         db.close()
 
@@ -207,11 +215,11 @@ async def auto_close_forgotten_attendance():
                             recipient_staff_id=rec.staff_id,
                         )
                 except Exception as ne:
-                    print(f"[AUTO_CLOSE_ATT] notice failed: {ne}")
-            print(f"[AUTO_CLOSE_ATT] Auto-closed {len(closed)} forgotten check-out(s).")
+                    logger.warning("[AUTO_CLOSE_ATT] notice failed: %s", ne)
+            logger.info("[AUTO_CLOSE_ATT] Auto-closed %s forgotten check-out(s).", len(closed))
     except Exception as e:
         db.rollback()
-        print(f"[AUTO_CLOSE_ATT] Error: {e}")
+        logger.exception("[AUTO_CLOSE_ATT] Error")
     finally:
         db.close()
 
@@ -251,16 +259,16 @@ def start_scheduler():
     # never displayed — every sales range ends at "yesterday" — so this is safe.
     try:
         asyncio.get_running_loop().create_task(run_sync_job())
-        print("[SCHEDULER] Boot sync scheduled ✓")
+        logger.info("[SCHEDULER] Boot sync scheduled")
     except RuntimeError:
         # No running loop (e.g. called outside async context) — skip; the cron
         # jobs will still run on schedule.
         pass
 
-    print("[SCHEDULER] Started | Deep Sync 3AM/1PM/7PM IST | Auto-close hourly")
+    logger.info("[SCHEDULER] Started | Deep Sync 3AM/1PM/7PM IST | Auto-close hourly")
 
 
 def stop_scheduler():
     if scheduler.running:
         scheduler.shutdown(wait=False)
-        print("[SCHEDULER] Stopped")
+        logger.info("[SCHEDULER] Stopped")
