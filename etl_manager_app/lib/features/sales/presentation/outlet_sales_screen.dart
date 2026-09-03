@@ -20,14 +20,14 @@ const _warn = Color(0xFFF59E0B);
 const _accent = Color(0xFFDEFF9A); // Lime green
 
 const _periodLabels = [
-  'Day',
-  'Week',
-  'Month',
-  'Year',
+  'Yesterday',
+  'This Week',
+  'This Month',
+  'This Year',
   'Custom',
 ];
 const _periods = [
-  SalesPeriod.day,
+  SalesPeriod.yesterday,
   SalesPeriod.week,
   SalesPeriod.month,
   SalesPeriod.year,
@@ -87,7 +87,7 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
       if (oid != null) {
         ref
             .read(salesNotifierProvider.notifier)
-            .selectPeriod(SalesPeriod.day, outletId: oid, allCourts: false);
+            .fetchSummary(outletId: oid, period: SalesPeriod.yesterday);
       }
     });
   }
@@ -109,17 +109,12 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
   }
 
   void _onPeriodTap(SalesPeriod period) async {
-    final notifier = ref.read(salesNotifierProvider.notifier);
     if (period == SalesPeriod.custom) {
-      final yesterday = DateTime.now().subtract(const Duration(days: 1));
-      final DateTimeRange? picked = await showDateRangePicker(
+      final DateTime? pickedDate = await showDatePicker(
         context: context,
+        initialDate: DateTime.now().subtract(const Duration(days: 1)),
         firstDate: DateTime(2024),
-        lastDate: yesterday,
-        initialDateRange: DateTimeRange(
-          start: yesterday.subtract(const Duration(days: 6)),
-          end: yesterday,
-        ),
+        lastDate: DateTime.now(),
         builder: (ctx, child) => Theme(
           data: ThemeData.dark().copyWith(
             colorScheme: const ColorScheme.dark(
@@ -133,17 +128,23 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
         ),
       );
 
-      if (picked == null || !mounted) return;
+      if (pickedDate == null || !mounted) return;
       HapticFeedback.selectionClick();
-      notifier.selectCustomRange(
-        picked.start,
-        picked.end,
-        outletId: _outletId,
-        allCourts: false,
-      );
+
+      final dateStr = pickedDate.toIso8601String().split('T').first;
+      ref
+          .read(salesNotifierProvider.notifier)
+          .fetchSummary(
+            outletId: _outletId,
+            period: SalesPeriod.custom,
+            customDateFrom: dateStr,
+            customDateTo: dateStr,
+          );
     } else {
       HapticFeedback.selectionClick();
-      notifier.selectPeriod(period, outletId: _outletId, allCourts: false);
+      ref
+          .read(salesNotifierProvider.notifier)
+          .fetchSummary(outletId: _outletId, period: period);
     }
   }
 
@@ -151,6 +152,21 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     if (v >= 100000) return '${(v / 100000).toStringAsFixed(2)}L';
     if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
     return v.toStringAsFixed(0);
+  }
+
+  String _periodLabel(SalesPeriod p, String? date) {
+    switch (p) {
+      case SalesPeriod.yesterday:
+        return date ?? 'Yesterday';
+      case SalesPeriod.week:
+        return 'Current Week';
+      case SalesPeriod.month:
+        return 'Current Month';
+      case SalesPeriod.year:
+        return 'Annual Gross';
+      case SalesPeriod.custom:
+        return date ?? 'Selected Date';
+    }
   }
 
   @override
@@ -174,9 +190,12 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
     // for the newly-selected outlet.
     ref.listen<int?>(selectedOutletIdProvider, (prev, next) {
       if (next != null && prev != next) {
-        ref
-            .read(salesNotifierProvider.notifier)
-            .selectScope(outletId: next, allCourts: false);
+        ref.read(salesNotifierProvider.notifier).fetchSummary(
+              outletId: next,
+              period: salesState.period,
+              customDateFrom: salesState.customDateFrom,
+              customDateTo: salesState.customDateTo,
+            );
         ref.invalidate(weeklyInsightsProvider);
       }
     });
@@ -229,8 +248,13 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                               AnimatedSwitcher(
                                 duration: const Duration(milliseconds: 300),
                                 child: Text(
-                                  salesState.range.label,
-                                  key: ValueKey(salesState.range.label),
+                                  _periodLabel(
+                                    salesState.period,
+                                    summary?.date,
+                                  ),
+                                  key: ValueKey(
+                                    '${salesState.period}_${summary?.date}',
+                                  ),
                                   style: GoogleFonts.inter(
                                     fontSize: 12,
                                     color: _white,
@@ -308,7 +332,12 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                         HapticFeedback.mediumImpact();
                         ref
                             .read(salesNotifierProvider.notifier)
-                            .selectScope(outletId: _outletId, allCourts: false);
+                            .fetchSummary(
+                              outletId: _outletId,
+                              period: salesState.period,
+                              customDateFrom: salesState.customDateFrom,
+                              customDateTo: salesState.customDateTo,
+                            );
                         ref.invalidate(weeklyInsightsProvider);
                       },
                       child: ListView(
@@ -339,30 +368,7 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                               ),
                             ),
                           ),
-                          const SizedBox(height: 14),
-
-                          // Range navigator: ‹ prev · label · next ›
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            child: _OutletRangeNavBar(
-                              label: salesState.range.label,
-                              canPrev: salesState.canGoPrev,
-                              canNext: salesState.canGoNext,
-                              onPrev: () {
-                                HapticFeedback.selectionClick();
-                                ref
-                                    .read(salesNotifierProvider.notifier)
-                                    .shift(-1);
-                              },
-                              onNext: () {
-                                HapticFeedback.selectionClick();
-                                ref
-                                    .read(salesNotifierProvider.notifier)
-                                    .shift(1);
-                              },
-                            ),
-                          ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 40),
 
                           // Core Analytics
                           Padding(
@@ -1044,91 +1050,4 @@ class _ErrorRow extends StatelessWidget {
       ],
     ),
   );
-}
-
-
-
-// ── Range navigator (‹ prev · label · next ›) — light canvas ──────────────────
-class _OutletRangeNavBar extends StatelessWidget {
-  final String label;
-  final bool canPrev;
-  final bool canNext;
-  final VoidCallback onPrev;
-  final VoidCallback onNext;
-  const _OutletRangeNavBar({
-    required this.label,
-    required this.canPrev,
-    required this.canNext,
-    required this.onPrev,
-    required this.onNext,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 42,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F2F2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFECECEC), width: 1),
-      ),
-      child: Row(
-        children: [
-          _OutletNavArrow(
-            icon: Icons.chevron_left_rounded,
-            enabled: canPrev,
-            onTap: onPrev,
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: _black,
-                  letterSpacing: -0.2,
-                ),
-              ),
-            ),
-          ),
-          _OutletNavArrow(
-            icon: Icons.chevron_right_rounded,
-            enabled: canNext,
-            onTap: onNext,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OutletNavArrow extends StatelessWidget {
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback onTap;
-  const _OutletNavArrow({
-    required this.icon,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 46,
-        height: 42,
-        child: Icon(
-          icon,
-          size: 24,
-          color: enabled ? _black : _grey.withOpacity(0.35),
-        ),
-      ),
-    );
-  }
 }
