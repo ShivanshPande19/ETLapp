@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
 import '../data/sales_repository.dart';
-import '../domain/sales_notifier.dart';
 import 'package:flutter/services.dart';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -52,7 +50,7 @@ void showVendorDetail({
 
 // ── Sheet ─────────────────────────────────────────────────────────────────────
 
-class _VendorDetailSheet extends ConsumerStatefulWidget {
+class _VendorDetailSheet extends StatefulWidget {
   final String vendorName;
   final int courtId;
   final SalesRepository repo;
@@ -63,10 +61,10 @@ class _VendorDetailSheet extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<_VendorDetailSheet> createState() => _VendorDetailSheetState();
+  State<_VendorDetailSheet> createState() => _VendorDetailSheetState();
 }
 
-class _VendorDetailSheetState extends ConsumerState<_VendorDetailSheet>
+class _VendorDetailSheetState extends State<_VendorDetailSheet>
     with SingleTickerProviderStateMixin {
   VendorHistory? _data;
   bool _loading = true;
@@ -88,14 +86,9 @@ class _VendorDetailSheetState extends ConsumerState<_VendorDetailSheet>
 
   Future<void> _load() async {
     try {
-      // Use the SAME range the sales screen is showing, so a brand's detail
-      // numbers match the selected period exactly (previously always 7 days).
-      final range = ref.read(salesNotifierProvider).range;
       final result = await widget.repo.fetchVendorHistory(
         vendorName: widget.vendorName,
         courtId: widget.courtId,
-        dateFrom: range.fromStr,
-        dateTo: range.toStr,
       );
 
       if (mounted) {

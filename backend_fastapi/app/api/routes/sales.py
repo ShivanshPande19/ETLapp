@@ -106,8 +106,6 @@ async def sales_trend(
     court_id: Optional[int] = Query(None),
     outlet_id: Optional[int] = Query(None),
     period: str = Query("yesterday"),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -118,8 +116,6 @@ async def sales_trend(
         outlet_id=outlet_id,
         outlet_ids=outlet_ids,
         period=period,
-        date_from=date_from,
-        date_to=date_to,
     )
 
 
@@ -128,8 +124,6 @@ async def vendor_history(
     vendor_name: Optional[str] = Query(None), # ✅ NAYA: Made optional
     court_id: Optional[int] = Query(None),    # ✅ NAYA: Made optional
     outlet_id: Optional[int] = Query(None),   # ✅ NAYA: Added outlet_id
-    date_from: Optional[str] = Query(None),   # ✅ range-aware per-brand detail
-    date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -142,8 +136,6 @@ async def vendor_history(
             vendor_name=vendor_name,
             court_id=court_id,
             outlet_id=outlet_id, # ✅ Service ko id pass kardi
-            date_from=date_from,
-            date_to=date_to,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
