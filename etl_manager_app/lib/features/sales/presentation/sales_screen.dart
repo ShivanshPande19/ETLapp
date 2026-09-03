@@ -19,9 +19,9 @@ const _cardBorder = Color(0xFFECECEC); // soft light border for premium cards
 
 // ── Period config ─────────────────────────────────────────────────────────────
 
-const _periodLabels = ['Yesterday', 'Week', 'Month', 'Year', 'Custom'];
+const _periodLabels = ['Day', 'Week', 'Month', 'Year', 'Custom'];
 const _periods = [
-  SalesPeriod.yesterday,
+  SalesPeriod.day,
   SalesPeriod.week,
   SalesPeriod.month,
   SalesPeriod.year,
@@ -84,12 +84,18 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
   // ── Period change — triggers content fade ─────────────────────────────────
 
   void _onPeriodTap(SalesPeriod period, int? courtId) async {
+    final notifier = ref.read(salesNotifierProvider.notifier);
     if (period == SalesPeriod.custom) {
-      final DateTime? pickedDate = await showDatePicker(
+      // A real from–to range picker (e.g. 1–31 Aug), capped at yesterday.
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      final DateTimeRange? picked = await showDateRangePicker(
         context: context,
-        initialDate: DateTime.now().subtract(const Duration(days: 1)),
         firstDate: DateTime(2024),
-        lastDate: DateTime.now(),
+        lastDate: yesterday,
+        initialDateRange: DateTimeRange(
+          start: yesterday.subtract(const Duration(days: 6)),
+          end: yesterday,
+        ),
         builder: (ctx, child) => Theme(
           data: ThemeData.dark().copyWith(
             colorScheme: const ColorScheme.dark(
@@ -103,24 +109,17 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
         ),
       );
 
-      if (pickedDate == null || !mounted) return;
+      if (picked == null || !mounted) return;
       HapticFeedback.selectionClick();
-
-      final dateStr = pickedDate.toIso8601String().split('T').first;
-
-      ref
-          .read(salesNotifierProvider.notifier)
-          .fetchSummary(
-            courtId: courtId,
-            period: SalesPeriod.custom,
-            customDateFrom: dateStr,
-            customDateTo: dateStr,
-          );
+      notifier.selectCustomRange(
+        picked.start,
+        picked.end,
+        courtId: courtId,
+        allCourts: courtId == null,
+      );
     } else {
       HapticFeedback.selectionClick();
-      ref
-          .read(salesNotifierProvider.notifier)
-          .fetchSummary(courtId: courtId, period: period);
+      notifier.selectPeriod(period, courtId: courtId, allCourts: courtId == null);
     }
   }
 
@@ -143,20 +142,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
     return v.toStringAsFixed(0);
   }
 
-  String _periodLabel(SalesPeriod p, String? date) {
-    switch (p) {
-      case SalesPeriod.yesterday:
-        return date ?? 'Yesterday';
-      case SalesPeriod.week:
-        return 'This Week';
-      case SalesPeriod.month:
-        return 'This Month';
-      case SalesPeriod.year:
-        return 'This Year';
-      case SalesPeriod.custom:
-        return date ?? 'Custom Date';
-    }
-  }
+
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -227,10 +213,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      _periodLabel(
-                                        salesState.period,
-                                        summary?.date,
-                                      ),
+                                      salesState.range.label,
                                       style: GoogleFonts.inter(
                                         fontSize: 12,
                                         color: Colors.white70,
@@ -326,14 +309,8 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                       color: _black,
                       backgroundColor: _white,
                       strokeWidth: 2,
-                      onRefresh: () => ref
-                          .read(salesNotifierProvider.notifier)
-                          .fetchSummary(
-                            courtId: salesState.selectedCourtId,
-                            period: salesState.period,
-                            customDateFrom: salesState.customDateFrom,
-                            customDateTo: salesState.customDateTo,
-                          ),
+                      onRefresh: () =>
+                          ref.read(salesNotifierProvider.notifier).selectScope(),
                       child: SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         child: Column(
@@ -352,12 +329,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                             HapticFeedback.selectionClick();
                             ref
                                 .read(salesNotifierProvider.notifier)
-                                .fetchSummary(
-                                  courtId: id,
-                                  period: salesState.period,
-                                  customDateFrom: salesState.customDateFrom,
-                                  customDateTo: salesState.customDateTo,
-                                );
+                                .selectScope(courtId: id, allCourts: id == null);
                           },
                         ),
                       ),
@@ -381,6 +353,25 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                               ),
                             ),
                           ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // ── Range navigator: ‹ prev · label · next › ─────
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: _RangeNavBar(
+                          label: salesState.range.label,
+                          canPrev: salesState.canGoPrev,
+                          canNext: salesState.canGoNext,
+                          onPrev: () {
+                            HapticFeedback.selectionClick();
+                            ref.read(salesNotifierProvider.notifier).shift(-1);
+                          },
+                          onNext: () {
+                            HapticFeedback.selectionClick();
+                            ref.read(salesNotifierProvider.notifier).shift(1);
+                          },
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -422,13 +413,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                   child: _SalesErrorState(
                                     onRetry: () => ref
                                         .read(salesNotifierProvider.notifier)
-                                        .fetchSummary(
-                                          courtId: salesState.selectedCourtId,
-                                          period: salesState.period,
-                                          customDateFrom:
-                                              salesState.customDateFrom,
-                                          customDateTo: salesState.customDateTo,
-                                        ),
+                                        .selectScope(),
                                   ),
                                 )
                               else if (isLoading && summary == null) ...[
@@ -465,10 +450,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                         salesState.selectedCourtId != null,
                                     hasOutlets: summary != null &&
                                         summary.vendors.isNotEmpty,
-                                    periodLabel: _periodLabel(
-                                      salesState.period,
-                                      summary?.date,
-                                    ),
+                                    periodLabel: salesState.range.label,
                                   ),
                                 )
                               else ...[
@@ -1364,7 +1346,7 @@ class _SalesTrendChart extends StatelessWidget {
 
   String get _title {
     switch (period) {
-      case SalesPeriod.yesterday:
+      case SalesPeriod.day:
         return 'Last 7 days';
       case SalesPeriod.week:
         return 'This week';
@@ -1732,6 +1714,95 @@ class _SalesErrorState extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+
+// ── Range navigator (‹ prev · label · next ›) ─────────────────────────────────
+// Moves the selected Day/Week/Month/Year by one unit. Disabled for custom
+// ranges and when the next step would run past yesterday.
+class _RangeNavBar extends StatelessWidget {
+  final String label;
+  final bool canPrev;
+  final bool canNext;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  const _RangeNavBar({
+    required this.label,
+    required this.canPrev,
+    required this.canNext,
+    required this.onPrev,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 42,
+      decoration: BoxDecoration(
+        color: _lightGrey,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _cardBorder, width: 1),
+      ),
+      child: Row(
+        children: [
+          _NavArrow(
+            icon: Icons.chevron_left_rounded,
+            enabled: canPrev,
+            onTap: onPrev,
+          ),
+          Expanded(
+            child: Center(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: _black,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+          ),
+          _NavArrow(
+            icon: Icons.chevron_right_rounded,
+            enabled: canNext,
+            onTap: onNext,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavArrow extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _NavArrow({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 46,
+        height: 42,
+        child: Icon(
+          icon,
+          size: 24,
+          color: enabled ? _black : _grey.withOpacity(0.35),
+        ),
       ),
     );
   }

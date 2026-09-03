@@ -218,6 +218,8 @@ class SalesRepository {
     int? courtId,
     int? outletId, // ✅ P0-3
     String period = 'yesterday',
+    String? dateFrom, // ✅ range-driven chart
+    String? dateTo,
   }) async {
     final response = await _dio.get(
       '/sales/trend',
@@ -225,6 +227,8 @@ class SalesRepository {
         'period': period,
         if (courtId != null) 'court_id': courtId,
         if (outletId != null) 'outlet_id': outletId,
+        if (dateFrom != null) 'date_from': dateFrom,
+        if (dateTo != null) 'date_to': dateTo,
       },
     );
     return SalesTrend.fromJson(response.data as Map<String, dynamic>);
@@ -233,10 +237,19 @@ class SalesRepository {
   Future<VendorHistory> fetchVendorHistory({
     required String vendorName,
     required int courtId,
+    int? outletId,
+    String? dateFrom, // ✅ per-brand numbers for the SELECTED range
+    String? dateTo,
   }) async {
     final response = await _dio.get(
       '/sales/vendor/history',
-      queryParameters: {'vendor_name': vendorName, 'court_id': courtId},
+      queryParameters: <String, dynamic>{
+        'vendor_name': vendorName,
+        'court_id': courtId,
+        if (outletId != null) 'outlet_id': outletId,
+        if (dateFrom != null) 'date_from': dateFrom,
+        if (dateTo != null) 'date_to': dateTo,
+      },
     );
     return VendorHistory.fromJson(response.data as Map<String, dynamic>);
   }
