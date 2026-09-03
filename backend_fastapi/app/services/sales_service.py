@@ -34,6 +34,18 @@ def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str
     today = now_ist().date()
     yesterday = today - timedelta(days=1)
 
+    # Explicit window wins over any preset. The client sends concrete from/to
+    # for a picked day, a custom range, AND for "previous week/month/year"
+    # (which it computes), so the backend just sums that window. Same date twice
+    # => that single day.
+    if date_from and date_to:
+        s = date.fromisoformat(date_from)
+        e = date.fromisoformat(date_to)
+        return (s, e) if s <= e else (e, s)
+    if date_from:
+        single_date = date.fromisoformat(date_from)
+        return single_date, single_date
+
     clean_period = period.lower().replace("this_", "")
 
     if clean_period == "yesterday":
@@ -51,11 +63,6 @@ def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str
     if clean_period == "year":
         # Current calendar year so far: Jan 1 -> yesterday.
         return today.replace(month=1, day=1), yesterday
-
-    # FIX: Custom select karne par range nahi, balki exact SINGLE DATE pick hogi
-    if clean_period == "custom" and date_from:
-        single_date = date.fromisoformat(date_from)
-        return single_date, single_date  # Dono ko same day kar diya taaki exact match ho
 
     return yesterday, yesterday
 
@@ -222,6 +229,8 @@ async def get_sales_trend(
     outlet_id: Optional[int] = None,
     period: str = "yesterday",
     outlet_ids: Optional[list[int]] = None,  # ✓ MULTI-OUTLET: aggregate over a set
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> SalesTrendResponse:
     """Daily/monthly time-series for the sales chart, scoped to all courts, one
     court, one outlet, or an explicit set of outlets (a multi-outlet owner).
@@ -246,6 +255,45 @@ async def get_sales_trend(
     bucket = "daily"
 
     yday = today - timedelta(days=1)
+
+    # ── Explicit range (custom range OR a "previous" period from the client) →
+    #    adaptive buckets so the chart matches the selected window. ───────────
+    if date_from and date_to:
+        s = date.fromisoformat(date_from)
+        e = date.fromisoformat(date_to)
+        if s > e:
+            s, e = e, s
+        e = min(e, yday)
+        rp: list[SalesTrendPoint] = []
+        bkt = "daily"
+        if outlet_ids and s <= e:
+            span = (e - s).days + 1
+            if span <= 31:
+                bkt = "daily"
+                d = s
+                while d <= e:
+                    ts, tb = range_totals(d, d)
+                    rp.append(SalesTrendPoint(label=d.strftime("%d %b"), date=str(d), total_sales=ts, total_bills=tb))
+                    d += timedelta(days=1)
+            elif span <= 92:
+                bkt = "weekly"
+                ws = s
+                while ws <= e:
+                    we = min(ws + timedelta(days=6), e)
+                    ts, tb = range_totals(ws, we)
+                    rp.append(SalesTrendPoint(label=ws.strftime("%d %b"), date=str(ws), total_sales=ts, total_bills=tb))
+                    ws = we + timedelta(days=1)
+            else:
+                bkt = "monthly"
+                y, mm = s.year, s.month
+                while date(y, mm, 1) <= e:
+                    m_start = date(y, mm, 1)
+                    nxt = date(y + 1, 1, 1) if mm == 12 else date(y, mm + 1, 1)
+                    m_end = min(nxt - timedelta(days=1), e)
+                    ts, tb = range_totals(max(m_start, s), m_end)
+                    rp.append(SalesTrendPoint(label=month_abbr[mm], date=str(m_start), total_sales=ts, total_bills=tb))
+                    y, mm = (y + 1, 1) if mm == 12 else (y, mm + 1)
+        return SalesTrendResponse(period=period, bucket=bkt, points=rp)
 
     def totals_upto_yesterday(s: date, e: date) -> tuple[float, int]:
         # Count only completed business days (<= yesterday). Buckets that lie in
