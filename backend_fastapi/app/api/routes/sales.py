@@ -106,6 +106,8 @@ async def sales_trend(
     court_id: Optional[int] = Query(None),
     outlet_id: Optional[int] = Query(None),
     period: str = Query("yesterday"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -116,6 +118,8 @@ async def sales_trend(
         outlet_id=outlet_id,
         outlet_ids=outlet_ids,
         period=period,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 

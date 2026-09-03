@@ -84,44 +84,136 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
   // ── Period change — triggers content fade ─────────────────────────────────
 
   void _onPeriodTap(SalesPeriod period, int? courtId) async {
+    HapticFeedback.selectionClick();
     if (period == SalesPeriod.custom) {
-      final DateTime? pickedDate = await showDatePicker(
-        context: context,
-        initialDate: DateTime.now().subtract(const Duration(days: 1)),
-        firstDate: DateTime(2024),
-        lastDate: DateTime.now(),
-        builder: (ctx, child) => Theme(
-          data: ThemeData.dark().copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: _white,
-              onPrimary: _black,
-              surface: Color(0xFF1A1A1A),
-              onSurface: _white,
-            ),
-          ),
-          child: child!,
-        ),
-      );
-
-      if (pickedDate == null || !mounted) return;
-      HapticFeedback.selectionClick();
-
-      final dateStr = pickedDate.toIso8601String().split('T').first;
-
-      ref
-          .read(salesNotifierProvider.notifier)
-          .fetchSummary(
-            courtId: courtId,
-            period: SalesPeriod.custom,
-            customDateFrom: dateStr,
-            customDateTo: dateStr,
-          );
+      _openCustomRange(courtId);
     } else {
-      HapticFeedback.selectionClick();
+      // Selecting a chip always starts at "this" period (offset 0). The user
+      // steps to previous periods via the clickable date pill.
       ref
           .read(salesNotifierProvider.notifier)
-          .fetchSummary(courtId: courtId, period: period);
+          .fetchSummary(courtId: courtId, period: period, periodOffset: 0);
     }
+  }
+
+  // Custom range picker: pick a single day (tap the same date twice) OR a
+  // from–to range. Capped at yesterday (today isn't synced yet).
+  Future<void> _openCustomRange(int? courtId) async {
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate: yesterday,
+      initialDateRange: DateTimeRange(
+        start: yesterday.subtract(const Duration(days: 6)),
+        end: yesterday,
+      ),
+      builder: (ctx, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: _white,
+            onPrimary: _black,
+            surface: Color(0xFF1A1A1A),
+            onSurface: _white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    HapticFeedback.selectionClick();
+    final from = picked.start.toIso8601String().split('T').first;
+    final to = picked.end.toIso8601String().split('T').first;
+    ref.read(salesNotifierProvider.notifier).fetchSummary(
+          courtId: courtId,
+          period: SalesPeriod.custom,
+          customDateFrom: from,
+          customDateTo: to,
+        );
+  }
+
+  // Tapping the date pill: for Week/Month/Year show This + previous periods to
+  // jump back; always offer a custom range. (Yesterday/Custom → custom only.)
+  void _showPeriodMenu(SalesState st) {
+    final period = st.period;
+    final courtId = st.selectedCourtId;
+    int count;
+    switch (period) {
+      case SalesPeriod.week:
+        count = 8;
+        break;
+      case SalesPeriod.month:
+        count = 12;
+        break;
+      case SalesPeriod.year:
+        count = 4;
+        break;
+      default:
+        count = 0; // yesterday / custom → only the custom-range option
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE5E5E5),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 6),
+            for (int i = 0; i < count; i++)
+              ListTile(
+                dense: true,
+                title: Text(
+                  periodWindow(period, i).label,
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    color: _black,
+                  ),
+                ),
+                trailing: i == st.periodOffset
+                    ? const Icon(Icons.check_rounded, color: _accent, size: 20)
+                    : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  HapticFeedback.selectionClick();
+                  ref.read(salesNotifierProvider.notifier).fetchSummary(
+                        courtId: courtId,
+                        period: period,
+                        periodOffset: i,
+                      );
+                },
+              ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.date_range_rounded, color: _black),
+              title: Text(
+                'Custom range…',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  color: _black,
+                ),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openCustomRange(courtId);
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -218,26 +310,37 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                     color: Colors.white.withOpacity(0.12),
                                   ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.calendar_today_rounded,
-                                      size: 12,
-                                      color: Colors.white.withOpacity(0.6),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _periodLabel(
-                                        salesState.period,
-                                        summary?.date,
+                                child: GestureDetector(
+                                  onTap: () => _showPeriodMenu(salesState),
+                                  behavior: HitTestBehavior.opaque,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today_rounded,
+                                        size: 12,
+                                        color: Colors.white.withOpacity(0.6),
                                       ),
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: Colors.white70,
-                                        fontWeight: FontWeight.w500,
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        salesState.rangeLabel ??
+                                            _periodLabel(
+                                              salesState.period,
+                                              summary?.date,
+                                            ),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          color: Colors.white70,
+                                          fontWeight: FontWeight.w500,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 4),
+                                      Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                        size: 15,
+                                        color: Colors.white.withOpacity(0.6),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -331,6 +434,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                           .fetchSummary(
                             courtId: salesState.selectedCourtId,
                             period: salesState.period,
+                            periodOffset: salesState.periodOffset,
                             customDateFrom: salesState.customDateFrom,
                             customDateTo: salesState.customDateTo,
                           ),
@@ -355,6 +459,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                 .fetchSummary(
                                   courtId: id,
                                   period: salesState.period,
+                                  periodOffset: salesState.periodOffset,
                                   customDateFrom: salesState.customDateFrom,
                                   customDateTo: salesState.customDateTo,
                                 );
@@ -425,6 +530,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                                         .fetchSummary(
                                           courtId: salesState.selectedCourtId,
                                           period: salesState.period,
+                                          periodOffset: salesState.periodOffset,
                                           customDateFrom:
                                               salesState.customDateFrom,
                                           customDateTo: salesState.customDateTo,
