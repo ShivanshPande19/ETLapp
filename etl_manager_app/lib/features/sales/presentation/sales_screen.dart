@@ -153,25 +153,27 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
     }
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true, // render ABOVE the bottom nav bar
       backgroundColor: _white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE5E5E5),
-                borderRadius: BorderRadius.circular(999),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E5E5),
+                  borderRadius: BorderRadius.circular(999),
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            for (int i = 0; i < count; i++)
+              const SizedBox(height: 6),
+              for (int i = 0; i < count; i++)
               ListTile(
                 dense: true,
                 title: Text(
@@ -211,6 +213,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
             ),
             const SizedBox(height: 10),
           ],
+          ),
         ),
       ),
     );
