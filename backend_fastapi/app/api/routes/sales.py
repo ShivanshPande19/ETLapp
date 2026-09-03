@@ -16,6 +16,20 @@ from ..deps import get_current_user, require_etl_manager, CurrentUser
 router = APIRouter()
 
 
+def _validate_date_params(date_from: Optional[str], date_to: Optional[str]) -> None:
+    """Reject malformed date_from/date_to with a clean 400 (instead of letting
+    date.fromisoformat raise deep in the service → 500)."""
+    for label, value in (("date_from", date_from), ("date_to", date_to)):
+        if value:
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid {label}. Use YYYY-MM-DD.",
+                )
+
+
 def _scope_outlets(
     user: CurrentUser,
     court_id: Optional[int],
@@ -89,6 +103,7 @@ async def sales_summary(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
+    _validate_date_params(date_from, date_to)
     court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
     return await get_sales_summary(
         db=db,
@@ -111,6 +126,7 @@ async def sales_trend(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
+    _validate_date_params(date_from, date_to)
     court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
     return await get_sales_trend(
         db=db,

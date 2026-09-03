@@ -239,9 +239,26 @@ class SalesNotifier extends Notifier<SalesState> {
   }
 
   void _applyScope({int? courtId, int? outletId, bool? allCourts}) {
-    if (allCourts != null) _allCourts = allCourts;
-    if (courtId != null || allCourts == true) _courtId = allCourts == true ? null : courtId;
-    if (outletId != null) _outletId = outletId;
+    // Scopes are mutually exclusive. Crucially we CLEAR the others so a stale
+    // scope can't leak — e.g. an outlet manager's outlet_id must not survive
+    // into an ETL manager's court view on the shared, app-lifetime notifier.
+    if (outletId != null) {
+      // Outlet-scoped view (outlet manager): exactly one outlet, no court.
+      _outletId = outletId;
+      _courtId = null;
+      _allCourts = false;
+    } else if (allCourts == true) {
+      // All courts (ETL manager): clear any court/outlet scope.
+      _allCourts = true;
+      _courtId = null;
+      _outletId = null;
+    } else if (courtId != null) {
+      // Specific court (ETL manager): clear any stale outlet scope.
+      _allCourts = false;
+      _courtId = courtId;
+      _outletId = null;
+    }
+    // No args → no scope change (used by refresh / retry).
   }
 
   // ── Core fetch ──────────────────────────────────────────────────────────────
