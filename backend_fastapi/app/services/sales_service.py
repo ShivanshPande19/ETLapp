@@ -34,30 +34,102 @@ def _get_date_range(period: str, date_from: Optional[str], date_to: Optional[str
     today = now_ist().date()
     yesterday = today - timedelta(days=1)
 
+    # ── Explicit range wins over any preset ──────────────────────────────────
+    # The client computes concrete from/to for EVERY selection (a single day,
+    # this/previous week, this/previous month, this/previous year, or a fully
+    # custom range) and sends them here, so the backend is the single, simple
+    # "sum this window" engine. This removes all the old ambiguity where a
+    # preset silently meant "…up to yesterday".
+    if date_from and date_to:
+        s = date.fromisoformat(date_from)
+        e = date.fromisoformat(date_to)
+        return (s, e) if s <= e else (e, s)
+    if date_from:
+        # Single day (from only).
+        d = date.fromisoformat(date_from)
+        return d, d
+
+    # ── Fallback presets (used by callers that don't send explicit dates, e.g.
+    #    the court cards' "yesterday" quick view). All end at yesterday. ───────
     clean_period = period.lower().replace("this_", "")
-
-    if clean_period == "yesterday":
-        return yesterday, yesterday
-
     if clean_period == "week":
-        # Current calendar week so far: Monday of this week -> yesterday.
         return today - timedelta(days=today.weekday()), yesterday
-
     if clean_period == "month":
-        # Current calendar month so far: 1st of this month -> yesterday.
-        # (Previously a rolling last-30-days window, which bled into last month.)
         return today.replace(day=1), yesterday
-
     if clean_period == "year":
-        # Current calendar year so far: Jan 1 -> yesterday.
         return today.replace(month=1, day=1), yesterday
+    return yesterday, yesterday  # "yesterday" + any unknown
 
-    # FIX: Custom select karne par range nahi, balki exact SINGLE DATE pick hogi
-    if clean_period == "custom" and date_from:
-        single_date = date.fromisoformat(date_from)
-        return single_date, single_date  # Dono ko same day kar diya taaki exact match ho
 
-    return yesterday, yesterday
+def _bucket_series(
+    db: Session,
+    outlet_ids: list[int],
+    start: date,
+    end: date,
+) -> tuple[list[SalesTrendPoint], str]:
+    """Sum DailySaleCache across ``outlet_ids`` over ``[start, end]`` and split
+    it into a sensible number of chart points. Granularity adapts to the span
+    so a chart is never one fat bar nor thousands of thin ones:
+
+        span <= 31 days  -> one point PER DAY      (bucket="daily")
+        span <= 92 days  -> one point per 7 days    (bucket="weekly")
+        else             -> one point per month     (bucket="monthly")
+
+    Every point is capped at yesterday (IST) so today's in-progress sales never
+    appear — consistent with the summary.
+    """
+    yday = now_ist().date() - timedelta(days=1)
+    end = min(end, yday)
+    if not outlet_ids or start > end:
+        return [], "daily"
+
+    def totals(s: date, e: date) -> tuple[float, int]:
+        rows = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id.in_(outlet_ids),
+            DailySaleCache.sale_date >= s,
+            DailySaleCache.sale_date <= e,
+        ).all()
+        return round(sum(r.total_sales for r in rows), 2), sum(r.bill_count for r in rows)
+
+    points: list[SalesTrendPoint] = []
+    span = (end - start).days + 1
+
+    if span <= 31:
+        bucket = "daily"
+        d = start
+        while d <= end:
+            ts, tb = totals(d, d)
+            points.append(SalesTrendPoint(
+                label=d.strftime("%d %b"), date=str(d),
+                total_sales=ts, total_bills=tb,
+            ))
+            d += timedelta(days=1)
+    elif span <= 92:
+        bucket = "weekly"
+        s = start
+        while s <= end:
+            e = min(s + timedelta(days=6), end)
+            ts, tb = totals(s, e)
+            points.append(SalesTrendPoint(
+                label=s.strftime("%d %b"), date=str(s),
+                total_sales=ts, total_bills=tb,
+            ))
+            s = e + timedelta(days=1)
+    else:
+        bucket = "monthly"
+        y, mm = start.year, start.month
+        while date(y, mm, 1) <= end:
+            m_start = date(y, mm, 1)
+            nxt = date(y + 1, 1, 1) if mm == 12 else date(y, mm + 1, 1)
+            m_end = min(nxt - timedelta(days=1), end)
+            ts, tb = totals(max(m_start, start), m_end)
+            points.append(SalesTrendPoint(
+                label=month_abbr[mm], date=str(m_start),
+                total_sales=ts, total_bills=tb,
+            ))
+            y, mm = (y + 1, 1) if mm == 12 else (y, mm + 1)
+
+    return points, bucket
 
 def _date_label(start: date, end: date) -> str:
     if start == end:
@@ -133,6 +205,8 @@ async def get_vendor_history(
     vendor_name: Optional[str] = None, # ✓ Made Optional
     court_id: Optional[int] = None,    # ✓ Made Optional
     outlet_id: Optional[int] = None,   # ✓ Added outlet_id
+    date_from: Optional[str] = None,   # ✓ range-aware per-brand detail
+    date_to: Optional[str] = None,
 ) -> VendorHistoryResponse:
     
     # ✓ Smart routing: Agar outlet_id h toh seedha fetch, warna purana method
@@ -152,6 +226,61 @@ async def get_vendor_history(
 
     if not outlet:
         raise ValueError("Outlet not found")
+
+    # ── Range mode: per-brand numbers for the EXACT selected window ──────────
+    # This is what makes a brand's detail sheet match the range chosen on the
+    # sales screen (previously it was hard-wired to a rolling last-7-days view,
+    # so per-brand numbers never matched an arbitrary range).
+    if date_from and date_to:
+        s = date.fromisoformat(date_from)
+        e = date.fromisoformat(date_to)
+        if s > e:
+            s, e = e, s
+        yday = now_ist().date() - timedelta(days=1)
+        e = min(e, yday)
+
+        pts, _bucket = _bucket_series(db, [outlet.id], s, e)
+        daily_history = [
+            DailySnapshot(date=p.date, total_sales=p.total_sales, total_bills=p.total_bills)
+            for p in pts
+        ]
+        range_total = round(sum(p.total_sales for p in pts), 2)
+        range_bills = sum(p.total_bills for p in pts)
+
+        # Previous window of equal length (for a period-over-period delta).
+        prev_total = 0.0
+        if s <= e:
+            span_days = (e - s).days + 1
+            prev_end = s - timedelta(days=1)
+            prev_start = prev_end - timedelta(days=span_days - 1)
+            prev_rows = db.query(DailySaleCache).filter(
+                DailySaleCache.outlet_id == outlet.id,
+                DailySaleCache.sale_date >= prev_start,
+                DailySaleCache.sale_date <= prev_end,
+            ).all()
+            prev_total = round(sum(r.total_sales for r in prev_rows), 2)
+
+        best = max(daily_history, key=lambda x: x.total_sales) if daily_history else None
+
+        synced_rows = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id == outlet.id,
+            DailySaleCache.sale_date >= s,
+            DailySaleCache.sale_date <= e,
+        ).all()
+        last_synced = max((c.fetched_at for c in synced_rows if c.fetched_at), default=None)
+
+        return VendorHistoryResponse(
+            vendor_name=outlet.vendor_name,
+            source_system=_source_label(outlet.pos_source),
+            total_sales=range_total,
+            bill_count=range_bills,
+            avg_bill_value=round(range_total / range_bills, 2) if range_bills else 0.0,
+            last_synced=str(last_synced) if last_synced else "",
+            week_total=range_total,          # reused as "selected-range total"
+            last_week_total=prev_total,      # previous equal-length window
+            best_day=best.date if best else "",
+            daily_history=daily_history,
+        )
 
     today = now_ist().date()
     history = []
@@ -222,6 +351,8 @@ async def get_sales_trend(
     outlet_id: Optional[int] = None,
     period: str = "yesterday",
     outlet_ids: Optional[list[int]] = None,  # ✓ MULTI-OUTLET: aggregate over a set
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> SalesTrendResponse:
     """Daily/monthly time-series for the sales chart, scoped to all courts, one
     court, one outlet, or an explicit set of outlets (a multi-outlet owner).
@@ -231,6 +362,15 @@ async def get_sales_trend(
     clean = period.lower().replace("this_", "")
     # An explicit set wins (multi-outlet owner viewing "all my outlets").
     outlet_ids = list(outlet_ids) if outlet_ids is not None else _resolve_outlet_ids(db, court_id, outlet_id)
+
+    # ── Explicit range → span-adaptive buckets (matches the summary window) ──
+    if date_from and date_to:
+        s = date.fromisoformat(date_from)
+        e = date.fromisoformat(date_to)
+        if s > e:
+            s, e = e, s
+        pts, bucket = _bucket_series(db, outlet_ids, s, e)
+        return SalesTrendResponse(period=period, bucket=bucket, points=pts)
 
     def range_totals(start: date, end: date) -> tuple[float, int]:
         if not outlet_ids:
