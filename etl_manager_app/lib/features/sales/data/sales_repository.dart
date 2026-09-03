@@ -218,6 +218,8 @@ class SalesRepository {
     int? courtId,
     int? outletId, // ✅ P0-3
     String period = 'yesterday',
+    String? dateFrom, // range-aware chart (previous period / custom range)
+    String? dateTo,
   }) async {
     final response = await _dio.get(
       '/sales/trend',
@@ -225,6 +227,8 @@ class SalesRepository {
         'period': period,
         if (courtId != null) 'court_id': courtId,
         if (outletId != null) 'outlet_id': outletId,
+        if (dateFrom != null) 'date_from': dateFrom,
+        if (dateTo != null) 'date_to': dateTo,
       },
     );
     return SalesTrend.fromJson(response.data as Map<String, dynamic>);
