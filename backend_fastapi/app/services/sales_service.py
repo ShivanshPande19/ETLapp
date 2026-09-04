@@ -21,6 +21,7 @@ _SOURCE_LABELS = {
     "petpooja_generic": "Petpooja",
     "petpooja_salesdata": "Petpooja",
     "royal_pos": "Royal POS",
+    "rista": "Rista",
 }
 
 def _source_label(pos_source: Optional[str]) -> str:
