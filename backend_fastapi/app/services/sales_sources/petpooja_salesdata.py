@@ -5,15 +5,17 @@ the `get_sales_data` endpoint (e.g. **Coffee Vault** ``r6h4cd0k2sfi``). Unlike
 flavour A this endpoint:
 
 * authenticates with **query params** (no ``Cookie`` header);
-* returns a bill's ``Receipt Date`` + ``Transaction Time``. Petpooja files each
-  bill under this Receipt Date — the SAME day its own reports / "yesterday
-  sales" emails use (verified against Coffee Vault: post-midnight bills carry
-  the calendar date, e.g. a 02:00 bill on the 24th has Receipt Date = 24). So
-  we attribute strictly by Receipt Date. (Earlier we re-applied the court's
-  ``day_cutoff_hour`` here — that double-shifted post-midnight bills to the
-  previous operational day and made the app disagree with the Petpooja email on
-  late-night/weekend sales. ``cutoff_hour`` is therefore NOT used by this
-  source.);
+* returns a bill's ``Receipt Date`` + ``Transaction Time``. Petpooja's own
+  SALES DASHBOARD closes the operational day at 03:00 — a bill rung between
+  midnight and 02:59 belongs to the PREVIOUS day. We reproduce that here by
+  shifting any bill whose ``Transaction Time`` hour is ``< 3`` back one day
+  (:data:`SALESDATA_DAY_CUTOFF_HOUR`). This was pinned by reconciling this
+  endpoint against the dashboard for Coffee Vault to the rupee across multiple
+  days. (History: we first re-applied the court's attendance ``day_cutoff_hour``
+  of 5 → over-shifted; then dropped the cutoff entirely and attributed by raw
+  Receipt Date → matched the "yesterday sales" EMAIL but drifted a few hundred
+  to ~1.3k off the DASHBOARD both ways. The dashboard's true boundary is 03:00,
+  and it is intentionally SEPARATE from the court's attendance cutoff.);
 * keys bills by a per-outlet sequential ``Receipt number`` (safe here because
   ``sales_orders`` is unique on ``(outlet_id, source, external_ref)``);
 * reports the final amount in ``Net sale``;
@@ -24,9 +26,9 @@ Enabling Coffee Vault does NOT require any Petpooja remap: it uses this outlet's
 OWN per-outlet credentials (``outlet.pp_app_key/pp_app_secret/pp_access_token``)
 — the exact creds already proven to return this outlet's sales via
 `get_sales_data`. Go-live is just data/config: store those creds on the outlet
-row and set ``pos_source='petpooja_salesdata'``. (The court's
-``day_cutoff_hour`` does NOT affect this source — attribution follows Petpooja's
-Receipt Date.) See PROGRESS_MULTISOURCE.md, Phase 2.
+row and set ``pos_source='petpooja_salesdata'``. (Day attribution uses this
+source's own 03:00 cutoff — see :data:`SALESDATA_DAY_CUTOFF_HOUR` — NOT the
+court's attendance ``day_cutoff_hour``.) See PROGRESS_MULTISOURCE.md, Phase 2.
 
 The records array lives under the top-level ``"Records"`` key (confirmed against
 a live response during investigation); :func:`_extract_records` keeps a few
@@ -35,7 +37,7 @@ fallbacks for safety.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import List
 
 import httpx
@@ -47,6 +49,23 @@ from .base import NormalizedOrder, SalesSourceAdapter, register
 logger = logging.getLogger("sales.petpooja_salesdata")
 
 PETPOOJA_SALESDATA_URL = "https://api.petpooja.com/V1/orders/get_sales_data/"
+
+# ── Business-day cutoff for this source ──────────────────────────────────────
+# Petpooja's own SALES DASHBOARD closes the operational day at 03:00 (a bill
+# rung between 00:00 and 02:59 counts toward the PREVIOUS day). This was pinned
+# empirically by reconciling get_sales_data against the dashboard for Coffee
+# Vault (Central 50) — with a 03:00 cutoff the app reproduced the dashboard's
+# daily totals to the rupee across multiple days (Aug 23/24/25 2026: 77,296 /
+# 24,032 / 34,946 — exact), whereas raw Receipt-Date and a 05:00 cutoff both
+# disagreed.
+#
+# NOTE: this is DELIBERATELY independent of the court's ``day_cutoff_hour``
+# (which drives attendance and is 5 for Central 50). Sales must follow the POS
+# dashboard's day boundary, not the attendance one. Only outlets on this adapter
+# (currently just Coffee Vault) are affected. If a future ``petpooja_salesdata``
+# outlet uses a different dashboard day-start, this should become per-outlet
+# config.
+SALESDATA_DAY_CUTOFF_HOUR = 3
 
 # "Records" is the confirmed live key (verified against a real get_sales_data
 # response). The rest are defensive fallbacks only.
@@ -72,6 +91,28 @@ def _is_revenue_row(rec: dict) -> bool:
         str(rec.get("Transaction status", "")).strip().upper() == "SALE"
         and str(rec.get("order_status", "")).strip().lower() == "success"
     )
+
+
+def _business_date_for(receipt_date: date, txn_time: str, cutoff_hour: int) -> date:
+    """Attribute a bill to Petpooja's operational (dashboard) day.
+
+    A bill whose ``Transaction Time`` hour is before ``cutoff_hour`` (i.e. rung
+    in the small hours after midnight) belongs to the PREVIOUS operational day,
+    matching how the Petpooja sales dashboard groups late-night bills. An
+    unparseable time is treated as ``>= cutoff`` (no shift) so it stays on its
+    own Receipt Date rather than silently moving.
+    """
+    if cutoff_hour and cutoff_hour > 0:
+        hour = cutoff_hour  # default: unknown time → don't shift
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                hour = datetime.strptime(txn_time.strip(), fmt).hour
+                break
+            except (ValueError, AttributeError):
+                continue
+        if hour < cutoff_hour:
+            return receipt_date - timedelta(days=1)
+    return receipt_date
 
 
 async def fetch_raw(
@@ -122,12 +163,16 @@ class PetpoojaSalesDataAdapter(SalesSourceAdapter):
 
         lo = min(api_fetch_dates)
         hi = max(api_fetch_dates)
-        # Attribution is by Petpooja's calendar Receipt Date (no cutoff shift),
-        # so fetch exactly the requested days end-to-end. No next-morning
-        # over-fetch is needed — and skipping it avoids populating the next
-        # day's cache with a partial (incomplete) total.
+        # Over-fetch into the next morning UP TO — but not past — the cutoff, so
+        # the latest requested day (`hi`) picks up its post-midnight bills (which
+        # carry Receipt Date hi+1 but belong to business day hi). Stopping AT the
+        # cutoff is deliberate: every over-fetched hi+1 bill has hour < cutoff and
+        # is shifted back to hi, so no partial `hi+1` cache row is ever created
+        # (bills at/after the cutoff — hi+1's real day — are simply not fetched).
+        cutoff_dt = datetime.combine(hi + timedelta(days=1), time(SALESDATA_DAY_CUTOFF_HOUR, 0, 0))
+        over_fetch_end = cutoff_dt - timedelta(seconds=1)
         from_date = f"{lo.strftime('%Y-%m-%d')} 00:00:00"
-        to_date = f"{hi.strftime('%Y-%m-%d')} 23:59:59"
+        to_date = over_fetch_end.strftime("%Y-%m-%d %H:%M:%S")
 
         try:
             raw = await fetch_raw(
@@ -166,11 +211,11 @@ class PetpoojaSalesDataAdapter(SalesSourceAdapter):
             except ValueError:
                 continue  # cannot attribute without a date
 
-            # Attribute strictly by Petpooja's Receipt Date — this matches the
-            # day Petpooja's own reports/emails use. The court's cutoff_hour is
-            # intentionally ignored here (re-applying it double-shifted
-            # post-midnight bills to the previous day and broke reconciliation).
-            business_date = receipt_date
+            # Attribute to Petpooja's operational day using THIS source's own
+            # 03:00 dashboard cutoff (not the court's attendance cutoff_hour).
+            business_date = _business_date_for(
+                receipt_date, txn_time, SALESDATA_DAY_CUTOFF_HOUR
+            )
 
             try:
                 created_on = datetime.strptime(
