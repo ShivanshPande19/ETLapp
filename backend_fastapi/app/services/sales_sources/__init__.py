@@ -19,3 +19,4 @@ from .base import (  # noqa: F401
 from . import petpooja_generic  # noqa: F401,E402
 from . import petpooja_salesdata  # noqa: F401,E402
 from . import royal_pos  # noqa: F401,E402
+from . import rista_pos  # noqa: F401,E402
