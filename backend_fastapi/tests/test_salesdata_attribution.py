@@ -1,6 +1,8 @@
-"""petpooja_salesdata must attribute bills by Petpooja's Receipt Date — NOT by
-re-applying the court's overnight cutoff (which double-shifted post-midnight
-bills and broke reconciliation with the Petpooja email — Coffee Vault bug)."""
+"""petpooja_salesdata attributes bills to Petpooja's SALES-DASHBOARD operational
+day, which closes at 03:00 (SALESDATA_DAY_CUTOFF_HOUR): a bill rung between
+midnight and 02:59 belongs to the PREVIOUS day. This 03:00 boundary was pinned
+by reconciling get_sales_data against the Coffee Vault dashboard to the rupee,
+and is deliberately SEPARATE from the court's attendance day_cutoff_hour."""
 import asyncio
 import datetime as dt
 
@@ -29,16 +31,17 @@ def _totals_by_date(orders):
     return out
 
 
-def test_post_midnight_bill_stays_on_its_receipt_date(monkeypatch):
+def test_pre_cutoff_bill_moves_to_previous_day(monkeypatch):
     async def fake_fetch_raw(*a, **k):
         return {
             "success": "1",
             "Records": [
-                # 02:30 AM bill on the 24th — must NOT move to the 23rd even
-                # though cutoff_hour=5 is passed.
+                # 02:30 AM bill on the 24th — before the 03:00 dashboard cutoff,
+                # so it counts toward the 23rd.
                 {"Receipt number": "R1", "Net sale": "100",
                  "Receipt Date": "2026-08-24", "Transaction Time": "02:30:00",
                  "Transaction status": "SALE", "order_status": "success"},
+                # 14:00 bill on the 24th — stays on the 24th.
                 {"Receipt number": "R2", "Net sale": "200",
                  "Receipt Date": "2026-08-24", "Transaction Time": "14:00:00",
                  "Transaction status": "SALE", "order_status": "success"},
@@ -47,8 +50,55 @@ def test_post_midnight_bill_stays_on_its_receipt_date(monkeypatch):
 
     monkeypatch.setattr(sd, "fetch_raw", fake_fetch_raw)
     orders = _run(_Outlet(), [dt.date(2026, 8, 24)], cutoff=5)
-    # Both bills belong to the 24th (Receipt Date) — cutoff ignored.
-    assert _totals_by_date(orders) == {dt.date(2026, 8, 24): 300.0}
+    assert _totals_by_date(orders) == {
+        dt.date(2026, 8, 23): 100.0,
+        dt.date(2026, 8, 24): 200.0,
+    }
+
+
+def test_bill_at_cutoff_hour_stays_on_its_day(monkeypatch):
+    async def fake_fetch_raw(*a, **k):
+        return {
+            "success": "1",
+            "Records": [
+                # exactly 03:00:00 — at the cutoff, so it belongs to its own day.
+                {"Receipt number": "R1", "Net sale": "150",
+                 "Receipt Date": "2026-08-24", "Transaction Time": "03:00:00",
+                 "Transaction status": "SALE", "order_status": "success"},
+                # 02:59:59 — one second before the cutoff, moves to the 23rd.
+                {"Receipt number": "R2", "Net sale": "150",
+                 "Receipt Date": "2026-08-24", "Transaction Time": "02:59:59",
+                 "Transaction status": "SALE", "order_status": "success"},
+            ],
+        }
+
+    monkeypatch.setattr(sd, "fetch_raw", fake_fetch_raw)
+    orders = _run(_Outlet(), [dt.date(2026, 8, 24)], cutoff=0)
+    assert _totals_by_date(orders) == {
+        dt.date(2026, 8, 23): 150.0,
+        dt.date(2026, 8, 24): 150.0,
+    }
+
+
+def test_cutoff_is_independent_of_court_day_cutoff_hour(monkeypatch):
+    """The court's attendance cutoff (passed as cutoff_hour) must NOT change
+    sales attribution — this source always uses its own 03:00 boundary."""
+    async def fake_fetch_raw(*a, **k):
+        return {
+            "success": "1",
+            "Records": [
+                # 04:00 bill — after the 03:00 sales cutoff, so it stays on the
+                # 24th even though the court's attendance cutoff of 5 would have
+                # (wrongly) pushed it to the 23rd.
+                {"Receipt number": "R1", "Net sale": "500",
+                 "Receipt Date": "2026-08-24", "Transaction Time": "04:00:00",
+                 "Transaction status": "SALE", "order_status": "success"},
+            ],
+        }
+
+    monkeypatch.setattr(sd, "fetch_raw", fake_fetch_raw)
+    orders = _run(_Outlet(), [dt.date(2026, 8, 24)], cutoff=5)
+    assert _totals_by_date(orders) == {dt.date(2026, 8, 24): 500.0}
 
 
 def test_only_successful_sale_rows_counted(monkeypatch):
