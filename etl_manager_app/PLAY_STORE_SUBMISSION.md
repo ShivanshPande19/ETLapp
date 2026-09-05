@@ -10,7 +10,7 @@ App facts (verified from code):
 - **Version:** 1.0.0 (versionCode 1)
 - **Category of app:** Internal business tool — Food Court operations (attendance,
   sales, housekeeping, maintenance, staff & outlet onboarding)
-- **Backend:** FastAPI on Railway → `https://etlapp-production.up.railway.app`
+- **Backend:** FastAPI on Railway (custom domain) → `https://app.eattrucklove.com`
 - **Access model:** Login only. **No public sign-up** — accounts are created by
   ETL admins/managers. Roles: ETL Manager (admin), Outlet Manager, Staff.
 
