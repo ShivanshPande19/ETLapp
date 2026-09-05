@@ -7,9 +7,10 @@
 
 import os
 import uuid
+import asyncio
 import secrets
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import (
@@ -92,6 +93,45 @@ def _to_out(app: OutletApplication, court_name: Optional[str] = None) -> Applica
 def _require_etl_manager(user: CurrentUser):
     if not user.is_etl_manager:
         raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+
+async def _sync_new_outlet_bg(outlet_id: int) -> None:
+    """Background: immediately pull sales for a JUST-APPROVED outlet so its data
+    is ready by the time the owner sets their password and logs in — instead of
+    waiting for the next scheduled (3x-daily) sync. Best-effort and fully
+    isolated: it opens its OWN DB session and can never affect the approval that
+    scheduled it. Uses the same 3-day deep window as the scheduled sync."""
+    # Lazy imports to avoid any import-order/cycle risk at module load.
+    from ...database import SessionLocal
+    from ...core.query_utils import now_ist
+    from ...services.petpooja_service import sync_outlet_for_dates
+
+    db = SessionLocal()
+    try:
+        outlet = db.query(Outlet).filter(Outlet.id == outlet_id).first()
+        if not outlet:
+            return
+        today = now_ist().date()
+        dates = [today, today - timedelta(days=1), today - timedelta(days=2)]
+        await sync_outlet_for_dates(db, outlet, dates)
+        logger.info("[ONBOARD SYNC] initial sync complete for outlet %s", outlet_id)
+    except Exception:  # noqa: BLE001 — a failed initial sync must never matter;
+        # the scheduled 3x-daily sync will populate it on the next tick anyway.
+        logger.exception("[ONBOARD SYNC] initial sync failed for outlet %s", outlet_id)
+    finally:
+        db.close()
+
+
+def _schedule_outlet_sync(outlet_id: int) -> None:
+    """Fire-and-forget the initial onboarding sync on the running event loop so
+    the approval response returns immediately and the POS fetch happens right
+    after — giving the owner data on their very first login."""
+    try:
+        asyncio.get_running_loop().create_task(_sync_new_outlet_bg(outlet_id))
+    except RuntimeError:
+        # No running loop (shouldn't happen under uvicorn) — the scheduled
+        # 3x-daily sync will pick the outlet up on its next tick.
+        pass
 
 
 # ─── PUBLIC: application form ────────────────────────────────────────────────
@@ -333,6 +373,10 @@ async def approve_application(
         db.commit()
         db.refresh(outlet)
 
+        # Kick off an immediate sync so the owner sees data on first login
+        # (instead of waiting for the next scheduled 3x-daily sync).
+        _schedule_outlet_sync(outlet.id)
+
         # Durable notice + push to the owner (targeted to the new outlet, which
         # they now own) telling them it's available in the outlet switcher.
         try:
@@ -403,6 +447,10 @@ async def approve_application(
     db.commit()
     db.refresh(outlet)
     db.refresh(manager)
+
+    # Kick off an immediate sync so the owner sees data on first login
+    # (instead of waiting for the next scheduled 3x-daily sync).
+    _schedule_outlet_sync(outlet.id)
 
     # 3. Set-password magic link
     token = create_token(
