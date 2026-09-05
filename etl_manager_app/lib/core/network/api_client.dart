@@ -5,8 +5,9 @@ import '../../features/auth/domain/auth_notifier.dart';
 
 // Backend API base URL.
 //
-// Defaults to the production Railway backend, so a normal `flutter build`
-// (and App Store / Play Store releases) point at prod automatically.
+// Defaults to the production backend (custom domain app.eattrucklove.com on
+// Railway), so a normal `flutter build` (and App Store / Play Store releases)
+// point at prod automatically.
 //
 // For local development against a machine on your LAN, override at build/run
 // time WITHOUT editing this file:
@@ -17,7 +18,7 @@ import '../../features/auth/domain/auth_notifier.dart';
 // backend's Railway env vars, never here.
 const String baseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://etlapp-production.up.railway.app',
+  defaultValue: 'https://app.eattrucklove.com',
 );
 
 /// Resolves a stored media path to a fully-qualified URL.

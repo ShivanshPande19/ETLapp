@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // for local development. (Base URL is not a secret — it ships in the binary.)
 const String baseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://etlapp-production.up.railway.app',
+  defaultValue: 'https://app.eattrucklove.com',
 );
 
 final dioProvider = Provider<Dio>((ref) {

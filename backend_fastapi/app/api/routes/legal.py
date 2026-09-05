@@ -1,8 +1,8 @@
 """Public legal pages (privacy policy + data deletion) served as static HTML.
 
 Hosted automatically by the backend, so the store-required URLs are simply:
-  Privacy Policy URL       ->  https://etlapp-production.up.railway.app/privacy
-  Data deletion request URL->  https://etlapp-production.up.railway.app/data-deletion
+  Privacy Policy URL       ->  https://app.eattrucklove.com/privacy
+  Data deletion request URL->  https://app.eattrucklove.com/data-deletion
 
 ⚠️ Before submitting to the stores, replace the [BRACKETED] placeholders below
 (contact email, company legal name if different) with your real details.
