@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../outlets/data/outlets_repository.dart'; // ETL admin: edit owner / delete outlet
+import '../../outlets/presentation/outlet_documents_screen.dart'; // manage docs (view/upload/remove)
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
@@ -540,6 +541,9 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
               _adminBtn(Icons.edit_rounded, 'Edit Owner Details', _black,
                   () => _editOwnerDialog(o)),
               const SizedBox(height: 10),
+              _adminBtn(Icons.folder_copy_rounded, 'Manage Documents', _black,
+                  () => _openManageDocs(o)),
+              const SizedBox(height: 10),
               _adminBtn(Icons.delete_forever_rounded, 'Delete Outlet',
                   AppTheme.danger, () => _confirmDeleteOutlet(o)),
 
@@ -608,6 +612,22 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
         ),
       ),
     );
+  }
+
+  Future<void> _openManageDocs(OutletWithDocs o) async {
+    // Close the outlet sheet, open the full documents manager, then refresh the
+    // court's outlets so the doc rows here reflect any change on return.
+    Navigator.of(context).pop();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OutletDocumentsScreen(
+          outletId: o.outletId,
+          outletName: o.vendorName,
+        ),
+      ),
+    );
+    if (mounted) ref.invalidate(courtOutletsProvider(widget.courtId));
   }
 
   // ─── ETL admin actions on an outlet (edit owner / delete) ─────────────────
