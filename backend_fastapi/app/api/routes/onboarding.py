@@ -19,6 +19,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from sqlalchemy import func
+
 from ...database import get_db
 from ...models.sale import Court, Outlet
 from ...models.manager import Manager
@@ -137,6 +139,27 @@ async def submit_application(
         raise HTTPException(status_code=400, detail="All fields are required.")
     if "@" not in owner_email or "." not in owner_email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+
+    # Guard against DUPLICATE submissions (double-click / resubmit-on-refresh,
+    # which previously created two identical `pending` rows). If an identical
+    # application is already pending for this court+owner+outlet, don't create a
+    # second one — just re-show the success page (idempotent from the owner's POV).
+    dup = (
+        db.query(OutletApplication)
+        .filter(
+            OutletApplication.court_id == court.id,
+            func.lower(OutletApplication.owner_email) == owner_email,
+            func.lower(OutletApplication.outlet_name) == outlet_name.lower(),
+            OutletApplication.status == "pending",
+        )
+        .first()
+    )
+    if dup:
+        return templates.TemplateResponse(
+            request=request,
+            name="onboarding_success.html",
+            context={"request": request, "outlet_name": outlet_name, "court_name": court.name},
+        )
 
     # Save documents (best-effort; owner may not have every doc)
     gst_url = await _save_doc(gst, "gst")
@@ -290,8 +313,15 @@ async def approve_application(
     db.add(outlet)
     db.flush()  # get outlet.id
 
-    # ─── Path A: EXISTING owner → link the new outlet, no new login ──────────
-    if existing_owner:
+    # ─── Path A: EXISTING **ACTIVE** owner → link the new outlet, no new login ─
+    # Only a still-ACTIVE owner is a genuine multi-outlet owner. An INACTIVE row
+    # here is a LEFTOVER from a previously-deleted outlet — delete_outlet
+    # deactivates the now-membershipless owner (is_active=False) instead of
+    # deleting the row (email is unique, and we keep it for history). Such a
+    # leftover must NOT be silently linked as a phantom "second outlet"; it is
+    # handled as a FRESH onboarding below (reactivated + given a set-password
+    # link), exactly like a brand-new owner.
+    if existing_owner and existing_owner.is_active:
         db.add(OutletMembership(
             manager_id=existing_owner.id,
             outlet_id=outlet.id,
@@ -334,17 +364,30 @@ async def approve_application(
             message="Outlet approved and linked to the existing owner account.",
         )
 
-    # ─── Path B: BRAND-NEW owner → create login + owner membership ───────────
-    # 2. Create the outlet-manager login (pending password — unusable until set)
-    manager = Manager(
-        name=app.owner_name,
-        email=app.owner_email,
-        hashed_password=hash_password(secrets.token_urlsafe(24)),
-        role="outlet_manager",
-        outlet_id=outlet.id,  # primary/default outlet
-        is_active=True,
-    )
-    db.add(manager)
+    # ─── Path B: BRAND-NEW owner (or a REACTIVATED leftover) → login + set-pw ─
+    # 2. Create — or REUSE — the outlet-manager login (pending password, unusable
+    #    until set). If `existing_owner` reached here it is a deactivated leftover
+    #    from a deleted outlet: since email is unique we must REUSE that row
+    #    rather than insert a duplicate — reactivate it, refresh its details, and
+    #    reset it to a pending password so the owner goes through the normal
+    #    set-password flow just like a first-time onboarding.
+    if existing_owner:
+        manager = existing_owner
+        manager.name = app.owner_name
+        manager.role = "outlet_manager"
+        manager.hashed_password = hash_password(secrets.token_urlsafe(24))
+        manager.outlet_id = outlet.id  # primary/default outlet
+        manager.is_active = True
+    else:
+        manager = Manager(
+            name=app.owner_name,
+            email=app.owner_email,
+            hashed_password=hash_password(secrets.token_urlsafe(24)),
+            role="outlet_manager",
+            outlet_id=outlet.id,  # primary/default outlet
+            is_active=True,
+        )
+        db.add(manager)
     db.flush()
 
     # Owner membership — the source of truth for what this account can access.
