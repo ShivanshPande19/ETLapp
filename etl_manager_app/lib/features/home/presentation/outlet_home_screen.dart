@@ -742,6 +742,10 @@ class _ReportsCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final insightsState = ref.watch(weeklyInsightsProvider);
+    // Fair same-span growth (this week-to-date vs last week SAME days) from
+    // /sales/compare — consistent with the Business Insights screen. best_day /
+    // avg_bill still come from vendor/history below.
+    final compareState = ref.watch(salesCompareProvider('week'));
 
     return GestureDetector(
       onTap: onTap,
@@ -777,7 +781,7 @@ class _ReportsCard extends ConsumerWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Compare this week vs last week',
+                        'This week vs last week · same days',
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           color: _grey,
@@ -819,17 +823,10 @@ class _ReportsCard extends ConsumerWidget {
                   ),
                 ),
                 data: (data) {
-                  final weekTotal = (data['week_total'] as num).toDouble();
-                  final lastWeekTotal = (data['last_week_total'] as num)
-                      .toDouble();
-
-                  double growth = 0.0;
-                  if (lastWeekTotal > 0) {
-                    growth =
-                        ((weekTotal - lastWeekTotal) / lastWeekTotal) * 100;
-                  } else if (weekTotal > 0) {
-                    growth = 100.0;
-                  }
+                  final double growth = compareState.maybeWhen(
+                    data: (c) => (c['growth_pct'] as num?)?.toDouble() ?? 0.0,
+                    orElse: () => 0.0,
+                  );
 
                   final growthStr = growth >= 0
                       ? '+${growth.toStringAsFixed(1)}%'

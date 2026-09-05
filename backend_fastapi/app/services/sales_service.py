@@ -13,6 +13,8 @@ from ..schemas.sale import (
     DailySnapshot,
     SalesTrendPoint,
     SalesTrendResponse,
+    ComparePoint,
+    SalesCompareResponse,
 )
 
 # Friendly POS label shown in the app, derived from Outlet.pos_source (instead
@@ -367,3 +369,148 @@ async def get_sales_trend(
             ))
 
     return SalesTrendResponse(period=period, bucket=bucket, points=points)
+
+
+
+def _growth_pct(current: float, previous: float) -> float:
+    """Fair growth %. If there is no previous baseline, report +100% when there
+    IS current revenue (brand-new activity) and 0% when both are zero."""
+    if previous > 0:
+        return round((current - previous) / previous * 100, 1)
+    return 100.0 if current > 0 else 0.0
+
+
+async def get_sales_comparison(
+    db: Session,
+    court_id: Optional[int] = None,
+    outlet_id: Optional[int] = None,
+    outlet_ids: Optional[list[int]] = None,
+    granularity: str = "week",
+) -> SalesCompareResponse:
+    """This-period-so-far vs the SAME number of days in the previous period.
+
+    The totals + growth compare LIKE FOR LIKE (partial vs partial) so early in a
+    period you don't see a misleading crash. ``points`` is an aligned bucket
+    series (this vs last) for a side-by-side chart — the previous period is shown
+    in full there for visual context, but the headline growth uses the same span.
+
+    granularity:
+      * "week"  → daily buckets Mon..Sun; this-week-to-date vs last-week same days
+      * "month" → weekly (day-of-month) buckets; this-month-to-date vs last-month same days
+      * "year"  → monthly buckets Jan..Dec; this-year-to-date vs last-year same days
+    """
+    today = now_ist().date()
+    yday = today - timedelta(days=1)
+    ids = list(outlet_ids) if outlet_ids is not None else _resolve_outlet_ids(db, court_id, outlet_id)
+
+    def rt(start: date, end: date) -> tuple[float, int]:
+        if not ids or start > end:
+            return 0.0, 0
+        rows = db.query(DailySaleCache).filter(
+            DailySaleCache.outlet_id.in_(ids),
+            DailySaleCache.sale_date >= start,
+            DailySaleCache.sale_date <= end,
+        ).all()
+        return round(sum(r.total_sales for r in rows), 2), sum(r.bill_count for r in rows)
+
+    def _first_of_prev_month(first_of_this: date) -> date:
+        if first_of_this.month == 1:
+            return first_of_this.replace(year=first_of_this.year - 1, month=12)
+        return first_of_this.replace(month=first_of_this.month - 1)
+
+    def _days_in_month(first_of_month: date) -> int:
+        nxt = (first_of_month.replace(year=first_of_month.year + 1, month=1)
+               if first_of_month.month == 12
+               else first_of_month.replace(month=first_of_month.month + 1))
+        return (nxt - timedelta(days=1)).day
+
+    g = (granularity or "week").lower().replace("this_", "").strip()
+    points: list[ComparePoint] = []
+
+    if g == "month":
+        bucket = "weekly"
+        cur_start = today.replace(day=1)
+        cur_end = yday
+        prev_start = _first_of_prev_month(cur_start)
+        prev_days = _days_in_month(prev_start)
+        cur_days = _days_in_month(cur_start)
+        n = max((cur_end - cur_start).days + 1, 0)
+        span = min(n, prev_days)
+        prev_end = prev_start + timedelta(days=span - 1) if span > 0 else prev_start - timedelta(days=1)
+        cur_total, cur_bills = rt(cur_start, cur_end) if n > 0 else (0.0, 0)
+        prev_total, prev_bills = rt(prev_start, prev_end) if span > 0 else (0.0, 0)
+
+        def dom_total(first_of_month: date, d1: int, d2: int, days_in_month: int, upto_day=None):
+            hi = min(d2, days_in_month)
+            if upto_day is not None:
+                hi = min(hi, upto_day)
+            if d1 > hi:
+                return 0.0, 0
+            return rt(first_of_month.replace(day=d1), first_of_month.replace(day=hi))
+
+        for (d1, d2) in [(1, 7), (8, 14), (15, 21), (22, 28), (29, 31)]:
+            cs, cb = dom_total(cur_start, d1, d2, cur_days, upto_day=cur_end.day if cur_end >= cur_start else 0)
+            ps, pb = dom_total(prev_start, d1, d2, prev_days)
+            points.append(ComparePoint(label=f"{d1}-{min(d2, max(cur_days, prev_days))}",
+                                       current_sales=cs, current_bills=cb,
+                                       previous_sales=ps, previous_bills=pb))
+        cur_label = (f"This month ({cur_start:%d %b}–{cur_end:%d %b})"
+                     if n > 0 else f"This month ({cur_start:%b})")
+        prev_label = (f"Last month ({prev_start:%d %b}–{prev_end:%d %b})"
+                      if span > 0 else f"Last month ({prev_start:%b})")
+
+    elif g == "year":
+        bucket = "monthly"
+        cur_start = today.replace(month=1, day=1)
+        cur_end = yday
+        prev_start = cur_start.replace(year=cur_start.year - 1)
+        n = max((cur_end - cur_start).days + 1, 0)
+        prev_end = prev_start + timedelta(days=n - 1) if n > 0 else prev_start - timedelta(days=1)
+        cur_total, cur_bills = rt(cur_start, cur_end) if n > 0 else (0.0, 0)
+        prev_total, prev_bills = rt(prev_start, prev_end) if n > 0 else (0.0, 0)
+        for m in range(1, 13):
+            c_s = date(today.year, m, 1)
+            c_nxt = date(today.year + 1, 1, 1) if m == 12 else date(today.year, m + 1, 1)
+            cs, cb = rt(c_s, min(c_nxt - timedelta(days=1), yday)) if c_s <= yday else (0.0, 0)
+            p_s = date(today.year - 1, m, 1)
+            p_nxt = date(today.year, 1, 1) if m == 12 else date(today.year - 1, m + 1, 1)
+            ps, pb = rt(p_s, p_nxt - timedelta(days=1))
+            points.append(ComparePoint(label=month_abbr[m], current_sales=cs, current_bills=cb,
+                                       previous_sales=ps, previous_bills=pb))
+        cur_label = f"{today.year} (Jan–{cur_end:%d %b})" if n > 0 else f"{today.year}"
+        prev_label = f"{today.year - 1} (Jan–{prev_end:%d %b})" if n > 0 else f"{today.year - 1}"
+
+    else:  # "week" (default)
+        bucket = "daily"
+        cur_start = today - timedelta(days=today.weekday())  # Monday of this week
+        cur_end = yday
+        prev_start = cur_start - timedelta(days=7)
+        n = max((cur_end - cur_start).days + 1, 0)
+        prev_end = prev_start + timedelta(days=n - 1) if n > 0 else prev_start - timedelta(days=1)
+        cur_total, cur_bills = rt(cur_start, cur_end) if n > 0 else (0.0, 0)
+        prev_total, prev_bills = rt(prev_start, prev_end) if n > 0 else (0.0, 0)
+        for i in range(7):
+            cd = cur_start + timedelta(days=i)
+            pd = prev_start + timedelta(days=i)
+            cs, cb = rt(cd, cd) if cd <= yday else (0.0, 0)
+            ps, pb = rt(pd, pd)  # last week is fully complete
+            points.append(ComparePoint(label=cd.strftime("%a"), current_sales=cs, current_bills=cb,
+                                       previous_sales=ps, previous_bills=pb))
+        cur_label = (f"This week ({cur_start:%d %b}–{cur_end:%d %b})"
+                     if n > 0 else f"This week ({cur_start:%d %b})")
+        prev_label = (f"Last week ({prev_start:%d %b}–{prev_end:%d %b})"
+                      if n > 0 else f"Last week ({prev_start:%d %b})")
+        g = "week"
+
+    return SalesCompareResponse(
+        granularity=g,
+        bucket=bucket,
+        current_label=cur_label,
+        previous_label=prev_label,
+        current_total=round(cur_total, 2),
+        previous_total=round(prev_total, 2),
+        current_bills=cur_bills,
+        previous_bills=prev_bills,
+        growth_pct=_growth_pct(cur_total, prev_total),
+        points=points,
+    )
