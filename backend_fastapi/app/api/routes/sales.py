@@ -5,8 +5,12 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from ...database import get_db
-from ...schemas.sale import SalesSummaryResponse, VendorHistoryResponse, SalesTrendResponse
-from ...services.sales_service import get_sales_summary, get_vendor_history, get_sales_trend
+from ...schemas.sale import (
+    SalesSummaryResponse, VendorHistoryResponse, SalesTrendResponse, SalesCompareResponse,
+)
+from ...services.sales_service import (
+    get_sales_summary, get_vendor_history, get_sales_trend, get_sales_comparison,
+)
 from ...services.petpooja_service import (
     sync_court_by_fetch_date,
     sync_all_active_outlets_by_fetch_date,
@@ -120,6 +124,27 @@ async def sales_trend(
         period=period,
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@router.get("/compare", response_model=SalesCompareResponse)
+async def sales_compare(
+    granularity: str = Query("week", description="week | month | year"),
+    court_id: Optional[int] = Query(None),
+    outlet_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Fair same-span comparison (this-period-so-far vs the same days last
+    period) with an aligned bucket series for a side-by-side chart. Scoped to
+    exactly what the caller may read, just like /summary and /trend."""
+    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
+    return await get_sales_comparison(
+        db=db,
+        court_id=court_id,
+        outlet_id=outlet_id,
+        outlet_ids=outlet_ids,
+        granularity=granularity,
     )
 
 

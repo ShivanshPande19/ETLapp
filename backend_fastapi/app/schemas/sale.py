@@ -82,3 +82,30 @@ class SalesTrendResponse(BaseModel):
     period: str
     bucket: str         # "daily" | "monthly"
     points: List[SalesTrendPoint]
+
+
+class ComparePoint(BaseModel):
+    """One aligned bucket in a this-vs-last comparison (e.g. Mon-vs-Mon,
+    week1-vs-week1, Jan-vs-Jan)."""
+    label: str
+    current_sales: float
+    current_bills: int
+    previous_sales: float
+    previous_bills: int
+
+
+class SalesCompareResponse(BaseModel):
+    """Fair, SAME-SPAN comparison of the current period-so-far against the same
+    number of days in the previous period. The totals/growth compare like for
+    like (partial vs partial); the ``points`` series is aligned bucket-by-bucket
+    for a side-by-side chart (previous period shown in full for context)."""
+    granularity: str        # "week" | "month" | "year"
+    bucket: str             # "daily" | "weekly" | "monthly"
+    current_label: str      # e.g. "This week (01–05 Sep)"
+    previous_label: str     # e.g. "Last week (25–29 Aug)"
+    current_total: float    # sum over the same span (partial)
+    previous_total: float   # sum over the same span in the previous period
+    current_bills: int
+    previous_bills: int
+    growth_pct: float       # (current_total - previous_total)/previous_total*100
+    points: List[ComparePoint]
