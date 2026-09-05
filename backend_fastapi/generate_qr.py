@@ -15,7 +15,7 @@ from app.core.config import settings
 # never accidentally printed pointing at the wrong environment. Falls back to
 # the production host, and an explicit CLI arg overrides everything:
 #     python generate_qr.py https://staging.example.com
-_DEFAULT_BASE_URL = "https://etl-backend-fresh-production.up.railway.app"
+_DEFAULT_BASE_URL = "https://app.eattrucklove.com"
 BASE_URL = (
     (sys.argv[1] if len(sys.argv) > 1 else "").strip()
     or (settings.PUBLIC_BASE_URL or "").strip()

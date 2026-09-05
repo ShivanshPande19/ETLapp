@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from app.database import SessionLocal
 from app.models.sale import Court, Outlet
 
-BASE_URL = "https://etl-backend-fresh-production.up.railway.app"      
+BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://app.eattrucklove.com").rstrip("/")
 OUT_DIR = "maintenance_qr_codes"
 os.makedirs(OUT_DIR, exist_ok=True)
 
