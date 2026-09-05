@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/ui/nav_visibility.dart';
 
 import 'home_providers.dart';
 
@@ -17,6 +18,10 @@ const _ok = Color(0xFF22C55E);
 const _warn = Color(0xFFF59E0B);
 const _blue = Color(0xFF60A5FA);
 const _danger = Color(0xFFEF4444);
+
+// Granularity options for the this-vs-last comparison.
+const _granKeys = ['week', 'month', 'year'];
+const _granTabs = ['Week', 'Month', 'Year'];
 
 class WeeklyInsightsScreen extends ConsumerStatefulWidget {
   const WeeklyInsightsScreen({super.key});
@@ -32,6 +37,9 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
   late final Animation<double> _fadeAnim;
   late final Animation<Offset> _slideAnim;
 
+  // Selected comparison granularity: "week" | "month" | "year".
+  String _gran = 'week';
+
   @override
   void initState() {
     super.initState();
@@ -45,17 +53,29 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
     _animCtrl.forward();
+
+    // Hide the floating bottom nav bar while this full-screen report is open
+    // (mirrors the outlet-switcher pattern). Restored in dispose().
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(navBarVisibleProvider.notifier).hide();
+    });
   }
 
   @override
   void dispose() {
+    // Bring the nav bar back when leaving the report.
+    ref.read(navBarVisibleProvider.notifier).show();
     _animCtrl.dispose();
     super.dispose();
   }
 
+  String get _periodWord => _gran; // "week" | "month" | "year"
+
+  double _num(dynamic v) => v is num ? v.toDouble() : 0.0;
+
   @override
   Widget build(BuildContext context) {
-    final insightsState = ref.watch(weeklyInsightsProvider);
+    final compareState = ref.watch(salesCompareProvider(_gran));
 
     return Scaffold(
       backgroundColor: _bg,
@@ -65,7 +85,7 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
           children: [
             // ─── Header ───
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
               child: Row(
                 children: [
                   GestureDetector(
@@ -102,13 +122,26 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                           ),
                         ),
                         Text(
-                          'Weekly Performance Report',
+                          'This $_periodWord vs last $_periodWord',
                           style: GoogleFonts.inter(fontSize: 12, color: _grey),
                         ),
                       ],
                     ),
                   ),
                 ],
+              ),
+            ),
+
+            // ─── Granularity toggle (Week / Month / Year) ───
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: _GranToggle(
+                selected: _gran,
+                onChanged: (g) {
+                  if (g == _gran) return;
+                  HapticFeedback.selectionClick();
+                  setState(() => _gran = g);
+                },
               ),
             ),
 
@@ -120,7 +153,7 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                   color: _white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
                 ),
-                child: insightsState.when(
+                child: compareState.when(
                   loading: () => const SkeletonList(
                     dark: false,
                     count: 4,
@@ -133,59 +166,23 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                     ),
                   ),
                   data: (data) {
-                    // 1. Calculations
-                    final weekTotal = (data['week_total'] as num).toDouble();
-                    final lastWeekTotal = (data['last_week_total'] as num)
-                        .toDouble();
-                    double growth = 0.0;
-                    if (lastWeekTotal > 0)
-                      growth =
-                          ((weekTotal - lastWeekTotal) / lastWeekTotal) * 100;
-                    else if (weekTotal > 0)
-                      growth = 100.0;
-                    final growthStr = growth >= 0
+                    final currentLabel =
+                        (data['current_label'] ?? 'This $_periodWord').toString();
+                    final previousLabel =
+                        (data['previous_label'] ?? 'Last $_periodWord').toString();
+                    final currentTotal = _num(data['current_total']);
+                    final previousTotal = _num(data['previous_total']);
+                    final currentBills = (data['current_bills'] ?? 0);
+                    final previousBills = (data['previous_bills'] ?? 0);
+                    final growth = _num(data['growth_pct']);
+                    final isPositive = growth >= 0;
+                    final growthStr = isPositive
                         ? '+${growth.toStringAsFixed(1)}%'
                         : '${growth.toStringAsFixed(1)}%';
-                    final isPositive = growth >= 0;
 
-                    // Parse Best Day
-                    String bestDayStr = "N/A";
-                    if (data['best_day'] != null &&
-                        data['best_day'].toString().isNotEmpty) {
-                      try {
-                        DateTime parsed = DateTime.parse(data['best_day']);
-                        bestDayStr = [
-                          'Mon',
-                          'Tue',
-                          'Wed',
-                          'Thu',
-                          'Fri',
-                          'Sat',
-                          'Sun',
-                        ][parsed.weekday - 1];
-                      } catch (_) {}
-                    }
-
-                    // Process Daily History for Chart & List.
-                    // Sort chronologically (oldest → newest) so the bar chart
-                    // shows the LATEST day on the RIGHT. The breakdown list
-                    // below iterates this reversed (newest first → latest on top).
-                    List history = List.from(data['daily_history'] as List);
-                    history.sort((a, b) {
-                      try {
-                        return DateTime.parse(
-                          a['date'].toString(),
-                        ).compareTo(DateTime.parse(b['date'].toString()));
-                      } catch (_) {
-                        return 0;
-                      }
-                    });
-                    double maxSales = 1.0; // Avoid Div/0
-                    for (var h in history) {
-                      if ((h['total_sales'] as num).toDouble() > maxSales) {
-                        maxSales = (h['total_sales'] as num).toDouble();
-                      }
-                    }
+                    final points = (data['points'] as List? ?? [])
+                        .map((e) => Map<String, dynamic>.from(e as Map))
+                        .toList();
 
                     return FadeTransition(
                       opacity: _fadeAnim,
@@ -200,7 +197,7 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                           ),
                           physics: const BouncingScrollPhysics(),
                           children: [
-                            // ─── Highlight Section ───
+                            // ─── Headline growth (fair, same-span) ───
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
@@ -216,7 +213,7 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
                                   child: Text(
-                                    'Growth WoW',
+                                    'vs last $_periodWord',
                                     style: GoogleFonts.inter(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w700,
@@ -227,10 +224,10 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                               ],
                             ),
                             const SizedBox(height: 8),
+                            // Crystal-clear statement of exactly what's compared
+                            // (same number of days, so it's apples-to-apples).
                             Text(
-                              isPositive
-                                  ? 'Your outlet is performing great, outperforming the previous week.'
-                                  : 'Revenue is slightly lower compared to last week. Monitor peak hours.',
+                              'Comparing $currentLabel against $previousLabel — the same number of days, so it\'s a fair like-for-like comparison.',
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: _black.withOpacity(0.7),
@@ -238,29 +235,28 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
                               ),
                             ),
 
-                            const SizedBox(height: 36),
+                            const SizedBox(height: 28),
 
-                            // ─── Mini Metrics Grid ───
+                            // ─── This vs Last totals ───
                             Row(
                               children: [
                                 Expanded(
                                   child: _MiniMetricCard(
-                                    title: 'Best Day',
-                                    value: bestDayStr,
-                                    subtitle: 'Top Performer',
-                                    icon: Icons.star_rounded,
-                                    color: _blue,
+                                    title: 'This $_periodWord',
+                                    value: _fmtMoney(currentTotal),
+                                    subtitle: '$currentBills bills',
+                                    icon: Icons.trending_up_rounded,
+                                    color: _ok,
                                   ),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(
                                   child: _MiniMetricCard(
-                                    title: 'Avg Bill',
-                                    value:
-                                        '₹${(data['avg_bill_value'] as num).toStringAsFixed(0)}',
-                                    subtitle: 'Stable Value',
-                                    icon: Icons.receipt_long_rounded,
-                                    color: _warn,
+                                    title: 'Last $_periodWord',
+                                    value: _fmtMoney(previousTotal),
+                                    subtitle: '$previousBills bills (same days)',
+                                    icon: Icons.history_rounded,
+                                    color: _blue,
                                   ),
                                 ),
                               ],
@@ -268,70 +264,21 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
 
                             const SizedBox(height: 36),
 
-                            // ─── 7-Day Chart (Dynamic Data) ───
+                            // ─── Side-by-side comparison chart ───
                             Text(
-                              '7-Day Revenue Trend',
+                              _gran == 'week'
+                                  ? 'Day-by-day: this week vs last week'
+                                  : _gran == 'month'
+                                      ? 'Week-by-week: this month vs last month'
+                                      : 'Month-by-month: this year vs last year',
                               style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
                                 color: _black,
                               ),
                             ),
-                            const SizedBox(height: 24),
-                            _PremiumDynamicBarChart(
-                              history: history,
-                              maxSales: maxSales,
-                            ),
-
-                            const SizedBox(height: 36),
-
-                            // ─── Daily Breakdown List ───
-                            Text(
-                              'Daily Breakdown',
-                              style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: _black,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            // Reversing again to show newest day at the top of the list
-                            ...history.reversed.map((dayData) {
-                              DateTime dt = DateTime.parse(dayData['date']);
-                              String dName = [
-                                'Mon',
-                                'Tue',
-                                'Wed',
-                                'Thu',
-                                'Fri',
-                                'Sat',
-                                'Sun',
-                              ][dt.weekday - 1];
-                              String dMonth = [
-                                'Jan',
-                                'Feb',
-                                'Mar',
-                                'Apr',
-                                'May',
-                                'Jun',
-                                'Jul',
-                                'Aug',
-                                'Sep',
-                                'Oct',
-                                'Nov',
-                                'Dec',
-                              ][dt.month - 1];
-
-                              return _DailyRow(
-                                day: dName,
-                                date: '$dMonth ${dt.day}',
-                                rev:
-                                    '₹${(dayData['total_sales'] as num).toStringAsFixed(0)}',
-                                bills: '${dayData['total_bills']} bills',
-                                isPeak: dayData['date'] == data['best_day'],
-                              );
-                            }).toList(),
+                            const SizedBox(height: 20),
+                            _CompareBarChart(points: points),
                           ],
                         ),
                       ),
@@ -342,6 +289,61 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+String _fmtMoney(double v) {
+  if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(2)}L';
+  if (v >= 1000) return '₹${(v / 1000).toStringAsFixed(1)}K';
+  return '₹${v.toStringAsFixed(0)}';
+}
+
+// ─── Granularity toggle ───
+class _GranToggle extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  const _GranToggle({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _white.withOpacity(0.08)),
+      ),
+      child: Row(
+        children: List.generate(_granKeys.length, (i) {
+          final key = _granKeys[i];
+          final isSel = key == selected;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onChanged(key),
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSel ? _white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _granTabs[i],
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isSel ? _black : _grey,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -412,178 +414,137 @@ class _MiniMetricCard extends StatelessWidget {
   }
 }
 
-// ─── Custom Dynamic Bar Chart (interactive: tap a bar) ───
-class _PremiumDynamicBarChart extends StatefulWidget {
-  final List history; // chronological: oldest -> newest (latest on right)
-  final double maxSales;
-
-  const _PremiumDynamicBarChart({
-    required this.history,
-    required this.maxSales,
-  });
+// ─── Grouped comparison bar chart (current vs previous per aligned bucket) ───
+class _CompareBarChart extends StatefulWidget {
+  final List<Map<String, dynamic>> points;
+  const _CompareBarChart({required this.points});
 
   @override
-  State<_PremiumDynamicBarChart> createState() =>
-      _PremiumDynamicBarChartState();
+  State<_CompareBarChart> createState() => _CompareBarChartState();
 }
 
-class _PremiumDynamicBarChartState extends State<_PremiumDynamicBarChart> {
+class _CompareBarChartState extends State<_CompareBarChart> {
   int? _selectedIndex;
 
-  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  static const _mons = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
+  double _n(dynamic v) => v is num ? v.toDouble() : 0.0;
 
   @override
   Widget build(BuildContext context) {
-    final history = widget.history;
-    final maxSales = widget.maxSales;
-    if (history.isEmpty) return const SizedBox.shrink();
+    final points = widget.points;
+    if (points.isEmpty) {
+      return const SizedBox(
+        height: 120,
+        child: Center(
+          child: Text('No data yet', style: TextStyle(color: _grey)),
+        ),
+      );
+    }
 
-    // Default selection = latest day (rightmost).
+    double maxVal = 1.0;
+    for (final p in points) {
+      final c = _n(p['current_sales']);
+      final pr = _n(p['previous_sales']);
+      if (c > maxVal) maxVal = c;
+      if (pr > maxVal) maxVal = pr;
+    }
+
     final activeIndex = (_selectedIndex != null &&
             _selectedIndex! >= 0 &&
-            _selectedIndex! < history.length)
+            _selectedIndex! < points.length)
         ? _selectedIndex!
-        : history.length - 1;
-
-    final activeData = history[activeIndex];
-    final activeSales = (activeData['total_sales'] as num).toDouble();
-    final activeBills = activeData['total_bills'];
-    DateTime activeDt;
-    try {
-      activeDt = DateTime.parse(activeData['date'].toString());
-    } catch (_) {
-      activeDt = DateTime.now();
-    }
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: _black,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: _black.withOpacity(0.15),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Dynamic info header for the selected day ──
+          // Legend + selected-bucket detail
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Text(
-                  '${_days[activeDt.weekday - 1]}, ${_mons[activeDt.month - 1]} ${activeDt.day}',
-                  key: ValueKey('d$activeIndex'),
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: _grey,
-                  ),
-                ),
+              Row(
+                children: [
+                  _legendDot(_ok, 'This'),
+                  const SizedBox(width: 14),
+                  _legendDot(_white.withOpacity(0.25), 'Last'),
+                ],
               ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: Column(
-                  key: ValueKey('v$activeIndex'),
+              if (activeIndex != null)
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      '₹${activeSales.toStringAsFixed(0)}',
-                      style: GoogleFonts.antonSc(
-                        fontSize: 22,
-                        color: _white,
-                        height: 1.0,
-                      ),
+                      '${points[activeIndex]['label']}',
+                      style: GoogleFonts.inter(fontSize: 11, color: _grey),
                     ),
                     Text(
-                      '$activeBills bills',
-                      style: GoogleFonts.inter(fontSize: 11, color: _grey),
+                      '${_fmtMoney(_n(points[activeIndex]['current_sales']))}  vs  ${_fmtMoney(_n(points[activeIndex]['previous_sales']))}',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _white,
+                      ),
                     ),
                   ],
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 24),
-
-          // ── Interactive bars ──
+          const SizedBox(height: 20),
           SizedBox(
             height: 120,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.end,
-              children: history.asMap().entries.map((entry) {
+              children: points.asMap().entries.map<Widget>((entry) {
                 final idx = entry.key;
-                final e = entry.value;
-                DateTime dt;
-                try {
-                  dt = DateTime.parse(e['date'].toString());
-                } catch (_) {
-                  dt = DateTime.now();
-                }
-                final dayLetter = ['M', 'T', 'W', 'T', 'F', 'S', 'S'][dt.weekday - 1];
-                double val = (e['total_sales'] as num) / maxSales;
-                if (val == 0) val = 0.05;
+                final p = entry.value;
+                final cur = _n(p['current_sales']);
+                final prev = _n(p['previous_sales']);
+                double cv = cur / maxVal;
+                double pv = prev / maxVal;
+                if (cv < 0) cv = 0;
+                if (pv < 0) pv = 0;
+                final isSel = idx == activeIndex;
 
-                final isPeak =
-                    (e['total_sales'] as num) == maxSales && maxSales > 1;
-                final isSelected = idx == activeIndex;
-
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    setState(() => _selectedIndex = idx);
-                  },
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 350),
-                        curve: Curves.easeOutCubic,
-                        width: isSelected ? 26 : 20,
-                        height: 90 * val,
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? _ok
-                              : (isPeak
-                                    ? _ok.withOpacity(0.5)
-                                    : _white.withOpacity(0.15)),
-                          borderRadius: BorderRadius.circular(6),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: _ok.withOpacity(0.4),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ]
-                              : [],
+                return Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _selectedIndex = isSel ? null : idx);
+                    },
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            _bar(90 * cv, _ok, isSel),
+                            const SizedBox(width: 3),
+                            _bar(90 * pv, _white.withOpacity(0.25), isSel),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        dayLetter,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: isSelected
-                              ? FontWeight.w800
-                              : FontWeight.w600,
-                          color: isSelected ? _white : _grey,
+                        const SizedBox(height: 8),
+                        Text(
+                          '${p['label']}',
+                          maxLines: 1,
+                          overflow: TextOverflow.clip,
+                          style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight:
+                                isSel ? FontWeight.w800 : FontWeight.w600,
+                            color: isSel ? _white : _grey,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 );
               }).toList(),
@@ -593,84 +554,41 @@ class _PremiumDynamicBarChartState extends State<_PremiumDynamicBarChart> {
       ),
     );
   }
-}
 
-// ─── Daily List Row ───
-class _DailyRow extends StatelessWidget {
-  final String day, date, rev, bills;
-  final bool isPeak;
-
-  const _DailyRow({
-    required this.day,
-    required this.date,
-    required this.rev,
-    required this.bills,
-    this.isPeak = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+  Widget _bar(double height, Color color, bool highlight) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      width: 9,
+      height: height < 2 ? 2 : height,
       decoration: BoxDecoration(
-        color: _white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isPeak ? _ok.withOpacity(0.3) : Colors.grey.shade200,
-          width: 1.5,
+        color: color,
+        borderRadius: BorderRadius.circular(3),
+        boxShadow: highlight
+            ? [BoxShadow(color: color.withOpacity(0.4), blurRadius: 6)]
+            : [],
+      ),
+    );
+  }
+
+  Widget _legendDot(Color color, String label) {
+    return Row(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isPeak ? _ok.withOpacity(0.1) : const Color(0xFFFAFAFA),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              isPeak ? Icons.star_rounded : Icons.calendar_today_rounded,
-              size: 18,
-              color: isPeak ? _ok : _grey,
-            ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: _grey,
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  day,
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: _black,
-                  ),
-                ),
-                Text(
-                  date,
-                  style: GoogleFonts.inter(fontSize: 12, color: _grey),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                rev,
-                style: GoogleFonts.antonSc(
-                  fontSize: 20,
-                  color: isPeak ? _ok : _black,
-                  height: 1.0,
-                ),
-              ),
-              Text(bills, style: GoogleFonts.inter(fontSize: 11, color: _grey)),
-            ],
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

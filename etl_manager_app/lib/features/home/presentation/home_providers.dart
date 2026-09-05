@@ -258,6 +258,30 @@ final weeklyInsightsProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
   },
 );
 
+// ─── SALES COMPARISON (fair same-span: this period-so-far vs same days last) ─
+// granularity: "week" | "month" | "year". Follows the selected outlet. Returns
+// the raw /sales/compare payload (current/previous labels + totals + growth_pct
+// + aligned `points`), so the Business Insights screen can show a fair,
+// clearly-labelled this-vs-last comparison at any granularity.
+final salesCompareProvider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>, String>((ref, granularity) async {
+  final outletId = ref.watch(selectedOutletIdProvider); // MULTI-OUTLET
+  if (outletId == null) {
+    throw Exception("No outlet assigned to this manager");
+  }
+  try {
+    final dio = ref.read(dioProvider);
+    final response = await dio.get(
+      '/sales/compare',
+      queryParameters: {'granularity': granularity, 'outlet_id': outletId},
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  } catch (e) {
+    debugPrint('🔴 [SALES_COMPARE] Exception: $e');
+    rethrow;
+  }
+});
+
 // ─── ROSTER PROVIDER (REAL DB DATA) ─────────────────────────────────────────
 
 // Selected roster day for the manager view. null => today.

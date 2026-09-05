@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../domain/sales_notifier.dart';
+import '../data/sales_repository.dart'; // SalesTrendPoint for the range-aware chart
 import '../../../core/widgets/skeleton.dart';
 import '../../home/presentation/home_providers.dart'; // ✅ Imported for Real Graph Data
 import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
@@ -780,41 +781,18 @@ class _InteractiveTrendGraphState
     extends ConsumerState<_InteractiveTrendGraph> {
   int? _selectedIndex;
 
-  String _formatDate(String iso) {
-    try {
-      DateTime dt = DateTime.parse(iso);
-      String day = [
-        'Mon',
-        'Tue',
-        'Wed',
-        'Thu',
-        'Fri',
-        'Sat',
-        'Sun',
-      ][dt.weekday - 1];
-      String mon = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ][dt.month - 1];
-      return "$day, $mon ${dt.day}";
-    } catch (_) {
-      return iso;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final insightsState = ref.watch(weeklyInsightsProvider);
+    // Range-aware: the trajectory follows the SAME selected period as the
+    // summary (this/last week, month, year, or a custom range) instead of a
+    // fixed current-week feed. `salesState.trend` is refetched with the
+    // selected window by SalesNotifier.fetchSummary — so "Last Week" now shows
+    // last week's bars, not this week's.
+    final salesState = ref.watch(salesNotifierProvider);
+    final List<SalesTrendPoint> points = salesState.trend?.points ?? const [];
+    final headerLabel = salesState.rangeLabel ?? 'Last 7 Days';
+    final loading =
+        salesState.status == SalesLoadStatus.loading && points.isEmpty;
 
     return Container(
       width: double.infinity,
@@ -824,222 +802,219 @@ class _InteractiveTrendGraphState
         borderRadius: BorderRadius.circular(28),
         border: Border.all(color: Colors.grey.shade200, width: 2),
       ),
-      child: insightsState.when(
-        loading: () => Shimmer.light(
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                SkeletonLine(width: 140, height: 13),
-                SizedBox(height: 14),
-                SkeletonBox(height: 120, radius: 12),
-              ],
-            ),
-          ),
-        ),
-        error: (err, _) => const SizedBox(
-          height: 160,
-          child: Center(
-            child: Text(
-              "Graph data unavailable",
-              style: TextStyle(color: _grey),
-            ),
-          ),
-        ),
-        data: (data) {
-          List history = List.from(data['daily_history'] as List);
+      child: loading
+          ? Shimmer.light(
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    SkeletonLine(width: 140, height: 13),
+                    SizedBox(height: 14),
+                    SkeletonBox(height: 120, radius: 12),
+                  ],
+                ),
+              ),
+            )
+          : points.isEmpty
+              ? const SizedBox(
+                  height: 160,
+                  child: Center(
+                    child: Text(
+                      "Graph data unavailable",
+                      style: TextStyle(color: _grey),
+                    ),
+                  ),
+                )
+              : _buildTrend(points, headerLabel),
+    );
+  }
 
-          if (history.isEmpty) return const SizedBox.shrink();
+  Widget _buildTrend(List<SalesTrendPoint> points, String headerLabel) {
+    double maxSales = 1.0;
+    int peakIndex = 0;
+    for (int i = 0; i < points.length; i++) {
+      final s = points[i].totalSales;
+      if (s > maxSales) {
+        maxSales = s;
+        peakIndex = i;
+      }
+    }
 
-          // Find Max Sales
-          double maxSales = 1.0;
-          int peakIndex = 0;
-          for (int i = 0; i < history.length; i++) {
-            if ((history[i]['total_sales'] as num).toDouble() > maxSales) {
-              maxSales = (history[i]['total_sales'] as num).toDouble();
-              peakIndex = i; // Save exact peak index
-            }
-          }
+    final activeIndex = (_selectedIndex != null &&
+            _selectedIndex! >= 0 &&
+            _selectedIndex! < points.length)
+        ? _selectedIndex!
+        : peakIndex;
+    final active = points[activeIndex];
 
-          // Auto-select peak day on first load
-          final activeIndex = _selectedIndex ?? peakIndex;
-
-          // Fallback safe checking in case activeIndex is somehow out of bounds
-          final activeData = (activeIndex >= 0 && activeIndex < history.length)
-              ? history[activeIndex]
-              : history.last;
-
-          final activeSales = (activeData['total_sales'] as num).toDouble();
-          final activeBills = activeData['total_bills'];
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ─── DYNAMIC INFO PANEL ───
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ─── DYNAMIC INFO PANEL ───
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '7-Day Trajectory',
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          color: _black,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: Text(
-                          _formatDate(activeData['date']),
-                          key: ValueKey(activeData['date']),
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: _grey,
-                          ),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    headerLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: _black,
+                    ),
                   ),
-
+                  const SizedBox(height: 4),
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 250),
-                    child: Column(
-                      key: ValueKey(activeIndex),
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '₹${activeSales.toStringAsFixed(0)}',
-                          style: GoogleFonts.antonSc(
-                            fontSize: 24,
-                            color: _black,
-                            height: 1.0,
-                          ),
-                        ),
-                        Text(
-                          '$activeBills Bills',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: _grey,
-                          ),
-                        ),
-                      ],
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(
+                      active.label,
+                      key: ValueKey('lbl_${active.label}'),
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _grey,
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 32),
-
-              // ─── INTERACTIVE BAR CHART ───
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              child: Column(
+                key: ValueKey(activeIndex),
                 crossAxisAlignment: CrossAxisAlignment.end,
-                children: history.asMap().entries.map((entry) {
-                  int idx = entry.key;
-                  var dayData = entry.value;
-
-                  DateTime dt = DateTime.parse(dayData['date']);
-                  String dayLetter = [
-                    'M',
-                    'T',
-                    'W',
-                    'T',
-                    'F',
-                    'S',
-                    'S',
-                  ][dt.weekday - 1];
-
-                  double sales = (dayData['total_sales'] as num).toDouble();
-                  double val = sales / maxSales;
-                  if (val == 0) val = 0.05;
-
-                  final isPeak = sales == maxSales && maxSales > 1;
-                  final isSelected = idx == activeIndex;
-
-                  return GestureDetector(
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      setState(() {
-                        _selectedIndex = idx;
-                      });
-                    },
-                    behavior: HitTestBehavior.opaque,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (isPeak)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _black,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'PEAK',
-                              style: GoogleFonts.inter(
-                                fontSize: 8,
-                                fontWeight: FontWeight.w800,
-                                color: _white,
-                              ),
-                            ),
-                          )
-                        else
-                          const SizedBox(height: 18),
-
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                          width: isSelected ? 28 : 22,
-                          height: 110 * val,
-                          decoration: BoxDecoration(
-                            color: isSelected ? _black : Colors.grey.shade300,
-                            borderRadius: BorderRadius.circular(6),
-                            boxShadow: isSelected
-                                ? [
-                                    BoxShadow(
-                                      color: _black.withOpacity(0.3),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ]
-                                : [],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 200),
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: isSelected
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                            color: isSelected ? _black : _grey,
-                          ),
-                          child: Text(dayLetter),
-                        ),
-                      ],
+                children: [
+                  Text(
+                    '₹${active.totalSales.toStringAsFixed(0)}',
+                    style: GoogleFonts.antonSc(
+                      fontSize: 24,
+                      color: _black,
+                      height: 1.0,
                     ),
-                  );
-                }).toList(),
+                  ),
+                  Text(
+                    '${active.totalBills} Bills',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _grey,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          );
-        },
-      ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 32),
+
+        // ─── INTERACTIVE BAR CHART (Expanded slots → no overflow at 5/7/12 bars) ─
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: points.asMap().entries.map<Widget>((entry) {
+            final idx = entry.key;
+            final p = entry.value;
+
+            final double sales = p.totalSales;
+            double val = sales / maxSales;
+            if (val <= 0) val = 0.05;
+
+            final isPeak = sales == maxSales && maxSales > 1;
+            final isSelected = idx == activeIndex;
+
+            return Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() {
+                    _selectedIndex = idx;
+                  });
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (isPeak)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _black,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'PEAK',
+                          style: GoogleFonts.inter(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w800,
+                            color: _white,
+                          ),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 18),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOutCubic,
+                      width: isSelected ? 28 : 22,
+                      height: 110 * val,
+                      decoration: BoxDecoration(
+                        color: isSelected ? _black : Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(6),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: _black.withOpacity(0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ]
+                            : [],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 200),
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight:
+                            isSelected ? FontWeight.w800 : FontWeight.w600,
+                        color: isSelected ? _black : _grey,
+                      ),
+                      child: Text(
+                        _axisLabel(p.label),
+                        maxLines: 1,
+                        overflow: TextOverflow.clip,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
+
+  // Daily week labels arrive as "Mon".."Sun" → show a single letter so 7 bars
+  // stay tidy. Bucket labels like "1-7" / "Jan" are already short → keep as-is.
+  static const _weekdayShort = {
+    'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+  };
+  String _axisLabel(String label) =>
+      _weekdayShort.contains(label) ? label[0] : label;
 }
 
 // ─── Premium Skeleton Loader ─────────────────────────────────────────────────

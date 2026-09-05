@@ -307,9 +307,9 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
         // ── Week comparison ─────────────────────────────────
         Row(
           children: [
-            _StatBox(label: 'This Week', value: _fmt(d.weekTotal), flex: 2),
+            _StatBox(label: 'Last 7 Days', value: _fmt(d.weekTotal), flex: 2),
             const SizedBox(width: 10),
-            _StatBox(label: 'Last Week', value: _fmt(d.lastWeekTotal), flex: 2),
+            _StatBox(label: 'Prev 7 Days', value: _fmt(d.lastWeekTotal), flex: 2),
             const SizedBox(width: 10),
             _StatBox(
               label: 'WoW',
@@ -334,7 +334,7 @@ class _VendorDetailSheetState extends State<_VendorDetailSheet>
               const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
               const SizedBox(width: 8),
               Text(
-                'Best day this week: ',
+                'Best day (last 7d): ',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   color: Colors.white54,
