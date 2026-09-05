@@ -17,6 +17,8 @@ import 'manage_etl_managers_screen.dart';
 import 'outlet_staff_management_screen.dart';
 import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 import '../../outlets/presentation/manage_access_screen.dart';
+import '../../outlets/presentation/outlet_documents_screen.dart';
+import '../../outlets/presentation/etl_outlet_docs_picker_screen.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
 import '../../attendance_calendar/presentation/manager_attendance_screen.dart';
@@ -404,6 +406,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                   subtitle: 'GoFrugal, Petpooja, Vyapar',
                                   onTap: () {},
                                 ),
+                                _GroupDivider(),
+                                _NavTile(
+                                  icon: Icons.folder_copy_rounded,
+                                  label: 'Outlet Documents',
+                                  subtitle: "View & manage any outlet's documents",
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const EtlOutletDocsPickerScreen(),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -490,6 +505,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                                     MaterialPageRoute(
                                       builder: (_) =>
                                           OutletStaffManagementScreen(
+                                        outletId: effectiveOutletId,
+                                        outletName: outletName,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                _GroupDivider(),
+                                _NavTile(
+                                  icon: Icons.folder_copy_rounded,
+                                  label: 'Documents',
+                                  subtitle: 'GST, FSSAI, term sheet, agreement',
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => OutletDocumentsScreen(
                                         outletId: effectiveOutletId,
                                         outletName: outletName,
                                       ),

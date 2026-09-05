@@ -65,6 +65,27 @@ class OutletManager {
       );
 }
 
+/// One document slot on an outlet (from GET /outlets/{id}/documents).
+class OutletDocument {
+  final String docType; // gst | fssai | term_sheet | agreement
+  final String label;
+  final String? url; // public path or null when not uploaded
+
+  const OutletDocument({
+    required this.docType,
+    required this.label,
+    this.url,
+  });
+
+  bool get hasFile => url != null && url!.isNotEmpty;
+
+  factory OutletDocument.fromJson(Map<String, dynamic> j) => OutletDocument(
+        docType: (j['doc_type'] ?? '') as String,
+        label: (j['label'] ?? '') as String,
+        url: j['url'] as String?,
+      );
+}
+
 class OutletsRepository {
   final Dio _dio;
   OutletsRepository(this._dio);
@@ -104,6 +125,48 @@ class OutletsRepository {
   /// Owner revokes a co-manager's access to this outlet.
   Future<void> removeManager(int outletId, int managerId) async {
     await _dio.delete('/outlets/$outletId/managers/$managerId');
+  }
+
+  // ── Documents (GST / FSSAI / term sheet / agreement) ───────────────────────
+
+  /// View an outlet's documents (no password needed).
+  Future<List<OutletDocument>> listDocuments(int outletId) async {
+    final res = await _dio.get('/outlets/$outletId/documents');
+    final data = res.data as Map;
+    final list = (data['documents'] as List? ?? []);
+    return list
+        .map((e) => OutletDocument.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  /// Upload / replace one document. Requires the acting account's password.
+  Future<String?> uploadDocument(
+    int outletId,
+    String docType,
+    String filePath,
+    String password,
+  ) async {
+    final form = FormData.fromMap({
+      'password': password,
+      'file': await MultipartFile.fromFile(filePath),
+    });
+    final res = await _dio.post(
+      '/outlets/$outletId/documents/$docType',
+      data: form,
+    );
+    return (res.data as Map)['url'] as String?;
+  }
+
+  /// Remove one document. Requires the acting account's password.
+  Future<void> deleteDocument(
+    int outletId,
+    String docType,
+    String password,
+  ) async {
+    await _dio.delete(
+      '/outlets/$outletId/documents/$docType',
+      data: {'password': password},
+    );
   }
 
   /// ETL admin: correct an outlet owner's name / email / phone.
