@@ -70,7 +70,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -79,9 +79,14 @@ async def lifespan(app: FastAPI):
     ensure_attendance_columns()
     print("[DB] Attendance schema ensured ✓")
 
-    # ✅ Add per-outlet Petpooja credential columns + pos_source if missing
+    # ✅ Add per-outlet Petpooja credential columns + pos_source + doc columns
     ensure_outlet_columns()
     print("[DB] Outlet schema ensured ✓")
+
+    # ✅ Seed outlet doc columns from the linked onboarding application (only
+    #    fills NULLs, so it never clobbers a doc changed via the new endpoints).
+    backfill_outlet_documents()
+    print("[DB] Outlet documents backfill ensured ✓")
 
     # ✅ Seed the multi-source sales_orders table from the legacy petpooja_orders
     # backup (idempotent). Runs after create_all built sales_orders.

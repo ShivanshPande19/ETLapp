@@ -86,6 +86,15 @@ class Outlet(Base):
     # Other values: 'petpooja_salesdata' (get_sales_data flow), 'royal_pos'.
     pos_source = Column(String, nullable=False, default="petpooja_generic")
 
+    # ✅ Onboarding documents live on the OUTLET (source of truth) so they can be
+    # uploaded / replaced / removed at ANY time — not just captured once at
+    # application time. Backfilled from the linked OutletApplication on boot.
+    # Each stores the public URL path ("uploads/documents/...") or NULL.
+    gst_url = Column(String, nullable=True)
+    fssai_url = Column(String, nullable=True)
+    term_sheet_url = Column(String, nullable=True)
+    agreement_url = Column(String, nullable=True)
+
     court = relationship("Court", back_populates="outlets")
     sales_cache = relationship("DailySaleCache", back_populates="outlet", cascade="all, delete-orphan")
 
