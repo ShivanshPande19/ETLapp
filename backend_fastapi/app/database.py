@@ -168,6 +168,12 @@ def ensure_outlet_columns() -> None:
         # Which POS adapter fetches this outlet. DEFAULT backfills existing rows
         # via the DDL itself so every legacy outlet keeps the generic flow.
         "pos_source": "VARCHAR DEFAULT 'petpooja_generic'",
+        # Onboarding documents (managed post-onboarding, source of truth on the
+        # outlet). Backfilled from outlet_applications by backfill_outlet_documents.
+        "gst_url": "VARCHAR",
+        "fssai_url": "VARCHAR",
+        "term_sheet_url": "VARCHAR",
+        "agreement_url": "VARCHAR",
     }
     try:
         with engine.begin() as conn:
@@ -268,6 +274,40 @@ def backfill_outlet_memberships() -> None:
         print("[MIGRATION] backfill_outlet_memberships ran ✓")
     except Exception as e:
         print(f"[MIGRATION] backfill_outlet_memberships skipped: {e}")
+
+
+def backfill_outlet_documents() -> None:
+    """One-time, idempotent copy of onboarding documents from
+    ``outlet_applications`` → the new ``outlets`` doc columns.
+
+    Documents were historically captured once on the application; they are now
+    managed on the outlet (upload/replace/remove any time). This seeds each
+    outlet's doc columns from its approved application so nothing already
+    uploaded is lost. Only fills columns that are still NULL, so it never
+    clobbers a doc that has since been changed via the new endpoints — safe on
+    every boot.
+    """
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            tables = set(insp.get_table_names())
+            if "outlets" not in tables or "outlet_applications" not in tables:
+                return  # fresh DB — nothing to backfill
+            for col in ("gst_url", "fssai_url", "term_sheet_url", "agreement_url"):
+                conn.execute(
+                    text(
+                        f"UPDATE outlets SET {col} = ("
+                        f"  SELECT a.{col} FROM outlet_applications a "
+                        f"  WHERE a.created_outlet_id = outlets.id AND a.{col} IS NOT NULL "
+                        f"  ORDER BY a.id DESC LIMIT 1) "
+                        f"WHERE {col} IS NULL AND EXISTS ("
+                        f"  SELECT 1 FROM outlet_applications a2 "
+                        f"  WHERE a2.created_outlet_id = outlets.id AND a2.{col} IS NOT NULL)"
+                    )
+                )
+        print("[MIGRATION] backfill_outlet_documents ran ✓")
+    except Exception as e:
+        print(f"[MIGRATION] backfill_outlet_documents skipped: {e}")
 
 
 def ensure_staff_columns() -> None:

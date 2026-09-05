@@ -558,10 +558,12 @@ def list_court_outlets(
             owner_name=a.owner_name if a else None,
             owner_email=a.owner_email if a else None,
             owner_phone=a.owner_phone if a else None,
-            gst_url=a.gst_url if a else None,
-            fssai_url=a.fssai_url if a else None,
-            term_sheet_url=a.term_sheet_url if a else None,
-            agreement_url=a.agreement_url if a else None,
+            # Docs now live on the OUTLET (managed post-onboarding). Fall back to
+            # the application only if the outlet column is still null (pre-backfill).
+            gst_url=o.gst_url or (a.gst_url if a else None),
+            fssai_url=o.fssai_url or (a.fssai_url if a else None),
+            term_sheet_url=o.term_sheet_url or (a.term_sheet_url if a else None),
+            agreement_url=o.agreement_url or (a.agreement_url if a else None),
             has_petpooja_creds=bool(o.pp_app_key),
             application_id=a.id if a else None,
         ))

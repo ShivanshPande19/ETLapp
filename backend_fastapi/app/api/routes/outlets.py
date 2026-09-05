@@ -14,17 +14,19 @@
 # Only an owner (or an ETL manager) may call the manage-access endpoints.
 
 import logging
+import os
 import secrets
+import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import text, inspect
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...core.config import settings
-from ...core.security import create_token, hash_password
+from ...core.security import create_token, hash_password, verify_password
 from ...models.manager import Manager
 from ...models.staff import Staff
 from ...models.sale import Outlet, Court
@@ -35,6 +37,7 @@ from ...models.outlet_membership import (
     MEMBERSHIP_MANAGER,
 )
 from ...services.email_service import send_email
+from ...services.notice_service import create_notice
 from ..deps import get_current_user, require_etl_manager, CurrentUser
 
 logger = logging.getLogger("outlets")
@@ -551,3 +554,172 @@ def delete_outlet(
         "staff_deleted": len(staff_ids),
         "rows_deleted": counts,
     }
+
+
+
+# ─── Outlet documents (GST / FSSAI / term sheet / agreement) ─────────────────
+#
+# Documents live on the OUTLET (backfilled from the onboarding application), so
+# they can be uploaded / replaced / removed at ANY time — by the outlet's owner
+# or an ETL manager. VIEWING is free (anyone who can access the outlet); every
+# CHANGE re-authenticates the acting account with its OWN password (a lightweight
+# "unlock", so a left-open phone can't be used to alter documents). Any change
+# notifies the OTHER side: an ETL edit pings the outlet's manager; an owner edit
+# pings the ETL managers.
+
+_DOC_COLUMNS = {
+    "gst": "gst_url",
+    "fssai": "fssai_url",
+    "term_sheet": "term_sheet_url",
+    "agreement": "agreement_url",
+}
+_DOC_LABELS = {
+    "gst": "GST certificate",
+    "fssai": "FSSAI licence",
+    "term_sheet": "Term sheet",
+    "agreement": "Agreement",
+}
+_ALLOWED_DOC_TYPES = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+_MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+class DocPasswordBody(BaseModel):
+    password: str
+
+
+def _outlet_for_docs(db: Session, user: CurrentUser, outlet_id: int) -> Outlet:
+    """Fetch an active outlet the caller may access (ETL manager → any; outlet
+    user → only their own via membership)."""
+    outlet = db.query(Outlet).filter(Outlet.id == outlet_id, Outlet.is_active == 1).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Outlet not found or inactive.")
+    if not user.can_access_outlet(outlet_id):
+        raise HTTPException(status_code=403, detail="You cannot access this outlet.")
+    return outlet
+
+
+def _reauth(db: Session, user: CurrentUser, password: Optional[str]) -> None:
+    """Re-authenticate the acting account by its own password before a change.
+    Only manager accounts (ETL or outlet) manage documents."""
+    if user.user_type != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can change documents.")
+    pw = (password or "").strip()
+    if not pw:
+        raise HTTPException(status_code=400, detail="Password is required to change documents.")
+    m = db.query(Manager).filter(Manager.id == user.id, Manager.is_active == True).first()  # noqa: E712
+    if not m or not verify_password(pw, m.hashed_password):
+        raise HTTPException(status_code=403, detail="Incorrect password.")
+
+
+async def _save_document(f: UploadFile, outlet_id: int, doc_type: str) -> str:
+    ext = _ALLOWED_DOC_TYPES.get(f.content_type or "")
+    if ext is None:
+        raise HTTPException(status_code=400, detail="Invalid file type. Upload PDF, JPG, PNG or WebP.")
+    data = await f.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(data) > _MAX_DOC_BYTES:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB).")
+    folder = os.path.join(settings.UPLOAD_DIR, "documents")
+    os.makedirs(folder, exist_ok=True)
+    filename = f"{doc_type}_{outlet_id}_{uuid.uuid4()}.{ext}"
+    with open(os.path.join(folder, filename), "wb") as buf:
+        buf.write(data)
+    return f"uploads/documents/{filename}"
+
+
+def _notify_doc_change(db: Session, user: CurrentUser, outlet: Outlet, doc_type: str, action: str) -> None:
+    label = _DOC_LABELS.get(doc_type, "document")
+    verb = "uploaded" if action == "upload" else "removed"
+    try:
+        if user.is_etl_manager:
+            # ETL admin changed it → tell the outlet's manager.
+            create_notice(
+                db,
+                audience="manager",
+                type="document_updated",
+                title=f"{label} {verb}",
+                body=f"An ETL admin {verb} the {label} for {outlet.vendor_name}.",
+                outlet_id=outlet.id,
+            )
+        else:
+            # Outlet owner/manager changed it → tell the ETL managers.
+            create_notice(
+                db,
+                audience="manager",
+                type="document_updated",
+                title=f"Outlet {label.lower()} {verb}",
+                body=f"{user.name} {verb} the {label} for {outlet.vendor_name}.",
+                court_id=outlet.court_id,
+                outlet_id=None,
+            )
+    except Exception as e:  # noqa: BLE001 — a notice must never break the change
+        logger.warning("doc-change notice failed for outlet %s: %s", outlet.id, e)
+
+
+@router.get("/{outlet_id}/documents")
+def get_outlet_documents(
+    outlet_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """View an outlet's documents (no password needed). Returns each doc type
+    with its current URL (or null)."""
+    outlet = _outlet_for_docs(db, user, outlet_id)
+    return {
+        "outlet_id": outlet.id,
+        "outlet_name": outlet.vendor_name,
+        "documents": [
+            {"doc_type": dt, "label": _DOC_LABELS[dt], "url": getattr(outlet, col)}
+            for dt, col in _DOC_COLUMNS.items()
+        ],
+    }
+
+
+@router.post("/{outlet_id}/documents/{doc_type}")
+async def upload_outlet_document(
+    outlet_id: int = Path(..., ge=1),
+    doc_type: str = Path(...),
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Upload or replace ONE document. Requires the acting account's password."""
+    if doc_type not in _DOC_COLUMNS:
+        raise HTTPException(status_code=400, detail="Unknown document type.")
+    outlet = _outlet_for_docs(db, user, outlet_id)
+    _reauth(db, user, password)
+    url = await _save_document(file, outlet_id, doc_type)
+    setattr(outlet, _DOC_COLUMNS[doc_type], url)
+    db.commit()
+    _notify_doc_change(db, user, outlet, doc_type, "upload")
+    return {"doc_type": doc_type, "label": _DOC_LABELS[doc_type], "url": url}
+
+
+@router.delete("/{outlet_id}/documents/{doc_type}")
+def delete_outlet_document(
+    body: DocPasswordBody,
+    outlet_id: int = Path(..., ge=1),
+    doc_type: str = Path(...),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Remove ONE document. Requires the acting account's password."""
+    if doc_type not in _DOC_COLUMNS:
+        raise HTTPException(status_code=400, detail="Unknown document type.")
+    outlet = _outlet_for_docs(db, user, outlet_id)
+    _reauth(db, user, body.password)
+    col = _DOC_COLUMNS[doc_type]
+    changed = getattr(outlet, col) is not None
+    setattr(outlet, col, None)
+    db.commit()
+    if changed:
+        _notify_doc_change(db, user, outlet, doc_type, "remove")
+    return {"doc_type": doc_type, "removed": True}
