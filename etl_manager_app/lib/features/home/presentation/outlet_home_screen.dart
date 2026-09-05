@@ -12,6 +12,7 @@ import '../../staff/presentation/view_roster_screen.dart';
 import 'home_providers.dart';
 import 'weekly_insights_screen.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/ui/nav_visibility.dart'; // hide nav bar over full-screen report
 import '../../outlets/presentation/outlet_switcher.dart'; // multi-outlet switcher
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
@@ -208,14 +209,24 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                               _sectionTitle('Weekly Highlights'),
                               const SizedBox(height: 12),
                               _PressableScale(
-                                onTap: () {
+                                onTap: () async {
                                   HapticFeedback.selectionClick();
-                                  Navigator.push(
+                                  // Hide the floating nav bar ONLY while the
+                                  // full-screen report is open, and restore it
+                                  // the moment we return. Doing it here (around
+                                  // the push) is robust — show() always runs on
+                                  // pop, unlike a dispose() hook which could be
+                                  // skipped and leave the bar stuck hidden.
+                                  final navBar =
+                                      ref.read(navBarVisibleProvider.notifier);
+                                  navBar.hide();
+                                  await Navigator.push(
                                     context,
                                     _fadeSlideRoute(
                                       const WeeklyInsightsScreen(),
                                     ),
                                   );
+                                  navBar.show();
                                 },
                                 child: AbsorbPointer(
                                   child: _ReportsCard(onTap: () {}),

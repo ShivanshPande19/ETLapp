@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/widgets/skeleton.dart';
-import '../../../core/ui/nav_visibility.dart';
 
 import 'home_providers.dart';
 
@@ -53,18 +52,12 @@ class _WeeklyInsightsScreenState extends ConsumerState<WeeklyInsightsScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
     _animCtrl.forward();
-
-    // Hide the floating bottom nav bar while this full-screen report is open
-    // (mirrors the outlet-switcher pattern). Restored in dispose().
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(navBarVisibleProvider.notifier).hide();
-    });
+    // Nav-bar hide/show is handled at the call site (OutletHomeScreen) around
+    // the push — robust, so the bar is never left stuck hidden.
   }
 
   @override
   void dispose() {
-    // Bring the nav bar back when leaving the report.
-    ref.read(navBarVisibleProvider.notifier).show();
     _animCtrl.dispose();
     super.dispose();
   }
