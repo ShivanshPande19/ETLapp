@@ -194,6 +194,17 @@ class AppTheme {
     return base.copyWith(
       scaffoldBackgroundColor: background,
       textTheme: textTheme,
+
+      // Text caret / selection. The app's input fields sit on WHITE sheets, so
+      // the default (dark-theme) white cursor was invisible. A black caret with
+      // brand-red selection handles is visible everywhere and on-brand. Applies
+      // app-wide; individual fields may still override.
+      textSelectionTheme: const TextSelectionThemeData(
+        cursorColor: Color(0xFF0A0A0A),
+        selectionColor: Color(0x33D02128),
+        selectionHandleColor: Color(0xFFD02128),
+      ),
+
       colorScheme: const ColorScheme.dark(
         primary: primary,
         surface: surface,

@@ -263,13 +263,15 @@ class _OutletStaffManagementScreenState
             ListTile(
               leading: const Icon(Icons.camera_alt_rounded, color: _black),
               title: Text('Take Photo',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: _black)),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_rounded, color: _black),
               title: Text('Choose from Gallery',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: _black)),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
           ],
