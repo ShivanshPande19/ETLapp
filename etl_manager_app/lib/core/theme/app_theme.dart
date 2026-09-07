@@ -354,4 +354,105 @@ class AppTheme {
       ),
     );
   }
+
+  // ── Date picker (shared) ──────────────────────────────────────────────────
+  // ONE app-wide builder for `showDatePicker` / `showDateRangePicker` so every
+  // date selector in the app looks identical. Pass it directly:
+  //     builder: AppTheme.datePickerBuilder
+  //
+  // Why a fresh ThemeData (not the app theme): the app's body text styles carry
+  // line-height multipliers (height: 1.5/1.6) which overflow the picker's
+  // fixed-height day/year cells (RenderFlex overflow on device). A clean dark
+  // base with Inter typography renders correctly.
+  //
+  // Palette: NO coloured accents. Selected day/endpoints = white circle with
+  // black text; the in-range band is a subtle translucent grey with off-white
+  // date numbers — so dates stay clearly readable (fixes the old low-contrast
+  // coloured range highlight that hid the day numbers).
+  static Widget datePickerBuilder(BuildContext context, Widget? child) {
+    final base = ThemeData.dark(useMaterial3: true);
+    return Theme(
+      data: base.copyWith(
+        textTheme: GoogleFonts.interTextTheme(base.textTheme),
+        colorScheme: base.colorScheme.copyWith(
+          primary: primary,
+          onPrimary: Colors.black,
+          secondary: primary,
+          onSecondary: Colors.black,
+          surface: const Color(0xFF141414),
+          onSurface: textPrimary,
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: primary,
+            textStyle: GoogleFonts.inter(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        datePickerTheme: DatePickerThemeData(
+          backgroundColor: const Color(0xFF141414),
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.black,
+          headerBackgroundColor: const Color(0xFF141414),
+          headerForegroundColor: textPrimary,
+          dividerColor: border,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusXl),
+          ),
+          weekdayStyle: GoogleFonts.inter(
+            color: textSecondary,
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+
+          // Full-screen range picker chrome.
+          rangePickerBackgroundColor: background,
+          rangePickerSurfaceTintColor: Colors.transparent,
+          rangePickerElevation: 0,
+          rangePickerHeaderBackgroundColor: background,
+          rangePickerHeaderForegroundColor: textPrimary,
+          // Subtle translucent-grey band between the two endpoints. Off-white
+          // in-range dates read clearly on it (old coloured band hid them).
+          rangeSelectionBackgroundColor: const Color(0x1FFFFFFF),
+          rangeSelectionOverlayColor:
+              WidgetStateProperty.all(const Color(0x14FFFFFF)),
+
+          // Day cells.
+          dayForegroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) return textFaint;
+            if (states.contains(WidgetState.selected)) return Colors.black;
+            return textPrimary;
+          }),
+          dayBackgroundColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.selected) ? primary : null,
+          ),
+          dayOverlayColor: WidgetStateProperty.all(const Color(0x14FFFFFF)),
+          todayForegroundColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.selected) ? Colors.black : primary,
+          ),
+          todayBackgroundColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.selected) ? primary : null,
+          ),
+          todayBorder: const BorderSide(color: primaryMuted),
+
+          // Year grid.
+          yearForegroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) return textFaint;
+            if (states.contains(WidgetState.selected)) return Colors.black;
+            return textPrimary;
+          }),
+          yearBackgroundColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.selected) ? primary : null,
+          ),
+        ),
+      ),
+      child: child!,
+    );
+  }
 }

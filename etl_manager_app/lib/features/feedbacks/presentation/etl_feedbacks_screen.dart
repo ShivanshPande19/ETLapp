@@ -1,6 +1,7 @@
 // lib/features/feedbacks/presentation/etl_feedbacks_screen.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -130,17 +131,7 @@ class _EtlFeedbacksScreenState extends ConsumerState<EtlFeedbacksScreen>
       initialDate: current ?? DateTime.now(),
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: _accent,
-            onPrimary: _black,
-            surface: Color(0xFF1A1A1A),
-            onSurface: _white,
-          ),
-        ),
-        child: child!,
-      ),
+      builder: AppTheme.datePickerBuilder,
     );
     if (picked != null) {
       HapticFeedback.selectionClick();

@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -455,15 +456,7 @@ class _ManagerHousekeepingScreenState
       initialDate: _date,
       firstDate: DateTime(2025),
       lastDate: DateTime.now().add(const Duration(days: 1)),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: _white,
-            onPrimary: _black,
-          ),
-        ),
-        child: child!,
-      ),
+      builder: AppTheme.datePickerBuilder,
     );
     if (picked != null) {
       setState(() => _date = picked);

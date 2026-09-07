@@ -5,6 +5,7 @@
 // aur court filter chips. Data: GET /roster/etl.
 
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -105,17 +106,7 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
       initialDate: current,
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: _ok,
-            onPrimary: _black,
-            surface: Color(0xFF1A1A1A),
-            onSurface: _white,
-          ),
-        ),
-        child: child!,
-      ),
+      builder: AppTheme.datePickerBuilder,
     );
     if (picked != null) _setDate(picked);
   }

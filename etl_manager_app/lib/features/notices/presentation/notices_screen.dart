@@ -1,5 +1,6 @@
 // lib/features/notices/presentation/notices_screen.dart
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -63,23 +64,7 @@ class _NoticesScreenState extends ConsumerState<NoticesScreen> {
       firstDate: DateTime(now.year - 2),
       lastDate: DateTime(now.year, now.month, now.day),
       helpText: 'View notices from',
-      // Use a FRESH ThemeData (not Theme.of(ctx)). The app theme's text styles
-      // carry line-height multipliers (height: 1.5/1.6) which, applied to the
-      // Material date picker's fixed-height day/year cells, overflow the grid
-      // (a giant RenderFlex bottom overflow on device). A clean dark theme with
-      // default text metrics renders correctly — same approach as the feedbacks
-      // date pickers.
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark(useMaterial3: true).copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: _red,
-            onPrimary: _white,
-            surface: Color(0xFF1A1A1A),
-            onSurface: _white,
-          ),
-        ),
-        child: child!,
-      ),
+      builder: AppTheme.datePickerBuilder,
     );
     if (picked != null) {
       HapticFeedback.selectionClick();
