@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -108,17 +109,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
         start: yesterday.subtract(const Duration(days: 6)),
         end: yesterday,
       ),
-      builder: (ctx, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: _white,
-            onPrimary: _black,
-            surface: Color(0xFF1A1A1A),
-            onSurface: _white,
-          ),
-        ),
-        child: child!,
-      ),
+      builder: AppTheme.datePickerBuilder,
     );
     if (picked == null || !mounted) return;
     HapticFeedback.selectionClick();
