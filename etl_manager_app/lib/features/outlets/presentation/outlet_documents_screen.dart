@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/dio_provider.dart' show baseUrl;
@@ -180,6 +181,7 @@ class _OutletDocumentsScreenState
                 controller: ctrl,
                 obscureText: true,
                 autofocus: true,
+                cursorColor: _black,
                 style: GoogleFonts.inter(color: _black, fontWeight: FontWeight.w600),
                 decoration: InputDecoration(
                   hintText: 'Your password',
@@ -227,8 +229,8 @@ class _OutletDocumentsScreenState
     );
   }
 
-  Future<String?> _pickImagePath() async {
-    final source = await showModalBottomSheet<ImageSource>(
+  Future<String?> _pickFilePath() async {
+    final choice = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
@@ -244,22 +246,40 @@ class _OutletDocumentsScreenState
             ListTile(
               leading: const Icon(Icons.camera_alt_rounded, color: _black),
               title: Text('Take Photo',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-              onTap: () => Navigator.pop(context, ImageSource.camera),
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: _black)),
+              onTap: () => Navigator.pop(context, 'camera'),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_rounded, color: _black),
               title: Text('Choose from Gallery',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-              onTap: () => Navigator.pop(context, ImageSource.gallery),
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: _black)),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open_rounded, color: _black),
+              title: Text('Upload from files',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: _black)),
+              subtitle: Text('PDF or image',
+                  style: GoogleFonts.inter(fontSize: 11, color: _grey)),
+              onTap: () => Navigator.pop(context, 'file'),
             ),
           ],
         ),
       ),
     );
-    if (source == null) return null;
+    if (choice == null) return null;
+    if (choice == 'file') {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+      );
+      return res?.files.single.path;
+    }
     final XFile? img = await ImagePicker().pickImage(
-      source: source,
+      source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
       imageQuality: 80,
       maxWidth: 1600,
     );
@@ -269,7 +289,7 @@ class _OutletDocumentsScreenState
   Future<void> _upload(OutletDocument d) async {
     final pw = await _askPassword(d.hasFile ? 'Replacing' : 'Uploading', d.label);
     if (pw == null) return;
-    final path = await _pickImagePath();
+    final path = await _pickFilePath();
     if (path == null) return;
     setState(() => _busyType = d.docType);
     try {
