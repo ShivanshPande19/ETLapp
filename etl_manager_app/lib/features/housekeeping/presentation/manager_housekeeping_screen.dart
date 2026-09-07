@@ -780,6 +780,8 @@ class _SummaryCard extends StatelessWidget {
                   children: [
                     Text(
                       '$courtName · $shiftName Shift',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -797,12 +799,16 @@ class _SummaryCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 5),
-                        Text(
-                          total == 0 ? 'no tasks yet' : 'tasks done',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: _white.withOpacity(0.45),
-                            fontWeight: FontWeight.w500,
+                        Flexible(
+                          child: Text(
+                            total == 0 ? 'no tasks yet' : 'tasks done',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: _white.withOpacity(0.45),
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],

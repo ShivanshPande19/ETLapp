@@ -661,12 +661,17 @@ class _VisualDataRings extends StatelessWidget {
                       tween: Tween(begin: 0, end: bills.toDouble()),
                       duration: const Duration(milliseconds: 1000),
                       curve: Curves.easeOutCubic,
-                      builder: (_, val, __) => Text(
-                        val.toInt().toString(),
-                        style: GoogleFonts.antonSc(
-                          fontSize: 42,
-                          color: _white,
-                          height: 1.0,
+                      builder: (_, val, __) => FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          val.toInt().toString(),
+                          maxLines: 1,
+                          style: GoogleFonts.antonSc(
+                            fontSize: 42,
+                            color: _white,
+                            height: 1.0,
+                          ),
                         ),
                       ),
                     ),
@@ -730,12 +735,17 @@ class _VisualDataRings extends StatelessWidget {
                       tween: Tween(begin: 0, end: avgBill),
                       duration: const Duration(milliseconds: 1000),
                       curve: Curves.easeOutCubic,
-                      builder: (_, val, __) => Text(
-                        '₹${val.toStringAsFixed(0)}',
-                        style: GoogleFonts.antonSc(
-                          fontSize: 42,
-                          color: _black,
-                          height: 1.0,
+                      builder: (_, val, __) => FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '₹${val.toStringAsFixed(0)}',
+                          maxLines: 1,
+                          style: GoogleFonts.antonSc(
+                            fontSize: 42,
+                            color: _black,
+                            height: 1.0,
+                          ),
                         ),
                       ),
                     ),

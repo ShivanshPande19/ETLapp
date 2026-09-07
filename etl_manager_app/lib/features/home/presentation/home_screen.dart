@@ -290,7 +290,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           _StaggerRow(
                             anim: _stagger(0),
                             child: SizedBox(
-                              height: 120,
+                              height: 148,
                               child: Row(
                                 children: [
                                   Expanded(
@@ -508,14 +508,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                   milliseconds: 700,
                                                 ),
                                                 curve: Curves.easeOutCubic,
-                                                builder: (_, val, __) => Text(
-                                                  '₹${_fmt(val)}',
-                                                  style: GoogleFonts.antonSc(
-                                                    fontSize: 26,
-                                                    color: _black,
-                                                    height: 1,
-                                                  ),
-                                                ),
+                                                builder: (_, val, __) =>
+                                                    FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      alignment:
+                                                          Alignment.centerLeft,
+                                                      child: Text(
+                                                        '₹${_fmt(val)}',
+                                                        maxLines: 1,
+                                                        style:
+                                                            GoogleFonts.antonSc(
+                                                          fontSize: 26,
+                                                          color: _black,
+                                                          height: 1,
+                                                        ),
+                                                      ),
+                                                    ),
                                               ),
                                       ],
                                     ),
@@ -661,12 +669,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                                   MainAxisAlignment
                                                       .spaceBetween,
                                               children: [
-                                                Text(
-                                                  'Maintenance',
-                                                  style: GoogleFonts.inter(
-                                                    fontSize: 12,
-                                                    color: Colors.white60,
-                                                    fontWeight: FontWeight.w500,
+                                                Flexible(
+                                                  child: Text(
+                                                    'Maintenance',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 12,
+                                                      color: Colors.white60,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
                                                   ),
                                                 ),
                                                 Icon(

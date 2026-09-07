@@ -142,7 +142,10 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  _sectionTitle("Yesterday's Performance"),
+                                  Flexible(
+                                    child: _sectionTitle(
+                                        "Yesterday's Performance"),
+                                  ),
                                   const Icon(
                                     Icons.show_chart_rounded,
                                     size: 16,
@@ -321,6 +324,8 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
   // ─── Utils ─────────────────────────────────────────────────────────────────
   Widget _sectionTitle(String t) => Text(
     t,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
     style: GoogleFonts.inter(
       fontSize: 15,
       fontWeight: FontWeight.w800,
@@ -558,12 +563,16 @@ class _StatBox extends StatelessWidget {
           children: [
             Icon(icon, size: 10, color: color),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                color: _grey,
-                fontWeight: FontWeight.w600,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: _grey,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],

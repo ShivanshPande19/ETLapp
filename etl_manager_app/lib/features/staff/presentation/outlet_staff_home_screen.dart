@@ -114,7 +114,8 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Column(
+                    Expanded(
+                      child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
@@ -127,13 +128,18 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Text(
-                          firstName.toUpperCase(),
-                          style: GoogleFonts.antonSc(
-                            fontSize: 42,
-                            color: _white,
-                            height: 1.0,
-                            letterSpacing: 0.5,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            firstName.toUpperCase(),
+                            maxLines: 1,
+                            style: GoogleFonts.antonSc(
+                              fontSize: 42,
+                              color: _white,
+                              height: 1.0,
+                              letterSpacing: 0.5,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -145,19 +151,24 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
                               color: _blue,
                             ),
                             const SizedBox(width: 6),
-                            Text(
-                              (outletName != null && outletName.isNotEmpty)
-                                  ? outletName
-                                  : 'Your Outlet',
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: _white.withOpacity(0.8),
-                                fontWeight: FontWeight.w600,
+                            Flexible(
+                              child: Text(
+                                (outletName != null && outletName.isNotEmpty)
+                                    ? outletName
+                                    : 'Your Outlet',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: _white.withOpacity(0.8),
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ],
+                      ),
                     ),
                     Row(
                       mainAxisSize: MainAxisSize.min,
