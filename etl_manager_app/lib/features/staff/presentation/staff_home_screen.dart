@@ -514,10 +514,12 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                       opacity: _heroFade,
                       child: Row(
                         children: [
-                          _HeaderTag(
-                            icon: Icons.stadium_rounded,
-                            label: realCourtName,
-                            color: _blue,
+                          Flexible(
+                            child: _HeaderTag(
+                              icon: Icons.stadium_rounded,
+                              label: realCourtName,
+                              color: _blue,
+                            ),
                           ),
                           const SizedBox(width: 8),
                           _HeaderTag(
@@ -697,12 +699,16 @@ class _HeaderTag extends StatelessWidget {
         children: [
           Icon(icon, size: 13, color: color),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: color == _white ? _white.withOpacity(0.85) : color,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color == _white ? _white.withOpacity(0.85) : color,
+              ),
             ),
           ),
         ],
@@ -722,13 +728,17 @@ class _SectionLabel extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: GoogleFonts.inter(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-            color: _black,
-            letterSpacing: -0.3,
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: _black,
+              letterSpacing: -0.3,
+            ),
           ),
         ),
         if (trailing != null) trailing!,
@@ -1321,14 +1331,19 @@ class _HousekeepingCardState extends State<_HousekeepingCard> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '${widget.done} / ${widget.total} tasks done',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: _grey,
-                      fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: Text(
+                      '${widget.done} / ${widget.total} tasks done',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: _grey,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Row(
                     children: [
                       Text(

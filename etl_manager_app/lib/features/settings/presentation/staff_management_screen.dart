@@ -177,12 +177,16 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
                           ),
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          widget.courtName,
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            color: _white.withOpacity(0.45),
-                            fontWeight: FontWeight.w500,
+                        Flexible(
+                          child: Text(
+                            widget.courtName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: _white.withOpacity(0.45),
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],

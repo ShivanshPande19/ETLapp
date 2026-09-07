@@ -1091,12 +1091,13 @@ class _VendorBentoCardState extends State<_VendorBentoCard>
                       children: [
                         Text(
                           widget.vendor.vendorName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: textColor,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
                         Text(
                           widget.vendor.sourceSystem,

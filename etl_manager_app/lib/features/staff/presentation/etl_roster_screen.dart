@@ -593,12 +593,16 @@ class _SummaryCard extends StatelessWidget {
         style: GoogleFonts.antonSc(fontSize: 18, color: _white, height: 1.0),
       ),
       const SizedBox(width: 8),
-      Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          color: Colors.white60,
-          fontWeight: FontWeight.w600,
+      Flexible(
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            color: Colors.white60,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     ],

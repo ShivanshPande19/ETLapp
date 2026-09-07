@@ -143,13 +143,19 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
                         ),
                       ),
                       const SizedBox(width: 20),
-                      Text(
-                        'DAILY ROSTER',
-                        style: GoogleFonts.antonSc(
-                          fontSize: 30,
-                          color: _white,
-                          letterSpacing: 0.5,
-                          height: 1.1,
+                      Expanded(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'DAILY ROSTER',
+                            style: GoogleFonts.antonSc(
+                              fontSize: 30,
+                              color: _white,
+                              letterSpacing: 0.5,
+                              height: 1.1,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -239,15 +245,20 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'Staff Overview',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w900,
-                                      color: _black,
-                                      letterSpacing: -0.5,
+                                  Flexible(
+                                    child: Text(
+                                      'Staff Overview',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w900,
+                                        color: _black,
+                                        letterSpacing: -0.5,
+                                      ),
                                     ),
                                   ),
+                                  const SizedBox(width: 8),
                                   Text(
                                     '$present / $total in',
                                     style: GoogleFonts.inter(
@@ -600,12 +611,16 @@ class _RosterSummaryCard extends StatelessWidget {
         style: GoogleFonts.antonSc(fontSize: 18, color: _white, height: 1.0),
       ),
       const SizedBox(width: 8),
-      Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          color: Colors.white60,
-          fontWeight: FontWeight.w600,
+      Flexible(
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            color: Colors.white60,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     ],

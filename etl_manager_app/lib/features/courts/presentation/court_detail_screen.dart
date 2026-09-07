@@ -716,12 +716,16 @@ class _StatBox extends StatelessWidget {
           children: [
             Icon(icon, size: 10, color: color),
             const SizedBox(width: 3),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                color: _grey,
-                fontWeight: FontWeight.w500,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: _grey,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
