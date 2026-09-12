@@ -156,6 +156,143 @@ async def sync_outlet_for_dates(
     return list(affected_business_dates)
 
 
+async def resync_outlet_range(
+    db: Session,
+    outlet: Outlet,
+    date_from: date,
+    date_to: date,
+    purge: bool = True,
+) -> dict:
+    """Repair/rebuild one outlet's sales over an explicit date range.
+
+    Unlike the routine 3-day deep sync, this re-fetches EVERY day in
+    ``[date_from, date_to]`` and (optionally) PURGES the outlet's existing rows
+    for its POS source first, so a corrupted history (e.g. the daily-reset
+    orderID collision) is rebuilt cleanly with the current, collision-free key.
+
+    SAFETY: we fetch first and only purge if the fetch actually returned bills
+    (or the range legitimately has none but the caller forced purge). This means
+    a transient POS/network failure can never wipe good data and leave the
+    outlet at ₹0 — the purge simply doesn't happen and the caller sees 0 fetched.
+    """
+    source = outlet.pos_source or "petpooja_generic"
+
+    cutoff_hour = 0
+    if outlet.court_id:
+        court = db.query(Court).filter(Court.id == outlet.court_id).first()
+        cutoff_hour = (court.day_cutoff_hour or 0) if court else 0
+
+    adapter = get_adapter(source)
+
+    # Requesting order_date=D on the Petpooja generic API returns bills dated D
+    # AND D-1, so fetching each day in [from, to] fully covers business days
+    # [from, to]. Other range-based adapters read min..max themselves.
+    span = (date_to - date_from).days
+    api_dates = [date_from + timedelta(days=i) for i in range(span + 1)]
+
+    orders = await adapter.fetch_normalized_orders(
+        outlet, api_dates, cutoff_hour=cutoff_hour
+    )
+
+    # Only keep bills that actually fall inside the requested window (the API
+    # can hand back an adjacent day; we don't want to purge-and-rebuild dates
+    # outside the caller's range).
+    orders = [o for o in orders if date_from <= o.business_date <= date_to]
+
+    if not orders and purge:
+        # Nothing came back — refuse to purge so we never blank a good outlet on
+        # a transient failure. Caller can retry.
+        return {
+            "outlet_id": outlet.id,
+            "vendor_name": outlet.vendor_name,
+            "purged": False,
+            "fetched_orders": 0,
+            "updated_business_dates": [],
+            "note": "No orders returned for the range — purge skipped (safety). Retry.",
+        }
+
+    purged = 0
+    if purge:
+        purged = (
+            db.query(SalesOrder)
+            .filter(
+                SalesOrder.outlet_id == outlet.id,
+                SalesOrder.source == source,
+                SalesOrder.business_date >= date_from,
+                SalesOrder.business_date <= date_to,
+            )
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+
+    affected = set()
+    for o in orders:
+        affected.add(o.business_date)
+        stmt = _upsert(db, SalesOrder).values(
+            outlet_id=outlet.id,
+            source=source,
+            external_ref=o.external_ref,
+            business_date=o.business_date,
+            created_on=o.created_on,
+            total_amount=o.total_amount,
+            status=o.status,
+        ).on_conflict_do_update(
+            index_elements=["outlet_id", "source", "external_ref"],
+            set_={
+                "total_amount": o.total_amount,
+                "business_date": o.business_date,
+                "status": o.status,
+            },
+        )
+        db.execute(stmt)
+    db.commit()
+
+    # Recompute cache for every affected business day (revenue-only, scoped to
+    # this outlet+source) — identical logic to sync_outlet_for_dates.
+    for b_date in affected:
+        stats = _revenue_only(
+            db.query(
+                func.sum(SalesOrder.total_amount).label("tot"),
+                func.count(SalesOrder.id).label("cnt"),
+            ).filter(
+                SalesOrder.outlet_id == outlet.id,
+                SalesOrder.business_date == b_date,
+                SalesOrder.source == source,
+            )
+        ).first()
+        tot = stats.tot or 0.0
+        cnt = stats.cnt or 0
+        avg = round(tot / cnt, 2) if cnt > 0 else 0.0
+        now = datetime.utcnow()
+        cache_stmt = _upsert(db, DailySaleCache).values(
+            outlet_id=outlet.id,
+            sale_date=b_date,
+            total_sales=tot,
+            bill_count=cnt,
+            avg_bill=avg,
+            fetched_at=now,
+        ).on_conflict_do_update(
+            index_elements=["outlet_id", "sale_date"],
+            set_={
+                "total_sales": tot,
+                "bill_count": cnt,
+                "avg_bill": avg,
+                "fetched_at": now,
+            },
+        )
+        db.execute(cache_stmt)
+    db.commit()
+
+    return {
+        "outlet_id": outlet.id,
+        "vendor_name": outlet.vendor_name,
+        "source": source,
+        "purged": purged,
+        "fetched_orders": len(orders),
+        "updated_business_dates": sorted(str(d) for d in affected),
+    }
+
+
 # === ROUTE HANDLERS ===
 
 async def sync_court_by_fetch_date(

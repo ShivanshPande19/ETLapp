@@ -14,7 +14,9 @@ from ...services.sales_service import (
 from ...services.petpooja_service import (
     sync_court_by_fetch_date,
     sync_all_active_outlets_by_fetch_date,
+    resync_outlet_range,
 )
+from ...models.sale import Outlet
 from ..deps import get_current_user, require_etl_manager, CurrentUser
 
 router = APIRouter()
@@ -211,4 +213,47 @@ async def sync_sales(
             status_code=502,
             detail="Sales sync failed for all outlets — check POS credentials / connectivity.",
         )
+    return result
+
+
+@router.post("/resync")
+async def resync_outlet(
+    outlet_id: int = Query(..., description="Outlet to repair/rebuild"),
+    date_from: str = Query(..., description="Start business date, YYYY-MM-DD"),
+    date_to: str = Query(..., description="End business date, YYYY-MM-DD (inclusive)"),
+    purge: bool = Query(True, description="Delete the outlet's existing rows in the range first (clean rebuild)"),
+    db: Session = Depends(get_db),
+    # ETL-manager-only: this purges + re-fetches an outlet's history.
+    user: CurrentUser = Depends(require_etl_manager),
+):
+    """Repair one outlet's sales over an explicit date range.
+
+    Re-fetches every day in the range from the outlet's POS and (by default)
+    purges the outlet's existing rows for that range first, so a corrupted
+    history — e.g. the daily-reset orderID collision that made per-day totals
+    read ₹0 / partial — is rebuilt cleanly with the current collision-free key.
+    Also doubles as a gap-healer for any window the routine 3-day sync missed.
+    """
+    try:
+        d_from = date.fromisoformat(date_from)
+        d_to = date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD")
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="date_from must be <= date_to")
+    # Guard against an accidentally huge range (one Petpooja call per day).
+    if (d_to - d_from).days > 400:
+        raise HTTPException(status_code=400, detail="Range too large (max 400 days).")
+
+    outlet = db.query(Outlet).filter(Outlet.id == outlet_id).first()
+    if not outlet:
+        raise HTTPException(status_code=404, detail="Outlet not found.")
+
+    try:
+        result = await resync_outlet_range(
+            db=db, outlet=outlet, date_from=d_from, date_to=d_to, purge=purge
+        )
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=502, detail="Resync failed — check POS credentials / connectivity.")
     return result

@@ -226,18 +226,66 @@ def backfill_sales_orders() -> None:
                 "" if _is_sqlite
                 else "ON CONFLICT (outlet_id, source, external_ref) DO NOTHING"
             )
-            cast = "CAST(order_id AS TEXT)" if _is_sqlite else "CAST(order_id AS VARCHAR)"
+            # external_ref is now DAY-SCOPED ("YYYY-MM-DD:orderID") to match the
+            # petpooja_generic adapter — the legacy orderID resets daily for many
+            # outlets, so a bare orderID collides across days. Build the same key
+            # here so a re-seed from petpooja_orders lines up with adapter rows
+            # (idempotent via the unique key) instead of double-inserting.
+            date_cast = "CAST(business_date AS TEXT)" if _is_sqlite else "CAST(business_date AS VARCHAR)"
+            id_cast = "CAST(order_id AS TEXT)" if _is_sqlite else "CAST(order_id AS VARCHAR)"
+            ext_ref = f"({date_cast} || ':' || {id_cast})"
             conn.execute(
                 text(
                     f"INSERT {conflict}INTO sales_orders "
                     "(outlet_id, source, external_ref, business_date, created_on, total_amount, status) "
-                    f"SELECT outlet_id, 'petpooja_generic', {cast}, business_date, created_on, "
+                    f"SELECT outlet_id, 'petpooja_generic', {ext_ref}, business_date, created_on, "
                     f"total_amount, 'completed' FROM petpooja_orders {tail}"
                 )
             )
         print("[MIGRATION] backfill_sales_orders ran ✓")
     except Exception as e:
         print(f"[MIGRATION] backfill_sales_orders skipped: {e}")
+
+
+def migrate_generic_sales_external_ref() -> None:
+    """One-time, idempotent purge of legacy old-format petpooja_generic rows.
+
+    ROOT CAUSE this fixes: Petpooja `generic_get_orders` returns a per-outlet
+    DAILY orderID for many outlets (it resets to 1 every day, not a global id).
+    ``sales_orders`` keyed bills on ``(outlet_id, source, external_ref=orderID)``
+    with NO date component, so bills sharing an orderID on different days
+    collided and overwrote each other via the sync's upsert — silently
+    corrupting per-day totals (recent days showed ₹0 / partial revenue).
+
+    The adapter now emits a DAY-SCOPED ``external_ref`` ("YYYY-MM-DD:orderID").
+    Any legacy row still on the OLD format (no ':' in external_ref) must be
+    removed so it can be rebuilt collision-free on the next sync — otherwise the
+    old collided row would linger and double-count or inflate a day. We only
+    DELETE from ``sales_orders``; ``DailySaleCache`` is left untouched (it is
+    recomputed per business day whenever that day is next synced), so the app's
+    displayed history is unchanged until a fresh sync/resync corrects it.
+
+    Idempotent: after the purge no old-format generic row remains, so the
+    ``NOT LIKE '%:%'`` filter matches nothing on subsequent boots.
+    """
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "sales_orders" not in insp.get_table_names():
+                return  # fresh DB — create_all just made the table
+            result = conn.execute(
+                text(
+                    "DELETE FROM sales_orders "
+                    "WHERE source = 'petpooja_generic' AND external_ref NOT LIKE '%:%'"
+                )
+            )
+            if result.rowcount:
+                print(
+                    f"[MIGRATION] purged {result.rowcount} legacy old-format "
+                    "petpooja_generic sales_orders row(s) for the day-key fix"
+                )
+    except Exception as e:
+        print(f"[MIGRATION] migrate_generic_sales_external_ref skipped: {e}")
 
 
 def backfill_outlet_memberships() -> None:
