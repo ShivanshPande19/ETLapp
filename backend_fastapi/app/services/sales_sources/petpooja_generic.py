@@ -158,9 +158,25 @@ class PetpoojaGenericAdapter(SalesSourceAdapter):
                 except ValueError:
                     created_on = datetime.combine(business_date, datetime.min.time())
 
+                # external_ref MUST be unique per (outlet, source, external_ref)
+                # — see the sales_orders composite key. Petpooja's `orderID`
+                # here is NOT globally unique: for many outlets it is a
+                # per-outlet DAILY invoice number that resets to 1 every day
+                # (verified live: restID jcxkm3z71f returns orderIDs ~1-50 with
+                # ~70-80 bills per request, so the same orderID recurs on
+                # different days AND even twice within one response — since a
+                # request for order_date=X returns both X and X-1). Keying on
+                # the bare orderID therefore made bills from different days
+                # collide and overwrite each other, silently corrupting per-day
+                # totals (recent days showed ₹0 / partial). Scope the key by the
+                # bill's own business day so (day, orderID) is unique. This is
+                # also correct for outlets whose orderID IS global — prefixing a
+                # global id with its single date keeps it unique.
+                external_ref = f"{business_date.isoformat()}:{order_id}"
+
                 normalized.append(
                     NormalizedOrder(
-                        external_ref=str(order_id),
+                        external_ref=external_ref,
                         business_date=business_date,
                         created_on=created_on,
                         total_amount=total_amt,

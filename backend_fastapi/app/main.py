@@ -70,7 +70,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -87,6 +87,14 @@ async def lifespan(app: FastAPI):
     #    fills NULLs, so it never clobbers a doc changed via the new endpoints).
     backfill_outlet_documents()
     print("[DB] Outlet documents backfill ensured ✓")
+
+    # ✅ Purge legacy old-format petpooja_generic rows (external_ref without a
+    #    ':') so the daily-reset-orderID collision is undone. The adapter now
+    #    emits a day-scoped "YYYY-MM-DD:orderID" key; old rows are rebuilt
+    #    collision-free on the next sync. Runs BEFORE the re-seed so the backfill
+    #    below lines up on the new key. Idempotent.
+    migrate_generic_sales_external_ref()
+    print("[DB] Generic sales_orders day-key migration ensured ✓")
 
     # ✅ Seed the multi-source sales_orders table from the legacy petpooja_orders
     # backup (idempotent). Runs after create_all built sales_orders.

@@ -143,9 +143,15 @@ class PetpoojaOrder(Base):
 # UI reads — this table's shape can evolve without touching the app contract.
 #
 # The composite UNIQUE(outlet_id, source, external_ref) is the key design point:
-# `external_ref` is a STRING (Petpooja generic global orderID, Petpooja
-# sales_data per-outlet Receipt number, etc.) and only needs to be unique WITHIN
-# an outlet+source, so per-outlet sequential receipt numbers never collide.
+# `external_ref` is a STRING and only needs to be unique WITHIN an outlet+source.
+# Adapters are responsible for emitting a key that is actually unique per bill:
+#   • Petpooja generic  → "YYYY-MM-DD:orderID" (the orderID resets DAILY for
+#     many outlets, so it MUST be scoped by the bill's business day — a bare
+#     orderID collides across days and silently corrupts per-day totals);
+#   • Petpooja sales_data→ per-outlet Receipt number;
+#   • Royal POS          → RCPT_NUM; Rista → invoiceNumber.
+# Per-outlet sequential numbers that reset are fine ONLY when the adapter scopes
+# them (e.g. by date) so they don't collide within an outlet+source.
 class SalesOrder(Base):
     __tablename__ = "sales_orders"
 
