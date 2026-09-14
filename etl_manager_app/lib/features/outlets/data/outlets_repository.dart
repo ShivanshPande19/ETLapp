@@ -153,6 +153,14 @@ class OutletsRepository {
     final res = await _dio.post(
       '/outlets/$outletId/documents/$docType',
       data: form,
+      // Documents (esp. multi-page / scanned PDFs) are far larger than the
+      // JSON calls the shared 30s timeout was tuned for, and mobile uplinks
+      // (notably Jio) are slow/flaky — 30s routinely times out mid-upload and
+      // surfaces as a generic error. Give large-file uploads room to finish.
+      options: Options(
+        sendTimeout: const Duration(minutes: 5),
+        receiveTimeout: const Duration(minutes: 5),
+      ),
     );
     return (res.data as Map)['url'] as String?;
   }
