@@ -158,8 +158,8 @@ class OutletsRepository {
       // (notably Jio) are slow/flaky — 30s routinely times out mid-upload and
       // surfaces as a generic error. Give large-file uploads room to finish.
       options: Options(
-        sendTimeout: const Duration(minutes: 5),
-        receiveTimeout: const Duration(minutes: 5),
+        sendTimeout: const Duration(minutes: 10),
+        receiveTimeout: const Duration(minutes: 10),
       ),
     );
     return (res.data as Map)['url'] as String?;
