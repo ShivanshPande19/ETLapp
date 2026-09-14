@@ -54,7 +54,7 @@ _ALLOWED_DOC_TYPES = {
     "image/png": "png",
     "image/webp": "webp",
 }
-_MAX_DOC_BYTES = 25 * 1024 * 1024  # 25 MB (scanned multi-page docs can be big)
+_MAX_DOC_BYTES = 50 * 1024 * 1024  # 50 MB (scanned multi-page docs can be 30-40 MB)
 
 
 async def _save_doc(f: Optional[UploadFile], prefix: str) -> Optional[str]:
@@ -71,7 +71,7 @@ async def _save_doc(f: Optional[UploadFile], prefix: str) -> Optional[str]:
         )
     data = await f.read()
     if len(data) > _MAX_DOC_BYTES:
-        raise HTTPException(status_code=400, detail=f"{prefix} file too large (max 10 MB).")
+        raise HTTPException(status_code=400, detail=f"{prefix} file too large (max 50 MB).")
     if not data:
         return None
 
