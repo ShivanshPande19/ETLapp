@@ -586,7 +586,7 @@ _ALLOWED_DOC_TYPES = {
     "image/png": "png",
     "image/webp": "webp",
 }
-_MAX_DOC_BYTES = 25 * 1024 * 1024  # 25 MB (scanned multi-page agreements can be big)
+_MAX_DOC_BYTES = 50 * 1024 * 1024  # 50 MB (scanned multi-page agreements can be 30-40 MB)
 
 
 class DocPasswordBody(BaseModel):
@@ -625,7 +625,7 @@ async def _save_document(f: UploadFile, outlet_id: int, doc_type: str) -> str:
     if not data:
         raise HTTPException(status_code=400, detail="Empty file.")
     if len(data) > _MAX_DOC_BYTES:
-        raise HTTPException(status_code=400, detail="File too large (max 10 MB).")
+        raise HTTPException(status_code=400, detail="File too large (max 50 MB).")
     folder = os.path.join(settings.UPLOAD_DIR, "documents")
     os.makedirs(folder, exist_ok=True)
     filename = f"{doc_type}_{outlet_id}_{uuid.uuid4()}.{ext}"
