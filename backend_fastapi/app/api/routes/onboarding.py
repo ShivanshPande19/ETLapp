@@ -54,7 +54,7 @@ _ALLOWED_DOC_TYPES = {
     "image/png": "png",
     "image/webp": "webp",
 }
-_MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
+_MAX_DOC_BYTES = 25 * 1024 * 1024  # 25 MB (scanned multi-page docs can be big)
 
 
 async def _save_doc(f: Optional[UploadFile], prefix: str) -> Optional[str]:

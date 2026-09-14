@@ -586,7 +586,7 @@ _ALLOWED_DOC_TYPES = {
     "image/png": "png",
     "image/webp": "webp",
 }
-_MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
+_MAX_DOC_BYTES = 25 * 1024 * 1024  # 25 MB (scanned multi-page agreements can be big)
 
 
 class DocPasswordBody(BaseModel):

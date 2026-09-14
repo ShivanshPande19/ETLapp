@@ -104,6 +104,16 @@ class _OutletDocumentsScreenState
       final d = e.response?.data;
       if (d is Map && d['detail'] is String) return d['detail'] as String;
       if (e.response?.statusCode == 403) return 'Incorrect password.';
+      // No response = timeout / lost connection mid-upload (common with large
+      // PDFs on a slow/flaky mobile network). Give an actionable message
+      // instead of a generic one.
+      if (e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        return 'Upload timed out — the file may be large or the network slow. '
+            'Try again on a stronger connection.';
+      }
     }
     return 'Something went wrong. Try again.';
   }
