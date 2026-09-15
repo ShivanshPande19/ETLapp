@@ -233,7 +233,67 @@ class MaintenanceNotifier
     }
   }
 
-  // ── 4. VERIFY CLOSURE (Outlet user) ───────────────────────────────────────
+  // ── 4a. RAISE TICKET (Crownest Ops Head) ──────────────────────────────────
+  // General (court/zone) or outlet-specific, with target team(s) + mentions +
+  // urgent. Returns null on success, else an error message.
+  Future<String?> raiseTicketAsOps({
+    required String issueType,
+    required String priority,
+    required String description,
+    required String scope, // 'general' | 'outlet'
+    int? courtId,
+    int? outletId,
+    required List<String> targetTeams,
+    List<Map<String, String>> mentions = const [],
+    bool isUrgent = false,
+  }) async {
+    try {
+      final dio = ref.read(dioProvider);
+      await dio.post('/maintenance/', data: {
+        'issue_type': issueType,
+        'priority': priority,
+        'description': description.trim(),
+        'scope': scope,
+        if (courtId != null) 'court_id': courtId,
+        if (outletId != null) 'outlet_id': outletId,
+        'target_teams': targetTeams,
+        if (mentions.isNotEmpty) 'mentions': mentions,
+        'is_urgent': isUrgent,
+      });
+      await refresh();
+      return null;
+    } catch (e) {
+      debugPrint('❌ [MAINTENANCE_OPS_RAISE] $e');
+      return _friendlyError(e);
+    }
+  }
+
+  // ── 4b. ROUTE / TRIAGE (Crownest Ops Head) ────────────────────────────────
+  // Set/replace target team(s) + mentions on an existing ticket.
+  Future<String?> routeTicket(
+    int issueId, {
+    required List<String> targetTeams,
+    List<Map<String, String>> mentions = const [],
+    String? scope,
+    bool? isUrgent,
+  }) async {
+    try {
+      final dio = ref.read(dioProvider);
+      await dio.put('/maintenance/$issueId/route', data: {
+        'target_teams': targetTeams,
+        if (mentions.isNotEmpty) 'mentions': mentions,
+        if (scope != null) 'scope': scope,
+        if (isUrgent != null) 'is_urgent': isUrgent,
+      });
+      await refresh();
+      return null;
+    } catch (e) {
+      debugPrint('❌ [MAINTENANCE_ROUTE] $e');
+      return _friendlyError(e);
+    }
+  }
+
+  // ── 5. VERIFY CLOSURE (Outlet user) ───────────────────────────────────────
   Future<String?> verifyTicket(int issueId, bool isSatisfied) async {
     try {
       final dio = ref.read(dioProvider);

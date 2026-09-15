@@ -15,6 +15,7 @@ import '../../../core/widgets/app_network_image.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/appear_fade.dart';
 import '../../auth/domain/auth_notifier.dart';
+import 'ops_maintenance.dart'; // ROLE SPLIT: ops-head raise + route/triage
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -209,6 +210,8 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     final bool isOutletUser =
         authState.isOutletManager || authState.isOutletStaff;
     final bool isManager = authState.isEtlManager;
+    // ROLE SPLIT: only the Crownest Ops Head can raise + route tickets.
+    final bool isOpsHead = authState.isOpsHead;
 
     return Scaffold(
       backgroundColor: _bg,
@@ -434,14 +437,15 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
         ),
       ),
 
-      // ─── FAB (outlet users only) ───
-      floatingActionButton: isOutletUser
+      // ─── FAB — outlet users (simple raise) OR Crownest Ops Head (full raise) ───
+      floatingActionButton: (isOutletUser || isOpsHead)
           ? Padding(
               padding: const EdgeInsets.only(bottom: 90),
               child: FloatingActionButton.extended(
                 backgroundColor: _black,
                 elevation: 8,
-                onPressed: _showRaiseSheet,
+                onPressed:
+                    isOpsHead ? () => openOpsRaise(context) : _showRaiseSheet,
                 icon: const Icon(Icons.add_rounded, color: _white),
                 label: Text(
                   'Raise Ticket',
@@ -1640,6 +1644,7 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
                 ),
               ),
               const SizedBox(height: 12),
+              _OpsBadges(issue: issue),
               _Timeline(issue: issue),
 
               const SizedBox(height: 24),
@@ -1653,7 +1658,32 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
     );
   }
 
+  // ROLE SPLIT: the Crownest Ops Head gets a Route / re-assign action on top of
+  // the normal manager actions, so they can triage (route an outlet-raised
+  // ticket) or re-route an existing one.
   List<Widget> _buildActions(MaintenanceIssueModel issue) {
+    final base = _buildRoleActions(issue);
+    final isOpsHead = ref.read(authNotifierProvider).isOpsHead;
+    if (!isOpsHead || issue.status == 'CLOSED') return base;
+    final routeBtn = _Btn(
+      label: issue.triageStatus == 'pending'
+          ? 'Route to team'
+          : 'Re-route / assign teams',
+      color: _blue,
+      icon: Icons.alt_route_rounded,
+      loading: false,
+      outlined: true,
+      onTap: () {
+        // Keep a valid context after this sheet closes, then open the route sheet.
+        final rootCtx = Navigator.of(context, rootNavigator: true).context;
+        Navigator.of(context).pop();
+        openOpsRoute(rootCtx, issue);
+      },
+    );
+    return [routeBtn, if (base.isNotEmpty) const SizedBox(height: 10), ...base];
+  }
+
+  List<Widget> _buildRoleActions(MaintenanceIssueModel issue) {
     final notifier = ref.read(maintenanceNotifierProvider.notifier);
 
     // Manager: assign on RAISED/DISPUTED
@@ -2083,4 +2113,73 @@ class _ErrorView extends StatelessWidget {
       ),
     ],
   );
+}
+
+
+
+// ─── ROLE SPLIT: target / urgent / routing badges (ticket detail) ─────────────
+class _OpsBadges extends StatelessWidget {
+  final MaintenanceIssueModel issue;
+  const _OpsBadges({required this.issue});
+
+  static const _teamLabels = {
+    'azimuth_maintenance': 'Azimuth Maintenance',
+    'crownest_maintenance_head': 'Crownest Maint Head',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[];
+
+    if (issue.isUrgent) {
+      chips.add(_chip('URGENT', _red, Icons.priority_high_rounded));
+    }
+    if (issue.scope == 'general') {
+      chips.add(_chip('Zone-wide', _blue, Icons.public_rounded));
+    }
+
+    final needsRouting =
+        issue.targetTeams.isEmpty && issue.status != 'CLOSED';
+    if (needsRouting) {
+      chips.add(_chip('Needs routing', _warn, Icons.alt_route_rounded));
+    } else {
+      for (final t in issue.targetTeams) {
+        chips.add(_chip(
+          _teamLabels[t] ?? t,
+          _ok,
+          Icons.engineering_rounded,
+        ));
+      }
+    }
+
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Wrap(spacing: 8, runSpacing: 8, children: chips),
+    );
+  }
+
+  Widget _chip(String label, Color color, IconData icon) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: color.withOpacity(0.30)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      );
 }
