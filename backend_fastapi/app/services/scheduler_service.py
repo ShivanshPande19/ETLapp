@@ -72,9 +72,14 @@ async def auto_close_expired_tickets():
     db: Session = SessionLocal()
     try:
         threshold = datetime.utcnow() - timedelta(hours=VERIFICATION_WINDOW_HOURS)
+        # Only the OUTLET-verification stage auto-closes: the ticket is RESOLVED,
+        # the ops head has already verified (ops_verified_at set), and the owning
+        # outlet hasn't confirmed within the window. The ops-verification stage
+        # (ops_verified_at IS NULL) never auto-closes — the ops head must act.
         expired = db.query(MaintenanceIssue).filter(
             MaintenanceIssue.status == "RESOLVED",
-            MaintenanceIssue.resolved_at <= threshold,
+            MaintenanceIssue.ops_verified_at.isnot(None),
+            MaintenanceIssue.ops_verified_at <= threshold,
         ).all()
 
         for ticket in expired:

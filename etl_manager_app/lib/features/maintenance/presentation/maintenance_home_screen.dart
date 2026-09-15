@@ -9,11 +9,14 @@
 // so it looks native. Reuses maintenanceNotifierProvider (list + assign/resolve)
 // and attendanceNotifierProvider (check-in/out).
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../auth/domain/auth_notifier.dart';
 import '../domain/maintenance_notifier.dart';
@@ -370,10 +373,10 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
           }
           return err == null;
         },
-        onResolve: () async {
+        onResolve: (photos) async {
           final err = await ref
               .read(maintenanceNotifierProvider.notifier)
-              .markResolved(t.id);
+              .markResolved(t.id, photos: photos);
           if (!mounted) return false;
           if (err == null) {
             _toast('Marked resolved.');
@@ -665,7 +668,7 @@ class _TicketSheet extends StatefulWidget {
   final MaintenanceIssueModel issue;
   // Return true on success so the sheet can close.
   final Future<bool?> Function(String name, String phone) onAssign;
-  final Future<bool?> Function() onResolve;
+  final Future<bool?> Function(List<File> photos) onResolve;
   const _TicketSheet({
     required this.issue,
     required this.onAssign,
@@ -681,12 +684,19 @@ class _TicketSheetState extends State<_TicketSheet> {
   final _phoneCtrl = TextEditingController();
   bool _busy = false;
   bool _showAssign = false;
+  final List<File> _photos = []; // resolution proof (one or many)
 
   @override
   void initState() {
     super.initState();
     _nameCtrl.text = widget.issue.technicianName ?? '';
     _phoneCtrl.text = widget.issue.technicianPhone ?? '';
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    final x = await ImagePicker()
+        .pickImage(source: source, imageQuality: 80, maxWidth: 1280);
+    if (x != null && mounted) setState(() => _photos.add(File(x.path)));
   }
 
   @override
@@ -719,7 +729,7 @@ class _TicketSheetState extends State<_TicketSheet> {
 
   Future<void> _doResolve() async {
     setState(() => _busy = true);
-    final ok = await widget.onResolve();
+    final ok = await widget.onResolve(_photos);
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok == true) Navigator.pop(context);
@@ -833,12 +843,91 @@ class _TicketSheetState extends State<_TicketSheet> {
                 Icons.engineering_rounded,
                 _busy ? null : () => setState(() => _showAssign = true),
               ),
+              const SizedBox(height: 16),
+              Text('RESOLUTION PROOF  ·  optional',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: _grey,
+                    letterSpacing: 1.0,
+                  )),
+              const SizedBox(height: 6),
+              Text('Add photos of the completed work — the ops head sees these.',
+                  style: GoogleFonts.inter(fontSize: 12, color: _grey)),
               const SizedBox(height: 10),
+              _photoStrip(),
+              const SizedBox(height: 14),
               _primaryBtn(_busy ? 'Please wait…' : 'Mark resolved',
                   _busy ? null : _doResolve),
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _photoStrip() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (int idx = 0; idx < _photos.length; idx++)
+          _thumb(_photos[idx], idx),
+        _addPhotoTile(
+            Icons.camera_alt_rounded, () => _pickPhoto(ImageSource.camera)),
+        _addPhotoTile(
+            Icons.photo_library_rounded, () => _pickPhoto(ImageSource.gallery)),
+      ],
+    );
+  }
+
+  Widget _thumb(File f, int idx) {
+    return SizedBox(
+      width: 68,
+      height: 68,
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.file(f, width: 68, height: 68, fit: BoxFit.cover),
+          ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: GestureDetector(
+              onTap: _busy ? null : () => setState(() => _photos.removeAt(idx)),
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: _black.withOpacity(0.7),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close_rounded, size: 12, color: _white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addPhotoTile(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: _busy
+          ? null
+          : () {
+              HapticFeedback.selectionClick();
+              onTap();
+            },
+      child: Container(
+        width: 68,
+        height: 68,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _line),
+        ),
+        child: Icon(icon, size: 20, color: _grey),
       ),
     );
   }

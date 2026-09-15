@@ -57,3 +57,13 @@ class MaintenanceIssue(Base):
     last_reminder_at = Column(DateTime, nullable=True)
     escalated_2d    = Column(Boolean, nullable=False, default=False)
     escalated_4d    = Column(Boolean, nullable=False, default=False)
+
+    # ── Two-stage verification (ROLE SPLIT) ────────────────────────────────────
+    # Who verifies a resolved ticket depends on WHO RAISED it:
+    #   • ops-raised (zone or outlet) → Ops Head verifies, then it closes.
+    #   • outlet-raised               → Ops Head verifies FIRST (sets
+    #     ops_verified_at), then the owning outlet manager verifies to close.
+    ops_verified_at   = Column(DateTime, nullable=True)
+    # JSON text — list of proof photo URLs the maintenance team attached when
+    # marking the ticket resolved (shown to the verifier).
+    resolution_photos = Column(Text, nullable=True)
