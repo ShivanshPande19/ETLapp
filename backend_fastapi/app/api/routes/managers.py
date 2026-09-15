@@ -13,7 +13,9 @@
 # SECURITY: every endpoint requires an authenticated ETL manager
 # (require_etl_manager). Nothing here is reachable by outlet users or staff.
 
+import json
 import logging
+import re
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -305,9 +307,16 @@ class CreateAccountRequest(BaseModel):
     name: str
     email: EmailStr
     role: str
-    # Zone (court) — REQUIRED for crownest_maintenance_head (drives their
-    # attendance geofence + roster); ignored for every other role.
+    # Zone(s) (court) — for crownest_maintenance_head: ONE OR MORE zones the
+    # head covers (drives their attendance geofence + roster). Ignored for every
+    # other role. `court_ids` is preferred; `court_id` is kept for back-compat
+    # and folded in.
     court_id: int | None = None
+    court_ids: list[int] | None = None
+    # Shift timings ("HH:MM", 24-hour) — OPTIONAL at creation. A manager can set
+    # them later (attendance needs a shift, exactly like ETL staff).
+    shift_start: str | None = None
+    shift_end: str | None = None
 
 
 class CreateAccountResponse(BaseModel):
@@ -320,6 +329,11 @@ class CreateAccountResponse(BaseModel):
     message: str
 
 
+class ZoneOut(BaseModel):
+    court_id: int
+    name: str | None = None
+
+
 class AccountOut(BaseModel):
     kind: str            # "manager" | "staff"
     account_id: int
@@ -328,8 +342,11 @@ class AccountOut(BaseModel):
     role: str
     role_label: str
     org: str | None = None
-    zone_court_id: int | None = None
+    zone_court_id: int | None = None   # primary (first) zone — back-compat
     zone_name: str | None = None
+    zones: list[ZoneOut] = []          # every zone a maintenance head covers
+    shift_start: str | None = None
+    shift_end: str | None = None
     is_active: bool
     is_self: bool = False
 
@@ -353,6 +370,64 @@ def _role_welcome_email_html(name: str, role_label: str, link: str) -> str:
       <p style="color:#888; font-size:12px; word-break:break-all;">{link}</p>
     </div>
     """
+
+
+_SHIFT_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+def _validate_optional_shift(
+    start: str | None, end: str | None
+) -> tuple[str | None, str | None]:
+    """Normalise optional shift timings: both-or-neither, each HH:MM (24-hour)."""
+    start = (start or "").strip() or None
+    end = (end or "").strip() or None
+    if bool(start) != bool(end):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide both shift start and end, or leave both empty.",
+        )
+    for v in (start, end):
+        if v and not _SHIFT_RE.match(v):
+            raise HTTPException(
+                status_code=400,
+                detail="Shift time must be in HH:MM (24-hour) format.",
+            )
+    return start, end
+
+
+def _staff_zone_ids(s: Staff) -> list[int]:
+    """A maintenance head's assigned zone court-ids (falls back to court_id)."""
+    raw = getattr(s, "zone_court_ids", None)
+    if raw:
+        try:
+            v = json.loads(raw)
+            if isinstance(v, list):
+                ids = [int(x) for x in v]
+                if ids:
+                    return ids
+        except Exception:
+            pass
+    return [s.court_id] if s.court_id else []
+
+
+def _staff_account_out(
+    s: Staff, court_names: dict, *, is_self: bool = False
+) -> AccountOut:
+    """Build the AccountOut for a maintenance (staff-table) account, including
+    every zone it covers + its shift."""
+    ids = _staff_zone_ids(s)
+    return AccountOut(
+        kind="staff", account_id=s.id, name=s.name, email=s.email,
+        role=s.role, role_label=_ROLE_LABELS.get(s.role, s.role),
+        org=getattr(s, "org", None),
+        zone_court_id=(ids[0] if ids else None),
+        zone_name=(court_names.get(ids[0]) if ids else None),
+        zones=[ZoneOut(court_id=i, name=court_names.get(i)) for i in ids],
+        shift_start=getattr(s, "shift_start", None),
+        shift_end=getattr(s, "shift_end", None),
+        is_active=bool(s.is_active),
+        is_self=is_self,
+    )
 
 
 @router.post("/accounts", response_model=CreateAccountResponse)
@@ -390,16 +465,24 @@ async def create_account(
     org = _ORG_BY_ROLE.get(role)
     random_pw = hash_password(secrets.token_urlsafe(24))
 
-    # Zone handling: only crownest_maintenance_head takes a court (its attendance
-    # geofence + roster grouping). Required for that role, forbidden for others.
+    # Zone handling: only crownest_maintenance_head takes zone(s) (its attendance
+    # geofence + roster grouping) — ONE OR MORE. Shift is optional here; a
+    # manager can set it later. Both are ignored for every other role.
     court_id = None
+    zone_ids_json = None
+    shift_start = None
+    shift_end = None
     if role == "crownest_maintenance_head":
-        if req.court_id is None:
-            raise HTTPException(status_code=400, detail="A zone (court) is required for a Maintenance Head.")
-        court = db.query(Court).filter(Court.id == req.court_id, Court.is_active == 1).first()
-        if not court:
-            raise HTTPException(status_code=404, detail="Selected zone (court) not found.")
-        court_id = court.id
+        ids = list(dict.fromkeys(req.court_ids or ([req.court_id] if req.court_id else [])))
+        if not ids:
+            raise HTTPException(status_code=400, detail="At least one zone (court) is required for a Maintenance Head.")
+        found = {c.id for c in db.query(Court.id).filter(Court.id.in_(ids), Court.is_active == 1).all()}
+        missing = [i for i in ids if i not in found]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Zone(s) not found or inactive: {missing}")
+        court_id = ids[0]
+        zone_ids_json = json.dumps(ids)
+        shift_start, shift_end = _validate_optional_shift(req.shift_start, req.shift_end)
 
     if kind == "manager":
         acct = Manager(
@@ -415,6 +498,7 @@ async def create_account(
         acct = Staff(
             name=name, email=email, hashed_password=random_pw,
             role=role, org=org, court_id=court_id, outlet_id=None, is_active=True,
+            zone_court_ids=zone_ids_json, shift_start=shift_start, shift_end=shift_end,
         )
         db.add(acct); db.commit(); db.refresh(acct)
         token = create_token(
@@ -477,14 +561,8 @@ def list_accounts(
     )
     court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
     for s in maint:
-        out.append(AccountOut(
-            kind="staff", account_id=s.id, name=s.name, email=s.email,
-            role=s.role, role_label=_ROLE_LABELS.get(s.role, s.role),
-            org=getattr(s, "org", None),
-            zone_court_id=s.court_id,
-            zone_name=court_names.get(s.court_id),
-            is_active=bool(s.is_active),
-            is_self=(user.is_staff_account and s.id == user.id),
+        out.append(_staff_account_out(
+            s, court_names, is_self=(user.is_staff_account and s.id == user.id)
         ))
     return out
 
@@ -539,12 +617,7 @@ def deactivate_account(
         db.commit(); db.refresh(target)
         _safe_kill_tokens(db, "staff", target.id)
         court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
-        return AccountOut(
-            kind="staff", account_id=target.id, name=target.name, email=target.email,
-            role=target.role, role_label=_ROLE_LABELS.get(target.role, target.role),
-            org=getattr(target, "org", None), zone_court_id=target.court_id,
-            zone_name=court_names.get(target.court_id), is_active=False,
-        )
+        return _staff_account_out(target, court_names)
 
 
 @router.patch("/accounts/{kind}/{account_id}/reactivate", response_model=AccountOut)
@@ -579,12 +652,7 @@ def reactivate_account(
         target.is_active = True
         db.commit(); db.refresh(target)
         court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
-        return AccountOut(
-            kind="staff", account_id=target.id, name=target.name, email=target.email,
-            role=target.role, role_label=_ROLE_LABELS.get(target.role, target.role),
-            org=getattr(target, "org", None), zone_court_id=target.court_id,
-            zone_name=court_names.get(target.court_id), is_active=True,
-        )
+        return _staff_account_out(target, court_names)
 
 
 def _safe_kill_tokens(db: Session, user_type: str, user_id: int) -> None:

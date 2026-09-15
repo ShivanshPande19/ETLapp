@@ -177,7 +177,9 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     String? selectedRole;
-    int? selectedCourtId;
+    final Set<int> selectedCourtIds = <int>{};
+    TimeOfDay? shiftStart;
+    TimeOfDay? shiftEnd;
     bool loading = false;
 
     await showModalBottomSheet<void>(
@@ -246,7 +248,11 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                             HapticFeedback.selectionClick();
                             setSheet(() {
                               selectedRole = r.value;
-                              if (!r.needsZone) selectedCourtId = null;
+                              if (!r.needsZone) {
+                                selectedCourtIds.clear();
+                                shiftStart = null;
+                                shiftEnd = null;
+                              }
                             });
                           },
                           child: AnimatedContainer(
@@ -276,7 +282,7 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                     // ─── Zone picker (crownest_maintenance_head only) ───
                     if (needsZone) ...[
                       const SizedBox(height: 18),
-                      Text('ZONE',
+                      Text('ZONES  ·  pick one or more',
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
@@ -285,9 +291,46 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                           )),
                       const SizedBox(height: 10),
                       _ZonePicker(
-                        selectedCourtId: selectedCourtId,
-                        onSelected: (id) =>
-                            setSheet(() => selectedCourtId = id),
+                        selectedCourtIds: selectedCourtIds,
+                        onToggle: (id) => setSheet(() {
+                          if (!selectedCourtIds.add(id)) {
+                            selectedCourtIds.remove(id);
+                          }
+                        }),
+                      ),
+                      const SizedBox(height: 18),
+                      Text('SHIFT  ·  optional (a manager can set it later)',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: _grey,
+                            letterSpacing: 1.0,
+                          )),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _timeBtn('Start', shiftStart, () async {
+                              final t = await showTimePicker(
+                                context: ctx,
+                                initialTime: shiftStart ??
+                                    const TimeOfDay(hour: 9, minute: 0),
+                              );
+                              if (t != null) setSheet(() => shiftStart = t);
+                            }),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _timeBtn('End', shiftEnd, () async {
+                              final t = await showTimePicker(
+                                context: ctx,
+                                initialTime: shiftEnd ??
+                                    const TimeOfDay(hour: 21, minute: 0),
+                              );
+                              if (t != null) setSheet(() => shiftEnd = t);
+                            }),
+                          ),
+                        ],
                       ),
                     ],
 
@@ -338,8 +381,15 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                                 _snack('Pick a role.');
                                 return;
                               }
-                              if (needsZone && selectedCourtId == null) {
-                                _snack('Pick a zone for the maintenance head.');
+                              if (needsZone && selectedCourtIds.isEmpty) {
+                                _snack('Pick at least one zone for the '
+                                    'maintenance head.');
+                                return;
+                              }
+                              if (needsZone &&
+                                  (shiftStart == null) != (shiftEnd == null)) {
+                                _snack('Set both shift start and end, or leave '
+                                    'both empty.');
                                 return;
                               }
                               setSheet(() => loading = true);
@@ -350,8 +400,15 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                                       name: name,
                                       email: email,
                                       role: selectedRole!,
-                                      courtId:
-                                          needsZone ? selectedCourtId : null,
+                                      courtIds: needsZone
+                                          ? selectedCourtIds.toList()
+                                          : null,
+                                      shiftStart: needsZone
+                                          ? _fmtTod(shiftStart)
+                                          : null,
+                                      shiftEnd: needsZone
+                                          ? _fmtTod(shiftEnd)
+                                          : null,
                                     );
                                 HapticFeedback.mediumImpact();
                                 if (Navigator.canPop(ctx)) Navigator.pop(ctx);
@@ -772,8 +829,8 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _rolePill(a.roleLabel),
-                    if (a.zoneName != null && a.zoneName!.isNotEmpty)
-                      _zonePill(a.zoneName!),
+                    if (a.zonesLabel.isNotEmpty) _zonePill(a.zonesLabel),
+                    if (a.role == 'crownest_maintenance_head') _shiftPill(a),
                   ],
                 ),
               ],
@@ -846,18 +903,228 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
       ),
     );
   }
+
+  // ─── Shift (Crownest Maintenance Head only) ───
+
+  static String? _fmtTod(TimeOfDay? t) => t == null
+      ? null
+      : '${t.hour.toString().padLeft(2, '0')}:'
+          '${t.minute.toString().padLeft(2, '0')}';
+
+  static TimeOfDay? _parseTod(String? s) {
+    if (s == null || s.isEmpty || !s.contains(':')) return null;
+    final p = s.split(':');
+    final h = int.tryParse(p[0]);
+    final m = int.tryParse(p[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  Widget _timeBtn(String label, TimeOfDay? value, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.schedule_rounded, size: 16, color: _grey),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: GoogleFonts.inter(
+                        color: _grey,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 1),
+                Text(value == null ? '--:--' : _fmtTod(value)!,
+                    style: GoogleFonts.inter(
+                        color: _black,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _shiftPill(Account a) {
+    final has = a.hasShift;
+    final Color c = has ? _grey : const Color(0xFFE5A000);
+    return GestureDetector(
+      onTap: () => _showShiftSheet(a),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: c.withOpacity(has ? 0.12 : 0.16),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.schedule_rounded, size: 11, color: c),
+            const SizedBox(width: 4),
+            Text(has ? a.shiftLabel! : 'Set shift',
+                style: GoogleFonts.inter(
+                    color: c, fontSize: 10.5, fontWeight: FontWeight.w800)),
+            const SizedBox(width: 3),
+            Icon(Icons.edit_rounded, size: 9, color: c),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showShiftSheet(Account a) async {
+    TimeOfDay? start = _parseTod(a.shiftStart);
+    TimeOfDay? end = _parseTod(a.shiftEnd);
+    bool loading = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
+            decoration: const BoxDecoration(
+              color: _white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text('Shift timings',
+                    style: GoogleFonts.antonSc(fontSize: 22, color: _black)),
+                const SizedBox(height: 4),
+                Text('${a.name} — attendance needs a shift set.',
+                    style: GoogleFonts.inter(fontSize: 13, color: _grey)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _timeBtn('Start', start, () async {
+                        final t = await showTimePicker(
+                          context: ctx,
+                          initialTime:
+                              start ?? const TimeOfDay(hour: 9, minute: 0),
+                        );
+                        if (t != null) setSheet(() => start = t);
+                      }),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _timeBtn('End', end, () async {
+                        final t = await showTimePicker(
+                          context: ctx,
+                          initialTime:
+                              end ?? const TimeOfDay(hour: 21, minute: 0),
+                        );
+                        if (t != null) setSheet(() => end = t);
+                      }),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                GestureDetector(
+                  onTap: loading
+                      ? null
+                      : () async {
+                          if ((start == null) != (end == null)) {
+                            _snack('Set both start and end, or clear both.');
+                            return;
+                          }
+                          setSheet(() => loading = true);
+                          try {
+                            await ref
+                                .read(etlManagersRepositoryProvider)
+                                .setMaintenanceShift(
+                                    a.accountId, _fmtTod(start), _fmtTod(end));
+                            HapticFeedback.mediumImpact();
+                            if (Navigator.canPop(ctx)) Navigator.pop(ctx);
+                            await _load();
+                            _snack('Shift updated.');
+                          } catch (e) {
+                            setSheet(() => loading = false);
+                            _snack(_err(e));
+                          }
+                        },
+                  child: Container(
+                    height: 52,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: loading ? _grey : _black,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                color: _white, strokeWidth: 2),
+                          )
+                        : Text('Save shift',
+                            style: GoogleFonts.inter(
+                                color: _white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15)),
+                  ),
+                ),
+                if (start != null || end != null)
+                  Center(
+                    child: TextButton(
+                      onPressed: loading
+                          ? null
+                          : () => setSheet(() {
+                                start = null;
+                                end = null;
+                              }),
+                      child: Text('Clear shift',
+                          style: GoogleFonts.inter(
+                              color: _grey, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Zone (court) chooser used inside the add sheet — only shown for
 /// crownest_maintenance_head. Watches the courts provider so it reflects
 /// loading / error / empty states cleanly.
 class _ZonePicker extends ConsumerWidget {
-  final int? selectedCourtId;
-  final ValueChanged<int> onSelected;
+  final Set<int> selectedCourtIds;
+  final ValueChanged<int> onToggle;
 
   const _ZonePicker({
-    required this.selectedCourtId,
-    required this.onSelected,
+    required this.selectedCourtIds,
+    required this.onToggle,
   });
 
   @override
@@ -883,11 +1150,11 @@ class _ZonePicker extends ConsumerWidget {
           spacing: 8,
           runSpacing: 8,
           children: courts.map((Court c) {
-            final active = c.id == selectedCourtId;
+            final active = selectedCourtIds.contains(c.id);
             return GestureDetector(
               onTap: () {
                 HapticFeedback.selectionClick();
-                onSelected(c.id);
+                onToggle(c.id);
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
@@ -901,12 +1168,21 @@ class _ZonePicker extends ConsumerWidget {
                     width: 1.5,
                   ),
                 ),
-                child: Text(c.name,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: active ? _white : _grey,
-                    )),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (active) ...[
+                      const Icon(Icons.check_rounded, size: 14, color: _white),
+                      const SizedBox(width: 5),
+                    ],
+                    Text(c.name,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: active ? _white : _grey,
+                        )),
+                  ],
+                ),
               ),
             );
           }).toList(),

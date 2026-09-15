@@ -23,6 +23,11 @@ class Staff(Base):
     # ETL staff ke liye court assign hoga
     court_id        = Column(Integer, ForeignKey("courts.id"), nullable=True)   
     
+    # A Crownest Maintenance Head can cover MULTIPLE zones — JSON list of court
+    # ids (e.g. "[1, 3]"). `court_id` above stays the primary (first) zone for
+    # back-compat (business-day cutoff etc.); geofence + roster use this set.
+    zone_court_ids  = Column(String, nullable=True)
+
     # Outlet staff ke liye outlet assign hoga
     outlet_id       = Column(Integer, ForeignKey("outlets.id"), nullable=True)
     

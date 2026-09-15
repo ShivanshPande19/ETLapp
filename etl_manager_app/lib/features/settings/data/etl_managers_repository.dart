@@ -84,6 +84,18 @@ final etlManagersRepositoryProvider = Provider<EtlManagersRepository>((ref) {
 // staff table). Management-only on the server.
 // ══════════════════════════════════════════════════════════════════════════════
 
+/// A zone (court) a maintenance head covers.
+class AccountZone {
+  final int courtId;
+  final String? name;
+  const AccountZone({required this.courtId, this.name});
+
+  factory AccountZone.fromJson(Map<String, dynamic> j) => AccountZone(
+        courtId: (j['court_id'] ?? 0) as int,
+        name: j['name'] as String?,
+      );
+}
+
 /// One ETL-side account (from GET /managers/accounts).
 class Account {
   final String kind; // "manager" | "staff"
@@ -95,6 +107,9 @@ class Account {
   final String? org;
   final int? zoneCourtId;
   final String? zoneName;
+  final List<AccountZone> zones; // every zone a maintenance head covers
+  final String? shiftStart; // "HH:MM" or null
+  final String? shiftEnd;
   final bool isActive;
   final bool isSelf;
 
@@ -110,7 +125,25 @@ class Account {
     this.org,
     this.zoneCourtId,
     this.zoneName,
+    this.zones = const [],
+    this.shiftStart,
+    this.shiftEnd,
   });
+
+  bool get hasShift =>
+      (shiftStart != null && shiftStart!.isNotEmpty) &&
+      (shiftEnd != null && shiftEnd!.isNotEmpty);
+
+  /// "09:00 – 21:00", or null when no shift is set.
+  String? get shiftLabel => hasShift ? '$shiftStart – $shiftEnd' : null;
+
+  /// Comma-joined zone names (falls back to the single zoneName).
+  String get zonesLabel {
+    if (zones.isNotEmpty) {
+      return zones.map((z) => z.name ?? 'Zone ${z.courtId}').join(', ');
+    }
+    return zoneName ?? '';
+  }
 
   factory Account.fromJson(Map<String, dynamic> j) => Account(
         kind: (j['kind'] ?? 'manager') as String,
@@ -122,6 +155,12 @@ class Account {
         org: j['org'] as String?,
         zoneCourtId: j['zone_court_id'] as int?,
         zoneName: j['zone_name'] as String?,
+        zones: ((j['zones'] as List?) ?? [])
+            .whereType<Map>()
+            .map((z) => AccountZone.fromJson(Map<String, dynamic>.from(z)))
+            .toList(),
+        shiftStart: j['shift_start'] as String?,
+        shiftEnd: j['shift_end'] as String?,
         isActive: (j['is_active'] ?? true) as bool,
         isSelf: (j['is_self'] ?? false) as bool,
       );
@@ -137,20 +176,25 @@ extension AccountsApi on EtlManagersRepository {
         .toList();
   }
 
-  /// Create any of the 5 roles. `courtId` is required only for
-  /// crownest_maintenance_head (its zone). Returns the response map (may hold a
-  /// set_password_link when email_sent is false).
+  /// Create any of the 5 roles. `courtIds` (one or more zones) is required only
+  /// for crownest_maintenance_head. `shiftStart`/`shiftEnd` ("HH:MM") are
+  /// OPTIONAL — a manager can set them later. Returns the response map (may hold
+  /// a set_password_link when email_sent is false).
   Future<Map<String, dynamic>> createAccount({
     required String name,
     required String email,
     required String role,
-    int? courtId,
+    List<int>? courtIds,
+    String? shiftStart,
+    String? shiftEnd,
   }) async {
     final res = await _dio.post('/managers/accounts', data: {
       'name': name,
       'email': email,
       'role': role,
-      if (courtId != null) 'court_id': courtId,
+      if (courtIds != null && courtIds.isNotEmpty) 'court_ids': courtIds,
+      if (shiftStart != null) 'shift_start': shiftStart,
+      if (shiftEnd != null) 'shift_end': shiftEnd,
     });
     return Map<String, dynamic>.from(res.data as Map);
   }
@@ -161,5 +205,19 @@ extension AccountsApi on EtlManagersRepository {
 
   Future<void> reactivateAccount(String kind, int accountId) async {
     await _dio.patch('/managers/accounts/$kind/$accountId/reactivate');
+  }
+
+  /// Set/clear a maintenance head's shift timings. They live in the staff
+  /// table, so this reuses the shared staff-shift endpoint. Pass null/null to
+  /// clear. Attendance requires a shift to be set.
+  Future<void> setMaintenanceShift(
+    int staffAccountId,
+    String? shiftStart,
+    String? shiftEnd,
+  ) async {
+    await _dio.patch('/staff/$staffAccountId/shift', data: {
+      'shift_start': shiftStart,
+      'shift_end': shiftEnd,
+    });
   }
 }

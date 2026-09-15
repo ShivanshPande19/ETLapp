@@ -363,7 +363,7 @@ def ensure_staff_columns() -> None:
     Best-effort + idempotent."""
     # `org` (nullable) added for the role-split: maintenance worker roles live
     # in the staff table and carry an org label ('azimuth' | 'crownest').
-    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR", "shift_start": "VARCHAR", "shift_end": "VARCHAR", "org": "VARCHAR"}
+    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR", "shift_start": "VARCHAR", "shift_end": "VARCHAR", "org": "VARCHAR", "zone_court_ids": "VARCHAR"}
     try:
         with engine.begin() as conn:
             insp = inspect(conn)
