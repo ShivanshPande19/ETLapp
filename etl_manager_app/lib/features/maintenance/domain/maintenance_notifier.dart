@@ -246,9 +246,22 @@ class MaintenanceNotifier
     required List<String> targetTeams,
     List<Map<String, String>> mentions = const [],
     bool isUrgent = false,
+    File? photo,
   }) async {
     try {
       final dio = ref.read(dioProvider);
+
+      String? photoUrl;
+      if (photo != null) {
+        photoUrl = await PhotoUploadService.uploadMaintenancePhoto(
+          dio: dio,
+          photo: photo,
+        );
+        if (photoUrl == null) {
+          return 'Photo upload failed. Check your connection.';
+        }
+      }
+
       await dio.post('/maintenance/', data: {
         'issue_type': issueType,
         'priority': priority,
@@ -259,6 +272,7 @@ class MaintenanceNotifier
         'target_teams': targetTeams,
         if (mentions.isNotEmpty) 'mentions': mentions,
         'is_urgent': isUrgent,
+        if (photoUrl != null) 'photo_url': photoUrl,
       });
       await refresh();
       return null;
