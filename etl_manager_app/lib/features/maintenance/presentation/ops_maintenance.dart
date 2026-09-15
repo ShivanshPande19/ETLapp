@@ -10,10 +10,13 @@
 // AntonSC titles + custom chips/toggles), mirroring the outlet raise sheet and
 // ManageAccountsScreen — deliberately NOT the raw Material theme.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../courts/domain/courts_notifier.dart';
@@ -247,12 +250,19 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
   final _targets = <String>{};
   final _mentions = <String>{};
   final _descCtrl = TextEditingController();
+  File? _photo;
   bool _busy = false;
 
   @override
   void dispose() {
     _descCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    final x = await ImagePicker()
+        .pickImage(source: source, imageQuality: 80, maxWidth: 1280);
+    if (x != null && mounted) setState(() => _photo = File(x.path));
   }
 
   Future<void> _submit() async {
@@ -285,6 +295,7 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
               targetTeams: _targets.toList(),
               mentions: _mentionPayload(_mentions),
               isUrgent: _urgent,
+              photo: _photo,
             );
     if (!mounted) return;
     setState(() => _busy = false);
@@ -519,6 +530,50 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
                     ),
                     const SizedBox(height: 22),
 
+                    _sectionLabel('PHOTO  ·  optional'),
+                    const SizedBox(height: 10),
+                    if (_photo == null)
+                      Row(
+                        children: [
+                          _photoBtn(Icons.camera_alt_rounded, 'Camera',
+                              () => _pickPhoto(ImageSource.camera)),
+                          const SizedBox(width: 10),
+                          _photoBtn(Icons.photo_library_rounded, 'Gallery',
+                              () => _pickPhoto(ImageSource.gallery)),
+                        ],
+                      )
+                    else
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: Image.file(
+                              _photo!,
+                              height: 150,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _photo = null),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: _black.withOpacity(0.7),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close_rounded,
+                                    size: 14, color: _white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 22),
+
                     _sectionLabel('ASSIGN TO TEAM(S)'),
                     const SizedBox(height: 10),
                     Wrap(
@@ -643,6 +698,35 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
       ),
     );
   }
+
+  Widget _photoBtn(IconData icon, String label, VoidCallback onTap) => Expanded(
+        child: GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFAFAFA),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.grey.shade200, width: 1.5),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 17, color: _black),
+                const SizedBox(width: 8),
+                Text(label,
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _black)),
+              ],
+            ),
+          ),
+        ),
+      );
 }
 
 (Color, String) _priorityMeta(String p) => switch (p) {
