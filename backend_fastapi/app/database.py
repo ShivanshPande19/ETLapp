@@ -361,7 +361,9 @@ def backfill_outlet_documents() -> None:
 def ensure_staff_columns() -> None:
     """Add profile columns (phone, photo_url) to an existing `staff` table.
     Best-effort + idempotent."""
-    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR", "shift_start": "VARCHAR", "shift_end": "VARCHAR"}
+    # `org` (nullable) added for the role-split: maintenance worker roles live
+    # in the staff table and carry an org label ('azimuth' | 'crownest').
+    needed = {"phone": "VARCHAR", "photo_url": "VARCHAR", "shift_start": "VARCHAR", "shift_end": "VARCHAR", "org": "VARCHAR"}
     try:
         with engine.begin() as conn:
             insp = inspect(conn)
@@ -375,6 +377,62 @@ def ensure_staff_columns() -> None:
                     )
     except Exception as e:
         print(f"[MIGRATION] ensure_staff_columns skipped: {e}")
+
+
+def ensure_manager_columns() -> None:
+    """Add the role-split `org` column to an existing `managers` table
+    (create_all never ALTERs existing tables). Best-effort + idempotent.
+
+    `org` is a nullable label ('azimuth' | 'crownest'); access is decided by
+    `role` (see deps.MANAGEMENT_ROLES), never by org, so existing rows with a
+    NULL org keep working exactly as before.
+    """
+    needed = {"org": "VARCHAR"}
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "managers" not in insp.get_table_names():
+                return  # create_all builds it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("managers")}
+            for col, col_type in needed.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE managers ADD COLUMN {col} {col_type}")
+                    )
+    except Exception as e:
+        print(f"[MIGRATION] ensure_manager_columns skipped: {e}")
+
+
+def backfill_role_split() -> None:
+    """One-time, idempotent seed for the role split.
+
+    Puts the current live ETL manager (`manager@etl.com`) on the new
+    `crownest_head` role. It ONLY touches an account that still holds a LEGACY
+    full-access role ('etl_manager' | 'manager'), so:
+      • on first boot after deploy it flips manager@etl.com → crownest_head;
+      • on every later boot the guard no longer matches (role is already
+        crownest_head, or was reassigned via the admin screen), so a manual
+        reassignment is NEVER clobbered.
+
+    All OTHER legacy etl_manager/manager accounts are left as-is — they keep
+    full access via deps.MANAGEMENT_ROLES until an admin reassigns them.
+    """
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "managers" not in insp.get_table_names():
+                return
+            result = conn.execute(
+                text(
+                    "UPDATE managers SET role = 'crownest_head', org = 'crownest' "
+                    "WHERE lower(email) = 'manager@etl.com' "
+                    "AND role IN ('etl_manager', 'manager')"
+                )
+            )
+            if result.rowcount:
+                print(f"[MIGRATION] backfill_role_split: set {result.rowcount} account(s) to crownest_head")
+    except Exception as e:
+        print(f"[MIGRATION] backfill_role_split skipped: {e}")
 
 
 def ensure_notice_columns() -> None:
