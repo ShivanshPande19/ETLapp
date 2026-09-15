@@ -112,15 +112,23 @@ def set_password(req: SetPasswordRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid link.")
 
     email = payload.get("sub")
-    mid = payload.get("mid")
-    manager = db.query(Manager).filter(
-        Manager.id == mid, Manager.email == email
-    ).first()
-    if not manager:
+    # ROLE SPLIT: set-password now activates BOTH tables. Management accounts
+    # carry `mid` (managers); staff-table accounts (maintenance roles) carry
+    # `utype="staff"` + `uid`. Legacy tokens have no utype → default "manager".
+    utype = payload.get("utype", "manager")
+    if utype == "staff":
+        acct = db.query(Staff).filter(
+            Staff.id == payload.get("uid"), Staff.email == email
+        ).first()
+    else:
+        acct = db.query(Manager).filter(
+            Manager.id == payload.get("mid"), Manager.email == email
+        ).first()
+    if not acct:
         raise HTTPException(status_code=404, detail="Account not found.")
 
-    manager.hashed_password = hash_password(req.new_password)
-    manager.is_active = True
+    acct.hashed_password = hash_password(req.new_password)
+    acct.is_active = True
     db.commit()
     return {"message": "Password set successfully. You can now log in."}
 
