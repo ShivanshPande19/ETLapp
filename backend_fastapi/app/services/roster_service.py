@@ -72,6 +72,7 @@ def get_daily_roster(db: Session, outlet_id: int, target_date: date) -> RosterRe
         roster_list.append(StaffRosterItem(
             staff_id=staff.id,
             name=staff.name,
+            role=staff.role,
             status=status,
             check_in_time=chk_in,
             check_out_time=chk_out,
@@ -140,6 +141,7 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
         roster_list.append(StaffRosterItem(
             staff_id=staff.id,
             name=staff.name,
+            role=staff.role,
             status=status,
             check_in_time=chk_in,
             check_out_time=chk_out,

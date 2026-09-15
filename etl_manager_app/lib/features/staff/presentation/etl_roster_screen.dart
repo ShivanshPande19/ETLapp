@@ -362,6 +362,35 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
                   color: _grey,
                 ),
               ),
+              if ((s['role'] ?? '').toString() == 'crownest_maintenance_head') ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _red.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _red.withOpacity(0.25), width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.build_rounded, size: 12, color: _red),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Maintenance Head',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: _red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 22),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -775,6 +804,7 @@ class _CourtSection extends StatelessWidget {
               final checkOut = _formatTime(s['check_out_time']?.toString());
               return _StaffCard(
                 name: (s['name'] ?? 'Unknown').toString(),
+                role: (s['role'] ?? '').toString(),
                 isPresent: isPresent,
                 checkInStr: _formatTime(s['check_in_time']?.toString()),
                 checkOutStr: checkOut,
@@ -792,6 +822,7 @@ class _CourtSection extends StatelessWidget {
 
 class _StaffCard extends StatelessWidget {
   final String name;
+  final String? role;
   final bool isPresent;
   final String checkInStr;
   final String checkOutStr;
@@ -800,6 +831,7 @@ class _StaffCard extends StatelessWidget {
 
   const _StaffCard({
     required this.name,
+    this.role,
     required this.isPresent,
     required this.checkInStr,
     required this.checkOutStr,
@@ -863,14 +895,57 @@ class _StaffCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    style: GoogleFonts.inter(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: _black,
-                      letterSpacing: -0.3,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: _black,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                      if (role == 'crownest_maintenance_head') ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _red.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: _red.withOpacity(0.25),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.build_rounded,
+                                size: 10,
+                                color: _red,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Maintenance Head',
+                                style: GoogleFonts.inter(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: _red,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 4),
                   if (isPresent)
