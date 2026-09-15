@@ -11,7 +11,7 @@ Two audiences:
 
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Index, Text
 from sqlalchemy.sql import func
 
 from ..database import Base
@@ -22,7 +22,11 @@ class Notice(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # "manager" | "staff"
+    # "manager" | "staff" | "role"
+    #   "role" (ROLE SPLIT) targets every active account (manager OR staff)
+    #   whose role is in `target_roles`, plus any named individual recipient
+    #   (recipient_manager_id / recipient_staff_id). Used for the maintenance
+    #   notification matrix (targeted teams, mentions, management-tier alerts).
     audience = Column(String, nullable=False, index=True)
 
     # Category, e.g. "early_logout" | "shift_changed"
@@ -40,6 +44,14 @@ class Notice(Base):
 
     # For audience="staff": the staff who should RECEIVE this notice.
     recipient_staff_id = Column(Integer, ForeignKey("staff.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    # For audience="role": JSON list of role keys to deliver to, e.g.
+    # ["azimuth_maintenance"] or ["azimuth_management","crownest_head"].
+    target_roles = Column(Text, nullable=True)
+
+    # For audience="role": optionally also deliver to ONE named manager (an
+    # individual "mention"). Parallel to recipient_staff_id for staff mentions.
+    recipient_manager_id = Column(Integer, ForeignKey("managers.id", ondelete="CASCADE"), nullable=True, index=True)
 
     title = Column(String, nullable=False)
     body = Column(String, nullable=True)

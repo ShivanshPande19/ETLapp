@@ -436,9 +436,14 @@ def backfill_role_split() -> None:
 
 
 def ensure_notice_columns() -> None:
-    """Add `outlet_id` to an existing `notices` table (created before outlet
-    notice routing). Best-effort + idempotent."""
-    needed = {"outlet_id": "INTEGER"}
+    """Add newly-introduced columns to an existing `notices` table
+    (outlet_id, and the role-split targeting columns). Best-effort + idempotent."""
+    needed = {
+        "outlet_id": "INTEGER",
+        # ROLE SPLIT: role-based targeting (audience="role").
+        "target_roles": "TEXT",
+        "recipient_manager_id": "INTEGER",
+    }
     try:
         with engine.begin() as conn:
             insp = inspect(conn)

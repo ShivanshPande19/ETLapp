@@ -1,5 +1,6 @@
 # app/services/scheduler_service.py
 import asyncio
+import json
 import logging
 from datetime import date, datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,6 +14,27 @@ logger = logging.getLogger("scheduler")
 scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
 
 VERIFICATION_WINDOW_HOURS = 24
+
+# ─── Maintenance reminder / escalation policy (ROLE SPLIT) ────────────────────
+# A ticket is "open" (still needs work) in these statuses. RESOLVED/CLOSED stop
+# reminders. The management tier for escalations = Azimuth Management + Crownest
+# Head (per the locked notification matrix).
+_MAINT_OPEN_STATUSES = ("RAISED", "ASSIGNED", "DISPUTED")
+_MAINT_MGMT_TIER = ["azimuth_management", "crownest_head"]
+_MAINT_REMINDER_GAP = timedelta(hours=6)
+_MAINT_QUIET_START = 21   # 21:00 IST — reminders pause
+_MAINT_QUIET_END = 9      # 09:00 IST — reminders resume
+
+
+def _maint_targets(raw) -> list:
+    """Parse the ticket's target_teams JSON defensively."""
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
 
 
 async def run_sync_job():
@@ -224,6 +246,121 @@ async def auto_close_forgotten_attendance():
         db.close()
 
 
+async def maintenance_reminders():
+    """6-hourly nudge to the ticket's targeted maintenance team(s) while it is
+    still OPEN. Runs hourly but only actually sends between 09:00–21:00 IST and
+    at most once per 6h per ticket; stops the moment the ticket leaves the open
+    statuses (resolved/closed)."""
+    from ..models.maintenance import MaintenanceIssue
+    from .notice_service import create_notice
+
+    ist = now_ist()
+    if not (_MAINT_QUIET_END <= ist.hour < _MAINT_QUIET_START):
+        return  # quiet hours — never disturb overnight
+
+    db: Session = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        rows = db.query(MaintenanceIssue).filter(
+            MaintenanceIssue.status.in_(_MAINT_OPEN_STATUSES)
+        ).all()
+        sent = 0
+        for issue in rows:
+            targets = _maint_targets(issue.target_teams)
+            if not targets:
+                continue  # unrouted (triage) tickets have no assignee to remind
+            last = issue.last_reminder_at
+            if last is not None and (now - last) < _MAINT_REMINDER_GAP:
+                continue
+            try:
+                issue.last_reminder_at = now
+                create_notice(
+                    db,
+                    audience="role",
+                    type="maintenance_reminder",
+                    title=f"Reminder: ticket #{issue.id} still open",
+                    body=(
+                        f"{issue.issue_type} at "
+                        f"{issue.outlet_name or issue.court_name or 'the site'}: "
+                        f"{(issue.description or '')[:140]}"
+                    ),
+                    court_id=issue.court_id,
+                    outlet_id=(issue.outlet_id or None),
+                    target_roles=targets,
+                )
+                sent += 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[MAINT REMINDER] #%s failed: %s", issue.id, e)
+        if sent:
+            db.commit()
+            logger.info("[MAINT REMINDER] sent %s reminder(s)", sent)
+    except Exception:
+        db.rollback()
+        logger.exception("[MAINT REMINDER] error")
+    finally:
+        db.close()
+
+
+async def maintenance_escalations():
+    """Escalate a still-OPEN ticket to the management tier (Azimuth Management +
+    Crownest Head): after 2 days when Azimuth Maintenance is a target, or after
+    4 days for a Crownest-Maintenance-only ticket. Each escalation fires once."""
+    from ..models.maintenance import MaintenanceIssue
+    from .notice_service import create_notice
+
+    db: Session = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        rows = db.query(MaintenanceIssue).filter(
+            MaintenanceIssue.status.in_(_MAINT_OPEN_STATUSES)
+        ).all()
+
+        def _escalate(issue, days: int):
+            create_notice(
+                db,
+                audience="role",
+                type="maintenance_escalation",
+                title=f"Ticket #{issue.id} still open after {days} days",
+                body=(
+                    f"The {issue.issue_type} ticket at "
+                    f"{issue.outlet_name or issue.court_name or 'the site'} is still "
+                    f"unresolved after {days} days."
+                ),
+                court_id=issue.court_id,
+                outlet_id=(issue.outlet_id or None),
+                target_roles=_MAINT_MGMT_TIER,
+            )
+
+        fired = 0
+        for issue in rows:
+            targets = _maint_targets(issue.target_teams)
+            if not targets:
+                continue
+            age = now - (issue.created_at or now)
+            has_azimuth = "azimuth_maintenance" in targets
+            try:
+                if has_azimuth:
+                    if age >= timedelta(days=2) and not issue.escalated_2d:
+                        issue.escalated_2d = True
+                        _escalate(issue, 2)
+                        fired += 1
+                else:  # Crownest-Maintenance-only ticket
+                    if age >= timedelta(days=4) and not issue.escalated_4d:
+                        issue.escalated_4d = True
+                        _escalate(issue, 4)
+                        fired += 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[MAINT ESCALATION] #%s failed: %s", issue.id, e)
+        if fired:
+            db.commit()
+            logger.info("[MAINT ESCALATION] fired %s", fired)
+    except Exception:
+        db.rollback()
+        logger.exception("[MAINT ESCALATION] error")
+    finally:
+        db.close()
+
+
 def start_scheduler():
     if scheduler.running:
         return
@@ -248,6 +385,22 @@ def start_scheduler():
         auto_close_forgotten_attendance,
         trigger="cron", minute=10,
         id="attendance_auto_close", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+
+    # ✅ Maintenance role-split: 6h reminders (09:00–21:00 IST, self-throttled)
+    #    + 2d/4d escalations to the management tier. Both run hourly; the jobs
+    #    themselves enforce the 6h gap / quiet hours / once-only escalation.
+    scheduler.add_job(
+        maintenance_reminders,
+        trigger="cron", minute=15,
+        id="maintenance_reminders", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        maintenance_escalations,
+        trigger="cron", minute=20,
+        id="maintenance_escalations", replace_existing=True,
         max_instances=1, coalesce=True,
     )
 

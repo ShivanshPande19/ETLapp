@@ -342,6 +342,105 @@ def _ticket_label(issue: MaintenanceIssue) -> str:
     return f"{issue.issue_type} · {issue.outlet_name or 'outlet'}"
 
 
+# ─── Role-based ticket notifications (the locked matrix) ──────────────────────
+#
+# "Management tier" for maintenance alerts = Azimuth Management + Crownest Head
+# (they behave identically). The Ops Head raises tickets and is not separately
+# alerted for its own. Immediate alerts are fired here; the 6h reminders and
+# 2d/4d escalations are driven by the scheduler (services/scheduler_service.py).
+MANAGEMENT_TIER_ROLES = ["azimuth_management", "crownest_head"]
+
+
+def _notify_triage(db: Session, issue: MaintenanceIssue) -> None:
+    """Outlet-raised ticket → land in the Crownest Ops Head triage queue."""
+    urgency = " — HIGH PRIORITY" if (issue.priority or "").lower() == "high" else ""
+    try:
+        create_notice(
+            db,
+            audience="role",
+            type="maintenance_triage",
+            title=f"New ticket to route{urgency}",
+            body=(
+                f"{issue.outlet_name or 'An outlet'} raised a {issue.issue_type} issue "
+                f"at {issue.court_name or 'the court'}: {issue.description[:120]}"
+            ),
+            court_id=issue.court_id,
+            outlet_id=(issue.outlet_id or None),
+            target_roles=["crownest_ops_head"],
+        )
+    except Exception as e:  # noqa: BLE001 — a notice must never break the API
+        logger.warning("triage notice failed for #%s: %s", issue.id, e)
+
+
+def _dispatch_routed_notifications(db: Session, issue: MaintenanceIssue) -> None:
+    """Fire the IMMEDIATE role-based notifications when a ticket's targets /
+    mentions are set (ops-head raise, or triage/route). The 6h reminders and
+    2d/4d escalations are handled by the scheduler."""
+    targets = _json_list(issue.target_teams)
+    mentions = _json_list(issue.mentions)
+    if not targets and not mentions:
+        return
+
+    where = issue.outlet_name or issue.court_name or "the site"
+    desc = (issue.description or "")[:140]
+    urgent = " [URGENT]" if issue.is_urgent else ""
+    outlet_id = issue.outlet_id or None
+
+    def _notice(**kw):
+        try:
+            create_notice(db, court_id=issue.court_id, outlet_id=outlet_id, **kw)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ticket notice failed for #%s: %s", issue.id, e)
+
+    # 1) Targeted maintenance team(s) — immediate; they also own the 6h reminder.
+    if targets:
+        _notice(
+            audience="role", type="maintenance_assigned",
+            title=f"New maintenance ticket #{issue.id}{urgent}",
+            body=f"{issue.issue_type} at {where}: {desc}",
+            target_roles=targets,
+        )
+
+    # 2) Mentions — always notified immediately (role and/or individual).
+    mention_roles = [m["value"] for m in mentions if m.get("kind") == "role" and m.get("value")]
+    if mention_roles:
+        _notice(
+            audience="role", type="maintenance_mention",
+            title=f"You're mentioned on ticket #{issue.id}{urgent}",
+            body=f"{issue.issue_type} at {where}: {desc}",
+            target_roles=mention_roles,
+        )
+    for m in mentions:
+        if m.get("kind") != "user":
+            continue
+        val = str(m.get("value") or "")
+        if val.startswith("staff:") and val[6:].isdigit():
+            _notice(
+                audience="role", type="maintenance_mention",
+                title=f"You're mentioned on ticket #{issue.id}{urgent}",
+                body=f"{issue.issue_type} at {where}: {desc}",
+                recipient_staff_id=int(val[6:]),
+            )
+        elif val.startswith("manager:") and val[8:].isdigit():
+            _notice(
+                audience="role", type="maintenance_mention",
+                title=f"You're mentioned on ticket #{issue.id}{urgent}",
+                body=f"{issue.issue_type} at {where}: {desc}",
+                recipient_manager_id=int(val[8:]),
+            )
+
+    # 3) Management tier — ONE immediate alert, but ONLY when Azimuth Maintenance
+    #    is a target (locked matrix). A Crownest-Maintenance-only ticket reaches
+    #    the management tier via the 4-day escalation instead, not at raise time.
+    if "azimuth_maintenance" in targets:
+        _notice(
+            audience="role", type="maintenance_new_review",
+            title=f"Maintenance ticket #{issue.id} raised{urgent}",
+            body=f"{issue.issue_type} at {where} — assigned to Azimuth Maintenance.",
+            target_roles=MANAGEMENT_TIER_ROLES,
+        )
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.post("/maintenance/upload-photo", status_code=201)
@@ -458,22 +557,18 @@ async def raise_ticket(
 
     await _notify(issue)
 
-    # Phase 3: keep the existing management-tier notice for OUTLET-raised tickets
-    # (they land in the ops-head triage queue). The full role-based notification
-    # matrix (targeted teams, mentions, 6h reminders, 2d/4d escalations) is wired
-    # in Phase 4.
-    if not is_ops:
-        urgency = " — HIGH PRIORITY" if (issue.priority or "").lower() == "high" else ""
-        _notify_etl(
-            db,
-            issue,
-            type="maintenance_raised",
-            title=f"New maintenance ticket{urgency}",
-            body=(
-                f"{issue.outlet_name or 'An outlet'} raised a {issue.issue_type} issue "
-                f"at {issue.court_name or 'the court'}: {issue.description[:120]}"
-            ),
-        )
+    if is_ops:
+        # Ops-head raise: start the 6h-reminder clock once the ticket has a
+        # target team, then fire the immediate role-based notifications
+        # (targeted team(s) + mentions + management-tier once for an azimuth
+        # target). Crownest-maint-only tickets skip the immediate mgmt alert.
+        if target_teams:
+            issue.last_reminder_at = datetime.utcnow()
+            db.commit()
+        _dispatch_routed_notifications(db, issue)
+    else:
+        # Outlet-raised: lands in the Crownest Ops Head triage queue to be routed.
+        _notify_triage(db, issue)
     return _to_out(issue)
 
 
@@ -507,7 +602,12 @@ async def route_ticket(
     db.refresh(issue)
 
     await _notify(issue)
-    # Phase 4 wires the role-based notifications fired on routing.
+    # Start the 6h-reminder clock now the ticket has target team(s), then fire
+    # the immediate role-based notifications for this routing.
+    if targets:
+        issue.last_reminder_at = datetime.utcnow()
+        db.commit()
+    _dispatch_routed_notifications(db, issue)
     return _to_out(issue)
 
 

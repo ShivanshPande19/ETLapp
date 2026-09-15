@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 
 # created_at is stored as naive UTC. Notices are grouped/filtered by the IST
@@ -28,30 +28,44 @@ router = APIRouter()
 
 
 def _scoped_query(db: Session, user: CurrentUser):
-    """Notices visible to the current user.
+    """Notices visible to the current user (union of every applicable scope).
 
-    • ETL manager   → court-level manager notices (outlet_id IS NULL).
-    • Outlet manager → manager notices for THEIR outlet (outlet_id == their outlet).
-    • ETL/outlet staff → their own audience="staff" notices.
-    • Others → nothing.
+    • Management      → court-level manager notices (outlet_id IS NULL).
+    • Outlet manager  → manager notices for THEIR outlet(s).
+    • Any staff-table account (etl/outlet/maintenance) → their own
+      audience="staff" notices.
+    • ROLE SPLIT: everyone also sees audience="role" notices that target their
+      role, or that name them individually (recipient_manager_id/staff_id).
+
+    Kept in lock-step with services/push_targeting.resolve_notice_targets so a
+    user can always open what they were pushed.
     """
-    if user.is_etl_manager:
-        return db.query(Notice).filter(
-            Notice.audience == "manager",
-            Notice.outlet_id.is_(None),
-        )
+    conds = []
+
+    # Manager-audience scopes (unchanged).
+    if user.is_management:
+        conds.append(and_(Notice.audience == "manager", Notice.outlet_id.is_(None)))
     if user.role == "outlet_manager" and user.outlet_ids:
         # MULTI-OUTLET: notices for ANY of the outlets this manager is linked to.
-        return db.query(Notice).filter(
-            Notice.audience == "manager",
-            Notice.outlet_id.in_(user.outlet_ids),
-        )
-    if user.is_etl_staff or user.role == "outlet_staff":
-        return db.query(Notice).filter(
-            Notice.audience == "staff",
-            Notice.recipient_staff_id == user.id,
-        )
-    return db.query(Notice).filter(Notice.id < 0)  # empty set
+        conds.append(and_(Notice.audience == "manager", Notice.outlet_id.in_(user.outlet_ids)))
+
+    # Staff-audience: any staff-table account (etl_staff, outlet_staff AND the
+    # maintenance roles) can receive notices addressed personally to them
+    # (shift/attendance/access + individual mentions).
+    if user.is_staff_account:
+        conds.append(and_(Notice.audience == "staff", Notice.recipient_staff_id == user.id))
+
+    # Role-audience: targets this user's role, or names them individually.
+    role_or = [Notice.target_roles.like(f'%"{user.role}"%')]
+    if user.is_staff_account:
+        role_or.append(Notice.recipient_staff_id == user.id)
+    else:
+        role_or.append(Notice.recipient_manager_id == user.id)
+    conds.append(and_(Notice.audience == "role", or_(*role_or)))
+
+    if not conds:
+        return db.query(Notice).filter(Notice.id < 0)  # empty set
+    return db.query(Notice).filter(or_(*conds))
 
 
 @router.get("/", response_model=NoticeListResponse)
