@@ -18,7 +18,7 @@ from ...models.sale import Court, Outlet
 from ...core.uploads import save_upload_image
 from ...services.notice_service import create_notice
 from ..deps import (
-    CurrentUser, get_current_user, require_etl_manager, require_outlet_user,
+    CurrentUser, get_current_user, require_etl_manager,
     require_ops_head, MAINTENANCE_ROLES,
 )
 from .events import notify_clients
@@ -446,10 +446,13 @@ def _dispatch_routed_notifications(db: Session, issue: MaintenanceIssue) -> None
 @router.post("/maintenance/upload-photo", status_code=201)
 async def upload_maintenance_photo(
     photo: UploadFile = File(...),
-    user: CurrentUser = Depends(require_outlet_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Persist a maintenance proof photo on the Railway volume (replaces the
-    old Cloudinary flow) and return its public URL path."""
+    """Persist a maintenance proof photo on the Railway volume and return its
+    public URL path. Allowed for whoever can raise a ticket — an outlet user or
+    the Crownest Ops Head."""
+    if not (user.is_outlet_user or user.is_ops_head):
+        raise HTTPException(status_code=403, detail="You cannot upload maintenance photos.")
     photo_url = await save_upload_image(photo, "maintenance", "mnt")
     return {"photo_url": photo_url}
 
