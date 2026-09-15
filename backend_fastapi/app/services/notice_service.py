@@ -16,6 +16,7 @@ api/routes/notices.py::_scoped_query uses for reads, so a user can always open
 what they were pushed.
 """
 
+import json
 import logging
 from typing import Optional
 
@@ -34,10 +35,15 @@ _ANDROID_CHANNEL_ID = "etl_default"
 logger = logging.getLogger("notice")
 
 
-def _unread_badge_for(db: Session, notice: Notice) -> int:
+def _unread_badge_for(db: Session, notice: Notice) -> Optional[int]:
     """Recipient's TOTAL unread count in this notice's scope (mirrors
     api/routes/notices.py::_scoped_query). Sent as the app-icon badge so it
     reflects reality instead of the old hardcoded 1."""
+    # Role-audience notices fan out to many recipients (a whole role), so a
+    # single per-recipient badge count isn't meaningful here — skip it and let
+    # the app recompute the real unread count from /notices/unread-count on open.
+    if notice.audience == "role":
+        return None
     q = db.query(Notice).filter(Notice.is_read == False)  # noqa: E712
     if notice.audience == "staff":
         return q.filter(
@@ -130,14 +136,16 @@ async def _send_and_prune(tokens, *, title, body, data, badge=None) -> None:
 def create_notice(
     db: Session,
     *,
-    audience: str,            # "manager" | "staff"
+    audience: str,            # "manager" | "staff" | "role"
     type: str,                # "early_logout" | "shift_changed" | ...
     title: str,
     body: Optional[str] = None,
     court_id: Optional[int] = None,
     outlet_id: Optional[int] = None,           # set => belongs to an outlet manager
     staff_id: Optional[int] = None,            # subject (who it's about)
-    recipient_staff_id: Optional[int] = None,  # for audience="staff"
+    recipient_staff_id: Optional[int] = None,  # for audience="staff" (or a staff mention)
+    target_roles: Optional[list] = None,       # for audience="role": role keys to deliver to
+    recipient_manager_id: Optional[int] = None,  # for audience="role": an individual manager mention
     push: bool = True,                         # set False for low-value/noisy notices
 ) -> Notice:
     notice = Notice(
@@ -149,6 +157,9 @@ def create_notice(
         outlet_id=outlet_id,
         staff_id=staff_id,
         recipient_staff_id=recipient_staff_id,
+        # Stored as a JSON string so it works identically on SQLite + Postgres.
+        target_roles=(json.dumps(list(target_roles)) if target_roles else None),
+        recipient_manager_id=recipient_manager_id,
         is_read=False,
     )
     db.add(notice)

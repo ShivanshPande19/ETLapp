@@ -41,6 +41,7 @@ TWO RULES THAT MUST NOT BE BROKEN
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Iterable, List, Optional
 
@@ -156,6 +157,60 @@ def _tokens_for_etl_managers(db: Session) -> List[str]:
     return [r[0] for r in rows]
 
 
+def _tokens_for_roles(db: Session, roles: Iterable[str]) -> List[str]:
+    """Live tokens for EVERY active account — manager OR staff — whose role is
+    in `roles`. This is the ROLE-SPLIT targeting primitive: a maintenance role
+    lives in `staff`, a management role in `managers`, so both tables are
+    queried. Deactivated accounts are excluded (joined live, never the stale
+    DeviceToken snapshot)."""
+    wanted = [r for r in roles if r]
+    if not wanted:
+        return []
+    mgr = (
+        db.query(DeviceToken.fcm_token)
+        .join(Manager, Manager.id == DeviceToken.user_id)
+        .filter(
+            DeviceToken.user_type == "manager",
+            DeviceToken.is_active == True,  # noqa: E712
+            Manager.is_active == True,  # noqa: E712
+            Manager.role.in_(wanted),
+        )
+        .all()
+    )
+    stf = (
+        db.query(DeviceToken.fcm_token)
+        .join(Staff, Staff.id == DeviceToken.user_id)
+        .filter(
+            DeviceToken.user_type == "staff",
+            DeviceToken.is_active == True,  # noqa: E712
+            Staff.is_active == True,  # noqa: E712
+            Staff.role.in_(wanted),
+        )
+        .all()
+    )
+    return [r[0] for r in mgr] + [r[0] for r in stf]
+
+
+def _tokens_for_manager_ids(db: Session, manager_ids: Iterable[int]) -> List[str]:
+    """Live tokens for the given managers (used for an individual manager
+    mention). Deactivated managers are excluded."""
+    ids = [int(m) for m in manager_ids if m is not None]
+    if not ids:
+        return []
+    rows = (
+        db.query(DeviceToken.fcm_token)
+        .join(Manager, Manager.id == DeviceToken.user_id)
+        .filter(
+            DeviceToken.user_type == "manager",
+            DeviceToken.is_active == True,  # noqa: E712
+            Manager.is_active == True,  # noqa: E712
+            Manager.id.in_(ids),
+        )
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 # ─── The entry point used by notice_service ──────────────────────────────────
 
 def resolve_notice_targets(db: Session, notice: Notice) -> List[str]:
@@ -186,6 +241,22 @@ def resolve_notice_targets(db: Session, notice: Notice) -> List[str]:
             tokens = _tokens_for_outlet_managers(db, notice.outlet_id)
         else:
             tokens = _tokens_for_etl_managers(db)
+
+    elif notice.audience == "role":
+        # ROLE SPLIT: deliver to every account holding a target role, plus any
+        # named individual (manager/staff) mention. All resolved live.
+        roles: List[str] = []
+        if notice.target_roles:
+            try:
+                parsed = json.loads(notice.target_roles)
+                roles = [str(r) for r in parsed] if isinstance(parsed, list) else []
+            except Exception:
+                roles = []
+        tokens = _tokens_for_roles(db, roles)
+        if notice.recipient_manager_id is not None:
+            tokens += _tokens_for_manager_ids(db, [notice.recipient_manager_id])
+        if notice.recipient_staff_id is not None:
+            tokens += _tokens_for_staff_ids(db, [notice.recipient_staff_id])
 
     else:
         logger.warning("notice#%s unknown audience=%r — dropped", notice.id, notice.audience)
