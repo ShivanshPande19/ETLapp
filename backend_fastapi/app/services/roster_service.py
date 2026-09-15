@@ -95,9 +95,13 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
     """Ek court ke ETL staff ka roster banata hai (court_id se scoped)."""
     # ETL staff us court ke (court_id set hota hai; outlet staff ka court_id null
     # hota hai isliye wo apne aap exclude ho jaate hain).
+    # Crownest Maintenance Head ko yahan se exclude karte hain — wo har zone
+    # cover karta hai, isliye "Maintenance · All Zones" section me ek hi baar
+    # dikhta hai (warna apne assigned court me + all-zones me, dono jagah aata).
     staff_members = db.query(Staff).filter(
         Staff.court_id == court.id,
         Staff.is_active == True,
+        Staff.role != "crownest_maintenance_head",
     ).all()
 
     _start, _end = day_range(target_date)
