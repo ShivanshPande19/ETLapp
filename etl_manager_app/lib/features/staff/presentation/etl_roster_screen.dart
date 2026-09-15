@@ -242,6 +242,14 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
         .map((c) => Map<String, dynamic>.from(c))
         .toList();
 
+    // Roaming maintenance heads (Crownest Maintenance Head) — not tied to any
+    // one zone, shown once in their own "all zones" section.
+    final rawMaintenance = (data['maintenance_team'] as List?) ?? [];
+    final maintenanceTeam = rawMaintenance
+        .whereType<Map>()
+        .map((s) => Map<String, dynamic>.from(s))
+        .toList();
+
     // Court filter (client-side)
     final visibleCourts = _focusedCourtId == null
         ? courts
@@ -288,6 +296,27 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
                 ),
                 const SizedBox(height: 22),
               ],
+
+              // Maintenance heads span every zone — shown once, above courts,
+              // and never hidden by the per-court filter.
+              if (maintenanceTeam.isNotEmpty)
+                _CourtSection(
+                  court: <String, dynamic>{
+                    'court_name': 'Maintenance · All Zones',
+                    'present_count': maintenanceTeam
+                        .where(
+                          (s) => (s['status'] ?? '').toString() == 'present',
+                        )
+                        .length,
+                    'total_staff': maintenanceTeam.length,
+                    'staff_list': maintenanceTeam,
+                  },
+                  onStaffTap: (s) => _showStaffDetail(
+                    context,
+                    s,
+                    <String, dynamic>{'court_name': 'Maintenance · All Zones'},
+                  ),
+                ),
 
               if (courts.isEmpty)
                 _EmptyState(

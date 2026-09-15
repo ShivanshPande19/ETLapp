@@ -84,3 +84,6 @@ class EtlRosterResponse(BaseModel):
     total_staff: int
     total_present: int
     courts: List[CourtRosterItem]
+    # Roaming maintenance heads (Crownest Maintenance Head) aren't tied to one
+    # court — they're returned once here, covering every zone.
+    maintenance_team: List[StaffRosterItem] = []

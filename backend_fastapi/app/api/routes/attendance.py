@@ -116,6 +116,13 @@ def _resolve_staff(user: CurrentUser, db: Session) -> Staff:
     return staff
 
 
+def _is_roaming_maintenance(staff: Staff) -> bool:
+    """A Crownest Maintenance Head covers every zone, so their attendance is a
+    simple presence log: no fixed shift, no geofence, no early-check-in window.
+    Every other staff role keeps the standard shift + geofence rules."""
+    return staff.role == "crownest_maintenance_head"
+
+
 def _enforce_geofence(
     db: Session, staff: Staff, lat: float, lng: float, accuracy: Optional[float]
 ) -> None:
@@ -129,6 +136,10 @@ def _enforce_geofence(
     A small buffer (capped) based on the device-reported GPS accuracy is added
     to the allowed radius so a poor fix doesn't reject a genuine staff member.
     """
+    # ROLE SPLIT: a Crownest Maintenance Head roams every zone, so no single
+    # court's geofence applies — they may check in from wherever they are.
+    if _is_roaming_maintenance(staff):
+        return
     court = _staff_court(db, staff)
     if not court or court.latitude is None or court.longitude is None:
         return  # no court / no geofence configured → allow
@@ -252,6 +263,10 @@ def my_geofence(
     restriction applies (legacy court / no location set)."""
     staff = _resolve_staff(user, db)
 
+    # Roaming maintenance heads have no fixed geofence (they cover every zone).
+    if _is_roaming_maintenance(staff):
+        return {"has_geofence": False}
+
     court = _staff_court(db, staff)
     if not court or court.latitude is None or court.longitude is None:
         return {"has_geofence": False}
@@ -352,9 +367,14 @@ async def mark_attendance(
 ):
     staff = _resolve_staff(user, db)
 
+    # ROLE SPLIT: a roaming Crownest Maintenance Head logs a simple presence —
+    # no fixed shift, no geofence, no early-check-in window (they can start
+    # anywhere, anytime). Every other role keeps the mandatory-shift rule.
+    roaming = _is_roaming_maintenance(staff)
+
     # ✅ Shift is mandatory — staff can't mark attendance until the manager
     # has assigned their shift timings.
-    if not staff.shift_start or not staff.shift_end:
+    if not roaming and (not staff.shift_start or not staff.shift_end):
         raise HTTPException(
             status_code=403,
             detail="Your shift timings haven't been set yet. Please ask your manager.",
@@ -374,7 +394,7 @@ async def mark_attendance(
     _reject_if_mocked(is_mocked)
 
     # ⏰ Can't check in too early (more than the early window before shift start).
-    start_utc = scheduled_shift_start_utc(biz_date, staff.shift_start)
+    start_utc = None if roaming else scheduled_shift_start_utc(biz_date, staff.shift_start)
     if start_utc is not None:
         from datetime import timedelta
 
