@@ -6,17 +6,27 @@
 //   • OpsRouteSheet — triage/route an existing ticket (set target team(s) +
 //     mentions + urgent).
 //
-// Uses the app's dark Material theme directly (themed AppBar / inputs / buttons)
-// so it stays native without bespoke styling.
+// UI matches the app theme (dark header + white canvas + red brand accent +
+// AntonSC titles + custom chips/toggles), mirroring the outlet raise sheet and
+// ManageAccountsScreen — deliberately NOT the raw Material theme.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/network/api_client.dart';
-import '../../../core/theme/app_theme.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../domain/maintenance_notifier.dart';
+
+// ─── Palette (matches the app theme) ──────────────────────────────────────────
+const _bg = Color(0xFF080808);
+const _white = Color(0xFFFFFFFF);
+const _black = Color(0xFF0A0A0A);
+const _grey = Color(0xFF888888);
+const _brand = Color(0xFFD02128); // ETL brand red
+const _danger = Color(0xFFEF4444);
+const _field = Color(0xFFF5F5F5);
 
 // ─── Reference data ───────────────────────────────────────────────────────────
 const _targetTeams = <(String, String)>[
@@ -61,17 +71,170 @@ final opsOutletsProvider = FutureProvider.autoDispose<List<OutletLite>>((ref) as
 List<Map<String, String>> _mentionPayload(Set<String> roles) =>
     roles.map((r) => {'kind': 'role', 'value': r}).toList();
 
+// ─── Shared themed widgets ────────────────────────────────────────────────────
+
+Widget _sectionLabel(String t) => Text(
+      t,
+      style: GoogleFonts.inter(
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        color: _grey,
+        letterSpacing: 1.0,
+      ),
+    );
+
+/// A pill chip. Selected = solid black; unselected = light grey fill. Set
+/// [showCheck] for multi-select chips (shows a tick when selected).
+Widget _chip({
+  required String label,
+  required bool selected,
+  required VoidCallback onTap,
+  bool showCheck = false,
+}) {
+  return GestureDetector(
+    onTap: () {
+      HapticFeedback.selectionClick();
+      onTap();
+    },
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: selected ? _black : _field,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showCheck && selected) ...[
+            const Icon(Icons.check_rounded, size: 14, color: _white),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? _white : _black,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// The "Mark as urgent" toggle card (shared by the raise screen + route sheet).
+Widget _urgentCard(bool on, VoidCallback onTap) {
+  return GestureDetector(
+    onTap: () {
+      HapticFeedback.selectionClick();
+      onTap();
+    },
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: on ? _danger.withOpacity(0.08) : _field,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: on ? _danger.withOpacity(0.5) : Colors.transparent,
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.bolt_rounded, size: 18, color: on ? _danger : _grey),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Mark as urgent',
+                    style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: on ? _danger : _black)),
+                const SizedBox(height: 2),
+                Text('Notifies the mentioned teams immediately',
+                    style: GoogleFonts.inter(fontSize: 11.5, color: _grey)),
+              ],
+            ),
+          ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 44,
+            height: 26,
+            padding: const EdgeInsets.all(3),
+            alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+            decoration: BoxDecoration(
+              color: on ? _danger : Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: const BoxDecoration(
+                  color: _white, shape: BoxShape.circle),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _submitBtn(String label, bool busy, VoidCallback? onTap) {
+  return GestureDetector(
+    onTap: busy ? null : onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      decoration: BoxDecoration(
+        color: busy ? _grey : _black,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Center(
+        child: busy
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(color: _white, strokeWidth: 2),
+              )
+            : Text(label,
+                style: GoogleFonts.inter(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: _white)),
+      ),
+    ),
+  );
+}
+
+void _snack(BuildContext context, String msg) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(msg,
+          style: GoogleFonts.inter(color: _white, fontWeight: FontWeight.w600)),
+      backgroundColor: _black,
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Raise screen
 // ══════════════════════════════════════════════════════════════════════════════
-Future<void> openOpsRaise(BuildContext context) => Navigator.of(context,
-        rootNavigator: true)
-    .push(MaterialPageRoute(builder: (_) => const OpsRaiseTicketScreen()));
+Future<void> openOpsRaise(BuildContext context) =>
+    Navigator.of(context, rootNavigator: true)
+        .push(MaterialPageRoute(builder: (_) => const OpsRaiseTicketScreen()));
 
 class OpsRaiseTicketScreen extends ConsumerStatefulWidget {
   const OpsRaiseTicketScreen({super.key});
   @override
-  ConsumerState<OpsRaiseTicketScreen> createState() => _OpsRaiseTicketScreenState();
+  ConsumerState<OpsRaiseTicketScreen> createState() =>
+      _OpsRaiseTicketScreenState();
 }
 
 class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
@@ -92,47 +255,45 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
     super.dispose();
   }
 
-  void _snack(String m) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
-  }
-
   Future<void> _submit() async {
     final desc = _descCtrl.text.trim();
     if (desc.length < 5) {
-      _snack('Please add a description (min 5 characters).');
+      _snack(context, 'Please add a description (min 5 characters).');
       return;
     }
     if (_scope == 'general' && _courtId == null) {
-      _snack('Select a zone (court).');
+      _snack(context, 'Select a zone (court).');
       return;
     }
     if (_scope == 'outlet' && _outletId == null) {
-      _snack('Select an outlet.');
+      _snack(context, 'Select an outlet.');
       return;
     }
     if (_targets.isEmpty) {
-      _snack('Choose at least one team to assign.');
+      _snack(context, 'Choose at least one team to assign.');
       return;
     }
     setState(() => _busy = true);
-    final err = await ref.read(maintenanceNotifierProvider.notifier).raiseTicketAsOps(
-          issueType: _issueType,
-          priority: _priority,
-          description: desc,
-          scope: _scope,
-          courtId: _scope == 'general' ? _courtId : null,
-          outletId: _scope == 'outlet' ? _outletId : null,
-          targetTeams: _targets.toList(),
-          mentions: _mentionPayload(_mentions),
-          isUrgent: _urgent,
-        );
+    final err =
+        await ref.read(maintenanceNotifierProvider.notifier).raiseTicketAsOps(
+              issueType: _issueType,
+              priority: _priority,
+              description: desc,
+              scope: _scope,
+              courtId: _scope == 'general' ? _courtId : null,
+              outletId: _scope == 'outlet' ? _outletId : null,
+              targetTeams: _targets.toList(),
+              mentions: _mentionPayload(_mentions),
+              isUrgent: _urgent,
+            );
     if (!mounted) return;
     setState(() => _busy = false);
     if (err == null) {
-      _snack('Ticket raised.');
+      HapticFeedback.heavyImpact();
+      _snack(context, 'Ticket raised.');
       Navigator.of(context).pop();
     } else {
-      _snack(err);
+      _snack(context, err);
     }
   }
 
@@ -142,172 +303,368 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
     final outletsAsync = ref.watch(opsOutletsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Raise Maintenance Ticket')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
-        children: [
-          _label('Scope'),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'general', label: Text('General (Zone)')),
-              ButtonSegment(value: 'outlet', label: Text('Outlet')),
-            ],
-            selected: {_scope},
-            onSelectionChanged: (s) => setState(() {
-              _scope = s.first;
-              _outletId = null;
-            }),
-          ),
-          const SizedBox(height: 18),
-
-          // Zone (court) — always needed (drives outlet filter too).
-          _label('Zone (court)'),
-          courtsAsync.when(
-            loading: () => const LinearProgressIndicator(),
-            error: (e, _) => Text('Could not load courts', style: _err()),
-            data: (courts) => DropdownButtonFormField<int>(
-              initialValue: _courtId,
-              isExpanded: true,
-              decoration: const InputDecoration(hintText: 'Select a zone'),
-              items: [
-                for (final c in courts)
-                  DropdownMenuItem(value: c.id, child: Text(c.name)),
-              ],
-              onChanged: (v) => setState(() {
-                _courtId = v;
-                _outletId = null;
-              }),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Outlet picker (outlet scope only), filtered by the chosen zone.
-          if (_scope == 'outlet') ...[
-            _label('Outlet'),
-            outletsAsync.when(
-              loading: () => const LinearProgressIndicator(),
-              error: (e, _) => Text('Could not load outlets', style: _err()),
-              data: (outlets) {
-                final filtered = _courtId == null
-                    ? const <OutletLite>[]
-                    : outlets.where((o) => o.courtId == _courtId).toList();
-                return DropdownButtonFormField<int>(
-                  initialValue: _outletId,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    hintText: _courtId == null
-                        ? 'Pick a zone first'
-                        : (filtered.isEmpty ? 'No outlets in this zone' : 'Select an outlet'),
+      backgroundColor: _bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ─── Dark header ───
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.of(context).pop();
+                    },
+                    child: Container(
+                      height: 38,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: _white.withOpacity(0.07),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: _white.withOpacity(0.12)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.west_rounded,
+                              size: 14, color: _white.withOpacity(0.9)),
+                          const SizedBox(width: 6),
+                          Text('Back',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _white.withOpacity(0.9),
+                              )),
+                        ],
+                      ),
+                    ),
                   ),
-                  items: [
-                    for (final o in filtered)
-                      DropdownMenuItem(value: o.id, child: Text(o.name)),
-                  ],
-                  onChanged: filtered.isEmpty
-                      ? null
-                      : (v) => setState(() => _outletId = v),
-                );
-              },
+                  const SizedBox(height: 14),
+                  RichText(
+                    text: TextSpan(
+                      style: GoogleFonts.antonSc(
+                          fontSize: 34, height: 0.95, letterSpacing: -0.5),
+                      children: const [
+                        TextSpan(text: 'R', style: TextStyle(color: _brand)),
+                        TextSpan(
+                            text: 'AISE TICKET',
+                            style: TextStyle(color: _white)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.build_rounded, size: 13, color: _grey),
+                      const SizedBox(width: 6),
+                      Text('New maintenance ticket',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: _white.withOpacity(0.45),
+                            fontWeight: FontWeight.w500,
+                          )),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 14),
-          ],
 
-          _label('Issue type'),
-          DropdownButtonFormField<String>(
-            initialValue: _issueType,
-            isExpanded: true,
-            items: [
-              for (final t in _issueTypes)
-                DropdownMenuItem(value: t.$1, child: Text(t.$2)),
-            ],
-            onChanged: (v) => setState(() => _issueType = v ?? 'other'),
-          ),
-          const SizedBox(height: 14),
-
-          _label('Priority'),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'low', label: Text('Low')),
-              ButtonSegment(value: 'medium', label: Text('Medium')),
-              ButtonSegment(value: 'high', label: Text('High')),
-            ],
-            selected: {_priority},
-            onSelectionChanged: (s) => setState(() => _priority = s.first),
-          ),
-          const SizedBox(height: 6),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Mark as urgent'),
-            subtitle: Text('Notifies mentioned teams immediately',
-                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textSecondary)),
-            value: _urgent,
-            onChanged: (v) => setState(() => _urgent = v),
-          ),
-          const SizedBox(height: 8),
-
-          _label('Description'),
-          TextField(
-            controller: _descCtrl,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'Describe the issue / work needed…',
-            ),
-          ),
-          const SizedBox(height: 18),
-
-          _label('Assign to team(s)'),
-          for (final t in _targetTeams)
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              title: Text(t.$2),
-              value: _targets.contains(t.$1),
-              onChanged: (v) => setState(() =>
-                  v == true ? _targets.add(t.$1) : _targets.remove(t.$1)),
-            ),
-          const SizedBox(height: 12),
-
-          _label('Also notify (mentions)'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final r in _mentionRoles)
-                FilterChip(
-                  label: Text(r.$2),
-                  selected: _mentions.contains(r.$1),
-                  onSelected: (sel) => setState(() =>
-                      sel ? _mentions.add(r.$1) : _mentions.remove(r.$1)),
+            // ─── White canvas ───
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  color: _white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
                 ),
-            ],
-          ),
-          const SizedBox(height: 24),
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                      24, 26, 24, MediaQuery.of(context).padding.bottom + 32),
+                  physics: const BouncingScrollPhysics(),
+                  children: [
+                    _sectionLabel('SCOPE'),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _scopeCard('general', 'Zone', 'Court-wide',
+                              Icons.stadium_rounded),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _scopeCard('outlet', 'Outlet', 'One vendor',
+                              Icons.storefront_rounded),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
 
-          ElevatedButton.icon(
-            onPressed: _busy ? null : _submit,
-            icon: _busy
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                  )
-                : const Icon(Icons.send_rounded),
-            label: Text(_busy ? 'Raising…' : 'Raise ticket'),
-          ),
-        ],
+                    _sectionLabel('ZONE'),
+                    const SizedBox(height: 10),
+                    courtsAsync.when(
+                      loading: () => _loader(),
+                      error: (_, __) => _errText('Could not load zones.'),
+                      data: (courts) => Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final c in courts)
+                            _chip(
+                              label: c.name,
+                              selected: _courtId == c.id,
+                              onTap: () => setState(() {
+                                _courtId = c.id;
+                                _outletId = null;
+                              }),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    if (_scope == 'outlet') ...[
+                      _sectionLabel('OUTLET'),
+                      const SizedBox(height: 10),
+                      outletsAsync.when(
+                        loading: () => _loader(),
+                        error: (_, __) => _errText('Could not load outlets.'),
+                        data: (outlets) {
+                          if (_courtId == null) {
+                            return _hintText('Pick a zone first.');
+                          }
+                          final filtered = outlets
+                              .where((o) => o.courtId == _courtId)
+                              .toList();
+                          if (filtered.isEmpty) {
+                            return _hintText('No outlets in this zone.');
+                          }
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final o in filtered)
+                                _chip(
+                                  label: o.name,
+                                  selected: _outletId == o.id,
+                                  onTap: () =>
+                                      setState(() => _outletId = o.id),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 22),
+                    ],
+
+                    _sectionLabel('ISSUE TYPE'),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final t in _issueTypes)
+                          _chip(
+                            label: t.$2,
+                            selected: _issueType == t.$1,
+                            onTap: () => setState(() => _issueType = t.$1),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+
+                    _sectionLabel('PRIORITY'),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        for (final p in const ['low', 'medium', 'high'])
+                          Expanded(child: _priorityCard(p)),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+
+                    _urgentCard(_urgent, () => setState(() => _urgent = !_urgent)),
+                    const SizedBox(height: 22),
+
+                    _sectionLabel('DESCRIPTION'),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _descCtrl,
+                      maxLines: 4,
+                      maxLength: 1000,
+                      style: GoogleFonts.inter(color: _black, fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Describe the issue / work needed…',
+                        hintStyle: GoogleFonts.inter(color: _grey),
+                        counterText: '',
+                        filled: true,
+                        fillColor: const Color(0xFFFAFAFA),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: const BorderSide(color: _black, width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    _sectionLabel('ASSIGN TO TEAM(S)'),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final t in _targetTeams)
+                          _chip(
+                            label: t.$2,
+                            selected: _targets.contains(t.$1),
+                            showCheck: true,
+                            onTap: () => setState(() => _targets.contains(t.$1)
+                                ? _targets.remove(t.$1)
+                                : _targets.add(t.$1)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+
+                    _sectionLabel('ALSO NOTIFY  ·  optional'),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final r in _mentionRoles)
+                          _chip(
+                            label: r.$2,
+                            selected: _mentions.contains(r.$1),
+                            showCheck: true,
+                            onTap: () => setState(() =>
+                                _mentions.contains(r.$1)
+                                    ? _mentions.remove(r.$1)
+                                    : _mentions.add(r.$1)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 30),
+
+                    _submitBtn('Raise ticket', _busy, _submit),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _label(String s) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, top: 2),
-        child: Text(s,
-            style: GoogleFonts.inter(
-                fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-      );
+  Widget _scopeCard(
+      String value, String title, String subtitle, IconData icon) {
+    final sel = _scope == value;
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() {
+          _scope = value;
+          _outletId = null;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        decoration: BoxDecoration(
+          color: sel ? _black : _field,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 18, color: sel ? _white : _grey),
+            const SizedBox(height: 8),
+            Text(title,
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: sel ? _white : _black)),
+            const SizedBox(height: 2),
+            Text(subtitle,
+                style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: sel ? _white.withOpacity(0.6) : _grey)),
+          ],
+        ),
+      ),
+    );
+  }
 
-  TextStyle _err() => GoogleFonts.inter(color: AppTheme.danger, fontSize: 13);
+  Widget _priorityCard(String p) {
+    final (color, label) = _priorityMeta(p);
+    final sel = _priority == p;
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _priority = p);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        margin: EdgeInsets.only(right: p != 'high' ? 8 : 0),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: sel ? color.withOpacity(0.12) : _field,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: sel ? color : Colors.transparent, width: 1.5),
+        ),
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.flag_rounded, size: 13, color: sel ? color : _grey),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: sel ? color : _grey)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
+
+(Color, String) _priorityMeta(String p) => switch (p) {
+      'high' => (_danger, 'High'),
+      'low' => (const Color(0xFF94A3B8), 'Low'),
+      _ => (const Color(0xFFF59E0B), 'Medium'),
+    };
+
+Widget _loader() => const Padding(
+      padding: EdgeInsets.symmetric(vertical: 6),
+      child: SizedBox(
+        height: 18,
+        width: 18,
+        child: CircularProgressIndicator(strokeWidth: 2, color: _grey),
+      ),
+    );
+
+Widget _errText(String s) =>
+    Text(s, style: GoogleFonts.inter(color: _danger, fontSize: 12));
+
+Widget _hintText(String s) =>
+    Text(s, style: GoogleFonts.inter(color: _grey, fontSize: 12));
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Route / triage sheet
@@ -337,24 +694,26 @@ class _OpsRouteSheetState extends ConsumerState<OpsRouteSheet> {
 
   Future<void> _save() async {
     if (_targets.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose at least one team.')),
-      );
+      _snack(context, 'Choose at least one team.');
       return;
     }
     setState(() => _busy = true);
-    final err = await ref.read(maintenanceNotifierProvider.notifier).routeTicket(
-          widget.issue.id,
-          targetTeams: _targets.toList(),
-          mentions: _mentionPayload(_mentions),
-          isUrgent: _urgent,
-        );
+    final err =
+        await ref.read(maintenanceNotifierProvider.notifier).routeTicket(
+              widget.issue.id,
+              targetTeams: _targets.toList(),
+              mentions: _mentionPayload(_mentions),
+              isUrgent: _urgent,
+            );
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(err ?? 'Ticket routed.')),
-    );
-    if (err == null) Navigator.of(context).pop();
+    if (err == null) {
+      HapticFeedback.heavyImpact();
+      _snack(context, 'Ticket routed.');
+      Navigator.of(context).pop();
+    } else {
+      _snack(context, err);
+    }
   }
 
   @override
@@ -362,78 +721,77 @@ class _OpsRouteSheetState extends ConsumerState<OpsRouteSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
         decoration: const BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          color: _white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.border,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text('Route ticket #${widget.issue.id}',
-                style: GoogleFonts.inter(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary)),
-            const SizedBox(height: 4),
-            Text('Assign the team(s) that will handle this.',
-                style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textSecondary)),
-            const SizedBox(height: 14),
-            for (final t in _targetTeams)
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: Text(t.$2, style: const TextStyle(color: AppTheme.textPrimary)),
-                value: _targets.contains(t.$1),
-                onChanged: (v) => setState(() =>
-                    v == true ? _targets.add(t.$1) : _targets.remove(t.$1)),
-              ),
-            const SizedBox(height: 8),
-            Text('Also notify',
-                style: GoogleFonts.inter(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 14, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final r in _mentionRoles)
-                  FilterChip(
-                    label: Text(r.$2),
-                    selected: _mentions.contains(r.$1),
-                    onSelected: (sel) => setState(() =>
-                        sel ? _mentions.add(r.$1) : _mentions.remove(r.$1)),
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
+                ),
+                const SizedBox(height: 20),
+                Text('Route ticket #${widget.issue.id}',
+                    style: GoogleFonts.antonSc(fontSize: 24, color: _black)),
+                const SizedBox(height: 4),
+                Text('Assign the team(s) that will handle this.',
+                    style: GoogleFonts.inter(fontSize: 13, color: _grey)),
+                const SizedBox(height: 22),
+                _sectionLabel('ASSIGN TO TEAM(S)'),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final t in _targetTeams)
+                      _chip(
+                        label: t.$2,
+                        selected: _targets.contains(t.$1),
+                        showCheck: true,
+                        onTap: () => setState(() => _targets.contains(t.$1)
+                            ? _targets.remove(t.$1)
+                            : _targets.add(t.$1)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                _sectionLabel('ALSO NOTIFY  ·  optional'),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final r in _mentionRoles)
+                      _chip(
+                        label: r.$2,
+                        selected: _mentions.contains(r.$1),
+                        showCheck: true,
+                        onTap: () => setState(() => _mentions.contains(r.$1)
+                            ? _mentions.remove(r.$1)
+                            : _mentions.add(r.$1)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                _urgentCard(_urgent, () => setState(() => _urgent = !_urgent)),
+                const SizedBox(height: 26),
+                _submitBtn('Save routing', _busy, _save),
               ],
             ),
-            const SizedBox(height: 6),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Urgent', style: TextStyle(color: AppTheme.textPrimary)),
-              value: _urgent,
-              onChanged: (v) => setState(() => _urgent = v),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _busy ? null : _save,
-                child: Text(_busy ? 'Routing…' : 'Save routing'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
