@@ -46,6 +46,7 @@ class AttendanceStatusOut(BaseModel):
 class StaffRosterItem(BaseModel):
     staff_id: int
     name: str
+    role: Optional[str] = None  # staff role — lets the client badge special roles
     status: str  # "present" or "absent"
     check_in_time: Optional[datetime] = None
     check_out_time: Optional[datetime] = None
