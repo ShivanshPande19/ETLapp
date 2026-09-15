@@ -10,9 +10,16 @@ class Manager(Base):
     email           = Column(String,  nullable=False, unique=True, index=True)
     hashed_password = Column(String,  nullable=False)
     
-    # Role can be 'etl_manager' or 'outlet_manager'
+    # Role. Full-access management roles live here (see deps.MANAGEMENT_ROLES):
+    #   'azimuth_management' | 'crownest_ops_head' | 'crownest_head'
+    #   (legacy 'etl_manager'/'manager' still treated as full-access management),
+    # plus 'outlet_manager'. The narrow maintenance roles live in the staff table.
     role            = Column(String,  nullable=False, default="etl_manager")
-    
+
+    # Org this account belongs to: 'azimuth' | 'crownest' | None. Informational
+    # (labels/badges); access is decided by `role`, never by org.
+    org             = Column(String,  nullable=True)
+
     # Agar outlet_manager hai toh uski outlet ID, ETL Manager ke liye Null
     outlet_id       = Column(Integer, ForeignKey("outlets.id"), nullable=True)
     

@@ -70,7 +70,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_manager_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref, backfill_role_split
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -101,9 +101,17 @@ async def lifespan(app: FastAPI):
     backfill_sales_orders()
     print("[DB] sales_orders backfill ensured ✓")
 
-    # ✅ Add staff profile columns (phone, photo_url) if missing
+    # ✅ Add staff profile columns (phone, photo_url, org) if missing
     ensure_staff_columns()
     print("[DB] Staff schema ensured ✓")
+
+    # ✅ Role split: add managers.org, then seed the current live ETL manager
+    #    (manager@etl.com) onto the crownest_head role. Both idempotent; org
+    #    column must exist before the backfill writes it.
+    ensure_manager_columns()
+    print("[DB] Manager schema ensured ✓")
+    backfill_role_split()
+    print("[DB] Role-split backfill ensured ✓")
 
     # ✅ Add court geofencing columns (latitude, longitude, geofence_radius,
     #    address) + the per-court google_review_url

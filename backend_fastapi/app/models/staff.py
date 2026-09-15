@@ -10,8 +10,15 @@ class Staff(Base):
     email           = Column(String,  nullable=False, unique=True, index=True)
     hashed_password = Column(String,  nullable=False)
     
-    # Role can be 'etl_staff' or 'outlet_staff'
+    # Role. Narrow worker roles live here (see deps.MAINTENANCE_ROLES):
+    #   'etl_staff' | 'outlet_staff' | 'azimuth_maintenance' |
+    #   'crownest_maintenance_head'. The maintenance roles are worker accounts
+    #   with a narrow (tickets-only) view; crownest_maintenance_head also logs
+    #   attendance like etl_staff and appears in the roster (with a badge).
     role            = Column(String,  nullable=False, default="etl_staff")
+
+    # Org this account belongs to: 'azimuth' | 'crownest' | None. Informational.
+    org             = Column(String,  nullable=True)
     
     # ETL staff ke liye court assign hoga
     court_id        = Column(Integer, ForeignKey("courts.id"), nullable=True)   

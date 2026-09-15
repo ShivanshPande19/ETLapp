@@ -11,6 +11,33 @@ from ..models.staff import Staff
 from ..models.outlet_membership import OutletMembership
 
 
+# ─── Role taxonomy (single source of truth) ──────────────────────────────────
+#
+# ROLE SPLIT: the old single `etl_manager` full-access role is split into three
+# full-access MANAGEMENT roles across two orgs, plus two narrow MAINTENANCE
+# worker roles. Access is decided ONLY by these sets (never by `org`).
+#
+#   Management (managers table, full company-wide access):
+#     azimuth_management | crownest_ops_head | crownest_head
+#     + legacy etl_manager / manager  (kept full-access during transition)
+#   Maintenance (staff table, narrow tickets-only view):
+#     azimuth_maintenance | crownest_maintenance_head
+#
+# Only crownest_ops_head may RAISE maintenance tickets (on top of full access).
+MANAGEMENT_ROLES = frozenset({
+    "azimuth_management",
+    "crownest_ops_head",
+    "crownest_head",
+    "etl_manager",   # legacy full-access — treat as management until reassigned
+    "manager",       # legacy alias created by /auth/seed
+})
+MAINTENANCE_ROLES = frozenset({
+    "azimuth_maintenance",
+    "crownest_maintenance_head",
+})
+OPS_HEAD_ROLE = "crownest_ops_head"
+
+
 class CurrentUser:
     """Authenticated user — resolved fresh from DB on every request."""
 
@@ -24,11 +51,14 @@ class CurrentUser:
         outlet_id: int | None = None,
         user_type: str = "manager",
         outlet_ids: list[int] | None = None,
+        org: str | None = None,
     ):
         self.id = id
         self.name = name
         self.email = email
         self.role = role
+        # Org label ('azimuth' | 'crownest' | None). Informational only.
+        self.org = org
         self.court_id = court_id
         # `outlet_id` = the PRIMARY/default outlet (legacy single-outlet column).
         # Kept for backward compatibility and as the default selection.
@@ -55,8 +85,36 @@ class CurrentUser:
         self.user_type = user_type
 
     @property
+    def is_management(self) -> bool:
+        """Full company-wide access (all zones/outlets/sales). The three new
+        management roles + legacy etl_manager/manager."""
+        return self.role in MANAGEMENT_ROLES
+
+    @property
     def is_etl_manager(self) -> bool:
-        return self.role in ("etl_manager", "manager")
+        """Backward-compat alias of `is_management`. Every existing
+        `is_etl_manager` / `require_etl_manager` check now means "full-access
+        management account", which includes azimuth_management,
+        crownest_ops_head and crownest_head (not just legacy etl_manager)."""
+        return self.is_management
+
+    @property
+    def is_ops_head(self) -> bool:
+        """Crownest Ops Head — the ONLY role that can raise maintenance tickets
+        (in addition to full management access)."""
+        return self.role == OPS_HEAD_ROLE
+
+    @property
+    def is_maintenance(self) -> bool:
+        """Narrow maintenance worker role
+        (azimuth_maintenance / crownest_maintenance_head)."""
+        return self.role in MAINTENANCE_ROLES
+
+    @property
+    def maintenance_role(self) -> str | None:
+        """The maintenance role key (for ticket target/visibility matching), or
+        None for non-maintenance accounts."""
+        return self.role if self.role in MAINTENANCE_ROLES else None
 
     @property
     def is_outlet_user(self) -> bool:
@@ -164,6 +222,7 @@ def get_current_user(
             outlet_id=primary,
             outlet_ids=outlet_ids,
             user_type="manager",
+            org=getattr(user, "org", None),
         )
 
     staff = db.query(Staff).filter(
@@ -182,14 +241,39 @@ def get_current_user(
             outlet_id=staff.outlet_id,
             outlet_ids=staff_outlets,
             user_type="staff",
+            org=getattr(staff, "org", None),
         )
 
     raise HTTPException(status_code=401, detail="User not found or deactivated.")
 
 
+def require_management(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Full-access management gate: Azimuth Management, Crownest Ops Head,
+    Crownest Head (+ legacy etl_manager/manager)."""
+    if not user.is_management:
+        raise HTTPException(status_code=403, detail="Management access required.")
+    return user
+
+
 def require_etl_manager(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    if not user.is_etl_manager:
-        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    """Backward-compatible alias of `require_management` — kept so every existing
+    route compiles unchanged. Both mean "full-access management account"."""
+    if not user.is_management:
+        raise HTTPException(status_code=403, detail="Management access required.")
+    return user
+
+
+def require_ops_head(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Crownest Ops Head only (can raise/route maintenance tickets)."""
+    if not user.is_ops_head:
+        raise HTTPException(status_code=403, detail="Ops Head access required.")
+    return user
+
+
+def require_maintenance(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Narrow maintenance worker roles only."""
+    if not user.is_maintenance:
+        raise HTTPException(status_code=403, detail="Maintenance access required.")
     return user
 
 
