@@ -164,6 +164,60 @@ def _build_court_roster(db: Session, court: Court, target_date: date) -> CourtRo
     )
 
 
+def _build_maintenance_team(db: Session, target_date: date) -> list[StaffRosterItem]:
+    """Roaming maintenance heads (Crownest Maintenance Head) cover every zone,
+    so they aren't tied to a single court's roster. They're returned once as an
+    'all zones' group; attendance is matched by staff_id (NOT court_id) because
+    they can check in from wherever they are."""
+    heads = db.query(Staff).filter(
+        Staff.role == "crownest_maintenance_head",
+        Staff.is_active == True,
+    ).order_by(Staff.name).all()
+    if not heads:
+        return []
+
+    _start, _end = day_range(target_date)
+    head_ids = [h.id for h in heads]
+    attendances = db.query(Attendance).filter(
+        Attendance.staff_id.in_(head_ids),
+        or_(
+            Attendance.business_date == target_date,
+            and_(
+                Attendance.business_date.is_(None),
+                Attendance.check_in_time >= _start,
+                Attendance.check_in_time < _end,
+            ),
+        ),
+    ).all()
+    attendance_map = {a.staff_id: a for a in attendances}
+
+    items = []
+    for staff in heads:
+        record = attendance_map.get(staff.id)
+        if record:
+            items.append(StaffRosterItem(
+                staff_id=staff.id,
+                name=staff.name,
+                role=staff.role,
+                status="present",
+                check_in_time=record.check_in_time,
+                check_out_time=record.check_out_time,
+                selfie_url=record.check_in_photo_url,
+                check_in_photo_url=record.check_in_photo_url,
+                check_out_photo_url=record.check_out_photo_url,
+                early_checkout=bool(record.early_checkout),
+                auto_closed=bool(record.auto_closed),
+            ))
+        else:
+            items.append(StaffRosterItem(
+                staff_id=staff.id,
+                name=staff.name,
+                role=staff.role,
+                status="absent",
+            ))
+    return items
+
+
 def get_etl_court_roster(
     db: Session,
     target_date: date,
@@ -178,8 +232,12 @@ def get_etl_court_roster(
 
     court_items = [_build_court_roster(db, court, target_date) for court in courts]
 
-    total_staff = sum(c.total_staff for c in court_items)
-    total_present = sum(c.present_count for c in court_items)
+    # Roaming maintenance heads span every zone — counted ONCE (not per court).
+    maintenance_team = _build_maintenance_team(db, target_date)
+    maint_present = sum(1 for m in maintenance_team if m.status == "present")
+
+    total_staff = sum(c.total_staff for c in court_items) + len(maintenance_team)
+    total_present = sum(c.present_count for c in court_items) + maint_present
 
     return EtlRosterResponse(
         date=target_date,
@@ -187,4 +245,5 @@ def get_etl_court_roster(
         total_staff=total_staff,
         total_present=total_present,
         courts=court_items,
+        maintenance_team=maintenance_team,
     )
