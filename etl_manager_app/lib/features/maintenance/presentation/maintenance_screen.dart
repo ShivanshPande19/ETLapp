@@ -1523,6 +1523,44 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
                 ),
               ],
 
+              // Resolution proof photos (added by maintenance at resolve).
+              if (issue.resolutionPhotos.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'RESOLUTION PROOF',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: _grey,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 92,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: issue.resolutionPhotos.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, idx) {
+                      final url = issue.resolutionPhotos[idx];
+                      return GestureDetector(
+                        onTap: () => _viewPhoto(url),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: AppNetworkImage(
+                            url: url,
+                            width: 92,
+                            height: 92,
+                            memCacheWidth: 400,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+
               // Technician card with CALL button
               if (issue.technicianName != null) ...[
                 const SizedBox(height: 12),
@@ -1595,40 +1633,10 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
                 ),
               ],
 
-              // Countdown banner (RESOLVED state)
-              if (issue.status == 'RESOLVED' && countdown != null) ...[
+              // Verification status banner (RESOLVED) — stage-aware.
+              if (issue.status == 'RESOLVED') ...[
                 const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: _purple.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: _purple.withOpacity(0.25)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.hourglass_top_rounded,
-                        color: _purple,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          widget.isManager
-                              ? 'Waiting for outlet verification — auto-closes in ${_fmtCountdown(countdown)}.'
-                              : 'Verify within ${_fmtCountdown(countdown)} or this ticket auto-closes.',
-                          style: GoogleFonts.inter(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: _purple,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _verifyBanner(issue, countdown),
               ],
 
               const SizedBox(height: 20),
@@ -1664,7 +1672,11 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
   List<Widget> _buildActions(MaintenanceIssueModel issue) {
     final base = _buildRoleActions(issue);
     final isOpsHead = ref.read(authNotifierProvider).isOpsHead;
-    if (!isOpsHead || issue.status == 'CLOSED') return base;
+    // On a RESOLVED ticket the ops head verifies the fix (not re-routes), so
+    // hide the route action until it's disputed/re-opened again.
+    if (!isOpsHead || issue.status == 'CLOSED' || issue.status == 'RESOLVED') {
+      return base;
+    }
     final routeBtn = _Btn(
       label: issue.triageStatus == 'pending'
           ? 'Route to team'
@@ -1764,46 +1776,125 @@ class _TicketDetailSheetState extends ConsumerState<_TicketDetailSheet> {
       ];
     }
 
-    // Outlet: verify on RESOLVED
-    if (!widget.isManager && issue.status == 'RESOLVED') {
-      return [
-        Text(
-          'Is the issue actually fixed?',
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: _black,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _Btn(
-                label: 'No, Reopen',
-                color: _red,
-                icon: Icons.replay_rounded,
-                loading: _loading,
-                outlined: true,
-                onTap: () => _run(() => notifier.verifyTicket(issue.id, false)),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _Btn(
-                label: 'Yes, Close It',
-                color: _ok,
-                icon: Icons.check_circle_rounded,
-                loading: _loading,
-                onTap: () => _run(() => notifier.verifyTicket(issue.id, true)),
-              ),
-            ),
-          ],
-        ),
-      ];
+    // ── Verify a RESOLVED ticket — stage-aware (ops first, then outlet) ──
+    if (issue.status == 'RESOLVED') {
+      final pending = issue.pendingVerifier;
+      // Ops-head stage: management / ops head check the fix.
+      if (pending == 'ops' && widget.isManager) {
+        return _verifyButtons(
+          notifier,
+          issue,
+          question: 'Is the fix done correctly?',
+          rejectLabel: 'Send back',
+          approveLabel:
+              issue.raisedByOutlet ? 'Approve → outlet' : 'Approve & close',
+        );
+      }
+      // Outlet stage: the owning outlet manager confirms the repair.
+      if (pending == 'outlet' && !widget.isManager) {
+        return _verifyButtons(
+          notifier,
+          issue,
+          question: 'Is the issue actually fixed?',
+          rejectLabel: 'No, reopen',
+          approveLabel: 'Yes, close it',
+        );
+      }
+      // Not this user's turn — the banner above explains who's verifying.
+      return [];
     }
 
     return [];
+  }
+
+  List<Widget> _verifyButtons(
+    MaintenanceNotifier notifier,
+    MaintenanceIssueModel issue, {
+    required String question,
+    required String rejectLabel,
+    required String approveLabel,
+  }) {
+    return [
+      Text(
+        question,
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: _black,
+        ),
+      ),
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: _Btn(
+              label: rejectLabel,
+              color: _red,
+              icon: Icons.replay_rounded,
+              loading: _loading,
+              outlined: true,
+              onTap: () => _run(() => notifier.verifyTicket(issue.id, false)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _Btn(
+              label: approveLabel,
+              color: _ok,
+              icon: Icons.check_circle_rounded,
+              loading: _loading,
+              onTap: () => _run(() => notifier.verifyTicket(issue.id, true)),
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  Widget _verifyBanner(MaintenanceIssueModel issue, Duration? countdown) {
+    final pending = issue.pendingVerifier;
+    final left = countdown != null ? _fmtCountdown(countdown) : null;
+    String msg;
+    if (pending == 'ops') {
+      msg = widget.isManager
+          ? 'Please verify the fix below.'
+          : 'Fixed — awaiting ops-head verification.';
+    } else {
+      if (widget.isManager) {
+        msg = left != null
+            ? 'Ops verified — awaiting outlet confirmation. Auto-closes in $left.'
+            : 'Ops verified — awaiting outlet confirmation.';
+      } else {
+        msg = left != null
+            ? 'Verify within $left or this ticket auto-closes.'
+            : 'Please verify the repair below.';
+      }
+    }
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _purple.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _purple.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.hourglass_top_rounded, color: _purple, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              msg,
+              style: GoogleFonts.inter(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: _purple,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _field(

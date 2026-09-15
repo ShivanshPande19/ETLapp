@@ -38,6 +38,12 @@ class MaintenanceIssueModel {
   final String triageStatus;  // "pending" | "routed"
   final List<String> targetTeams;
 
+  // ── Two-stage verification ──────────────────────────────────────────────────
+  final DateTime? opsVerifiedAt;
+  final List<String> resolutionPhotos;   // proof photos added at resolve
+  final String? pendingVerifier;         // 'ops' | 'outlet' | null
+  final bool raisedByOutlet;             // outlet-raised → two-stage verify
+
   MaintenanceIssueModel({
     required this.id,
     required this.courtId,
@@ -61,6 +67,10 @@ class MaintenanceIssueModel {
     this.scope = 'outlet',
     this.triageStatus = 'routed',
     this.targetTeams = const [],
+    this.opsVerifiedAt,
+    this.resolutionPhotos = const [],
+    this.pendingVerifier,
+    this.raisedByOutlet = false,
   });
 
   // ✅ Backend ab explicit UTC ('Z' suffix) bhejta hai — toLocal() sahi IST dega
@@ -95,6 +105,14 @@ class MaintenanceIssueModel {
       targetTeams:
           (json['target_teams'] as List?)?.map((e) => e.toString()).toList() ??
           const [],
+      opsVerifiedAt: _dt(json['ops_verified_at']),
+      resolutionPhotos:
+          (json['resolution_photos'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      pendingVerifier: json['pending_verifier'] as String?,
+      raisedByOutlet: json['raised_by_outlet'] == true,
     );
   }
 
@@ -221,10 +239,26 @@ class MaintenanceNotifier
   }
 
   // ── 3. MARK RESOLVED (ETL Manager) ────────────────────────────────────────
-  Future<String?> markResolved(int issueId) async {
+  Future<String?> markResolved(int issueId, {List<File> photos = const []}) async {
     try {
       final dio = ref.read(dioProvider);
-      await dio.put('/maintenance/$issueId/resolve');
+
+      // Upload each proof photo first; abort if any fails.
+      final photoUrls = <String>[];
+      for (final p in photos) {
+        final url = await PhotoUploadService.uploadMaintenancePhoto(
+          dio: dio,
+          photo: p,
+        );
+        if (url == null) {
+          return 'Photo upload failed. Check your connection.';
+        }
+        photoUrls.add(url);
+      }
+
+      await dio.put('/maintenance/$issueId/resolve', data: {
+        if (photoUrls.isNotEmpty) 'photo_urls': photoUrls,
+      });
       await refresh();
       return null;
     } catch (e) {

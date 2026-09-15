@@ -110,6 +110,11 @@ class VerifyTicketInput(BaseModel):
     is_satisfied: bool
 
 
+class ResolveInput(BaseModel):
+    """Optional resolution proof photos (URLs from /maintenance/upload-photo)."""
+    photo_urls: Optional[List[str]] = None
+
+
 class IssueOut(BaseModel):
     id: int
     court_id: int
@@ -136,6 +141,11 @@ class IssueOut(BaseModel):
     target_teams: List[str] = Field(default_factory=list)
     mentions: List[dict] = Field(default_factory=list)
     raised_by_role: Optional[str] = None
+    # ── Two-stage verification ────────────────────────────────────────────────
+    ops_verified_at: Optional[str] = None
+    resolution_photos: List[str] = Field(default_factory=list)
+    pending_verifier: Optional[str] = None   # 'ops' | 'outlet' | None
+    raised_by_outlet: bool = False
 
 
 class IssueListOut(BaseModel):
@@ -163,6 +173,23 @@ def _json_list(raw: Optional[str]) -> list:
 
 def _dump_list(v: Optional[list]) -> Optional[str]:
     return json.dumps(v) if v else None
+
+
+def _is_outlet_raised(issue: "MaintenanceIssue") -> bool:
+    """True if an OUTLET user raised the ticket → two-stage verification (Ops
+    Head first, then the owning outlet). Ops-raised tickets (zone OR outlet)
+    are verified by the Ops Head alone."""
+    return (issue.raised_by_role or "") in ("outlet_manager", "outlet_staff")
+
+
+def _pending_verifier(issue: "MaintenanceIssue") -> Optional[str]:
+    """Who must verify a RESOLVED ticket right now: 'ops', 'outlet', or None
+    (not currently awaiting verification)."""
+    if issue.status != IssueStatus.RESOLVED.value:
+        return None
+    if _is_outlet_raised(issue):
+        return "outlet" if issue.ops_verified_at else "ops"
+    return "ops"
 
 
 def _validate_targets(targets: Optional[List[str]]) -> list:
@@ -236,10 +263,14 @@ def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
 
 
 def _to_out(i: MaintenanceIssue) -> IssueOut:
+    pending = _pending_verifier(i)
+    # The 24h auto-close countdown applies ONLY to the outlet-verification stage
+    # (an outlet-raised ticket the Ops Head has already verified). The ops stage
+    # has no auto-close — the Ops Head must act on it.
     auto_close = None
-    if i.status == IssueStatus.RESOLVED.value and i.resolved_at:
+    if pending == "outlet" and i.ops_verified_at:
         from datetime import timedelta
-        auto_close = _utc_iso(i.resolved_at + timedelta(hours=VERIFICATION_WINDOW_HOURS))
+        auto_close = _utc_iso(i.ops_verified_at + timedelta(hours=VERIFICATION_WINDOW_HOURS))
 
     return IssueOut(
         id=i.id,
@@ -266,6 +297,10 @@ def _to_out(i: MaintenanceIssue) -> IssueOut:
         target_teams=_json_list(i.target_teams),
         mentions=_json_list(i.mentions),
         raised_by_role=i.raised_by_role,
+        ops_verified_at=_utc_iso(i.ops_verified_at),
+        resolution_photos=_json_list(i.resolution_photos),
+        pending_verifier=pending,
+        raised_by_outlet=_is_outlet_raised(i),
     )
 
 
@@ -449,9 +484,10 @@ async def upload_maintenance_photo(
     user: CurrentUser = Depends(get_current_user),
 ):
     """Persist a maintenance proof photo on the Railway volume and return its
-    public URL path. Allowed for whoever can raise a ticket — an outlet user or
-    the Crownest Ops Head."""
-    if not (user.is_outlet_user or user.is_ops_head):
+    public URL path. Allowed for anyone in the ticket flow — an outlet user
+    (raise proof), the Crownest Ops Head / management (raise), or a maintenance
+    worker (resolution proof)."""
+    if not (user.is_outlet_user or user.is_management or user.is_maintenance):
         raise HTTPException(status_code=403, detail="You cannot upload maintenance photos.")
     photo_url = await save_upload_image(photo, "maintenance", "mnt")
     return {"photo_url": photo_url}
@@ -745,11 +781,19 @@ async def assign_technician(
 @router.put("/maintenance/{issue_id}/resolve", response_model=IssueOut)
 async def mark_resolved(
     issue_id: int = Path(..., ge=1),
+    body: Optional[ResolveInput] = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Mark resolved — starts the 24h verification window. Allowed for
-    management OR a targeted maintenance role."""
+    """Mark resolved (with optional proof photos) and hand off to the Crownest
+    Ops Head to verify the fix. Allowed for management OR a targeted maintenance
+    role.
+
+    Verification then follows WHO RAISED the ticket (see verify_closure):
+      • ops-raised (zone OR outlet) → Ops Head verifies, then it closes.
+      • outlet-raised               → Ops Head verifies first, then the owning
+        outlet manager verifies to close.
+    """
     issue = _get_issue_or_404(db, issue_id)
     if not _can_action_ticket(user, issue):
         raise HTTPException(status_code=403, detail="This ticket is not assigned to you.")
@@ -760,26 +804,45 @@ async def mark_resolved(
             detail=f"Cannot resolve — ticket is {issue.status}.",
         )
 
+    photos = [
+        p for p in ((body.photo_urls if body else None) or [])
+        if isinstance(p, str) and p.strip()
+    ]
+
     issue.status = IssueStatus.RESOLVED.value
     issue.resolved_at = datetime.utcnow()
+    issue.ops_verified_at = None            # fresh resolve → back to the ops stage
+    issue.resolution_photos = _dump_list(photos)
     db.commit()
     db.refresh(issue)
 
     await _notify(issue)
 
-    # Trigger #8 — the highest-value push in the module. The outlet now has a
-    # hard 24h deadline to verify or the ticket auto-closes without their say
-    # (see scheduler_service.auto_close_expired_tickets).
-    _notify_outlet(
-        db,
-        issue,
-        type="maintenance_resolved",
-        title="Please verify the repair",
-        body=(
-            f"Your {issue.issue_type} ticket was marked resolved. Confirm within "
-            f"{VERIFICATION_WINDOW_HOURS}h or it closes automatically."
-        ),
+    # Hand off to the Crownest Ops Head to verify the fix (with proof photos).
+    # The outlet is only looped in AFTER ops approves, and only for an
+    # outlet-raised ticket (see verify_closure) — never for an ops-raised one.
+    proof = (
+        f" ({len(photos)} photo{'s' if len(photos) != 1 else ''} attached)"
+        if photos else ""
     )
+    try:
+        create_notice(
+            db,
+            audience="role",
+            type="maintenance_verify",
+            title=f"Verify the fix — ticket #{issue.id}",
+            body=(
+                f"{issue.issue_type} at "
+                f"{issue.outlet_name or issue.court_name or 'the site'} was marked "
+                f"resolved{proof}. Please verify."
+            ),
+            court_id=issue.court_id,
+            outlet_id=(issue.outlet_id or None),
+            target_roles=["crownest_ops_head"],
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("resolve->ops notice failed for #%s: %s", issue.id, e)
+
     return _to_out(issue)
 
 
@@ -790,16 +853,16 @@ async def verify_closure(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Verify the fix (only when RESOLVED). The owning outlet verifies their own
-    ticket; management (incl. the ops head who raised a general/ops ticket) may
-    also verify."""
+    """Verify a RESOLVED ticket. Two-stage, following WHO RAISED it:
+
+      • Ops stage (always first) — the Crownest Ops Head (or higher management)
+        checks the fix. Approve → an OPS-raised ticket CLOSES; an OUTLET-raised
+        ticket moves to the outlet stage. Reject → DISPUTED (back to the team).
+      • Outlet stage (outlet-raised only) — the owning outlet manager confirms.
+        Approve → CLOSED. Reject → DISPUTED and the Ops Head is notified to run
+        the loop again.
+    """
     issue = _get_issue_or_404(db, issue_id)
-    if user.is_management:
-        pass
-    elif user.is_outlet_user:
-        _assert_outlet_owns(user, issue)
-    else:
-        raise HTTPException(status_code=403, detail="You cannot verify this ticket.")
 
     if issue.status != IssueStatus.RESOLVED.value:
         raise HTTPException(
@@ -807,41 +870,109 @@ async def verify_closure(
             detail=f"Cannot verify — ticket is {issue.status}, must be RESOLVED.",
         )
 
+    stage = _pending_verifier(issue)  # 'ops' | 'outlet'
+
+    # ── Ops-head verification stage ───────────────────────────────────────────
+    if stage == "ops":
+        if not (user.is_ops_head or user.is_management):
+            raise HTTPException(status_code=403, detail="Only the ops head can verify this fix.")
+
+        if not body.is_satisfied:
+            # Send back to the maintenance team.
+            issue.status = IssueStatus.DISPUTED.value
+            issue.resolved_at = None
+            issue.ops_verified_at = None
+            db.commit(); db.refresh(issue)
+            await _notify(issue)
+            targets = _json_list(issue.target_teams)
+            if targets:
+                try:
+                    create_notice(
+                        db, audience="role", type="maintenance_disputed",
+                        title=f"Rework needed — ticket #{issue.id}",
+                        body=(
+                            f"The ops head sent back the {issue.issue_type} fix at "
+                            f"{issue.outlet_name or issue.court_name or 'the site'}. "
+                            f"Please re-check."
+                        ),
+                        court_id=issue.court_id, outlet_id=(issue.outlet_id or None),
+                        target_roles=targets,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("ops-dispute notice failed for #%s: %s", issue.id, e)
+            return _to_out(issue)
+
+        # Approved by ops.
+        if _is_outlet_raised(issue):
+            # Hand off to the owning outlet to confirm (starts the 24h window).
+            issue.ops_verified_at = datetime.utcnow()
+            db.commit(); db.refresh(issue)
+            await _notify(issue)
+            _notify_outlet(
+                db, issue,
+                type="maintenance_resolved",
+                title="Please verify the repair",
+                body=(
+                    f"Your {issue.issue_type} ticket was fixed and checked by the ops "
+                    f"head. Confirm within {VERIFICATION_WINDOW_HOURS}h or it closes "
+                    f"automatically."
+                ),
+            )
+            return _to_out(issue)
+
+        # Ops-raised (zone or outlet) → close now; no outlet is involved.
+        issue.status = IssueStatus.CLOSED.value
+        issue.closed_at = datetime.utcnow()
+        db.commit(); db.refresh(issue)
+        await _notify(issue)
+        _notify_etl(
+            db, issue, type="maintenance_closed",
+            title="Ticket verified and closed",
+            body=(
+                f"The {issue.issue_type} ticket #{issue.id} was verified by the ops "
+                f"head and closed."
+            ),
+        )
+        return _to_out(issue)
+
+    # ── Outlet verification stage (outlet-raised, ops already approved) ────────
+    if user.is_outlet_user:
+        _assert_outlet_owns(user, issue)
+    elif not user.is_management:
+        raise HTTPException(status_code=403, detail="Only the owning outlet can confirm this repair.")
+
     if body.is_satisfied:
         issue.status = IssueStatus.CLOSED.value
         issue.closed_at = datetime.utcnow()
-    else:
-        issue.status = IssueStatus.DISPUTED.value
-        issue.resolved_at = None
-
-    db.commit()
-    db.refresh(issue)
-
-    await _notify(issue)
-
-    # Triggers #9 / #10 — the outlet's verdict. Both go to the ETL manager tier,
-    # since they are the ones who must act on a dispute.
-    if issue.status == IssueStatus.CLOSED.value:
+        db.commit(); db.refresh(issue)
+        await _notify(issue)
         _notify_etl(
-            db,
-            issue,
-            type="maintenance_closed",
+            db, issue, type="maintenance_closed",
             title="Ticket verified and closed",
             body=(
                 f"{issue.outlet_name or 'The outlet'} confirmed the "
                 f"{issue.issue_type} repair. Ticket #{issue.id} is closed."
             ),
         )
-    else:
-        _notify_etl(
-            db,
-            issue,
-            type="maintenance_disputed",
-            title="Repair disputed — needs rework",
+        return _to_out(issue)
+
+    # Outlet rejected → re-open and notify the Ops Head to run the loop again.
+    issue.status = IssueStatus.DISPUTED.value
+    issue.resolved_at = None
+    issue.ops_verified_at = None
+    db.commit(); db.refresh(issue)
+    await _notify(issue)
+    try:
+        create_notice(
+            db, audience="role", type="maintenance_disputed",
+            title=f"Repair rejected — ticket #{issue.id} re-opened",
             body=(
                 f"{issue.outlet_name or 'The outlet'} was not satisfied with the "
-                f"{issue.issue_type} repair. Ticket #{issue.id} needs to be "
-                f"reassigned."
+                f"{issue.issue_type} repair. It's re-opened — please re-route / re-check."
             ),
+            court_id=issue.court_id, outlet_id=(issue.outlet_id or None),
+            target_roles=["crownest_ops_head"],
         )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("outlet-dispute->ops notice failed for #%s: %s", issue.id, e)
     return _to_out(issue)

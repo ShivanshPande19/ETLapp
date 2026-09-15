@@ -606,6 +606,8 @@ def ensure_maintenance_columns() -> None:
             "last_reminder_at": "DATETIME",
             "escalated_2d": "BOOLEAN DEFAULT 0",
             "escalated_4d": "BOOLEAN DEFAULT 0",
+            "ops_verified_at": "DATETIME",
+            "resolution_photos": "TEXT",
         }
     else:
         types = {
@@ -620,6 +622,8 @@ def ensure_maintenance_columns() -> None:
             "last_reminder_at": "TIMESTAMP",
             "escalated_2d": "BOOLEAN DEFAULT FALSE",
             "escalated_4d": "BOOLEAN DEFAULT FALSE",
+            "ops_verified_at": "TIMESTAMP",
+            "resolution_photos": "TEXT",
         }
     try:
         with engine.begin() as conn:
