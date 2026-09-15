@@ -36,11 +36,13 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
   bool _withinZone = true; // staff currently inside the allowed circle
   bool _checkingZone = false;
   String? _courtName;
-  double? _courtLat;
-  double? _courtLng;
   int _radius = 150;
   double _accuracyBuffer = 75;
-  double? _distanceFromCourt; // metres
+  double? _distanceFromCourt; // metres to the nearest zone
+  // Every zone the staff may check in from (a Maintenance Head can cover
+  // several); check-in is allowed within ANY of them. Each holds
+  // name / lat / lng / radius.
+  final List<Map<String, dynamic>> _zones = [];
 
   @override
   void initState() {
@@ -53,15 +55,33 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
       final dio = ref.read(dioProvider);
       final res = await dio.get('/attendance/geofence');
       final data = res.data;
+      _zones.clear();
       if (data is Map && data['has_geofence'] == true) {
-        _hasGeofence = true;
-        _courtName = data['court_name'] as String?;
-        _courtLat = (data['latitude'] as num?)?.toDouble();
-        _courtLng = (data['longitude'] as num?)?.toDouble();
-        _radius = (data['geofence_radius'] as num?)?.toInt() ?? 150;
         _accuracyBuffer = (data['accuracy_buffer'] as num?)?.toDouble() ?? 75;
-      } else {
-        _hasGeofence = false;
+        // A maintenance head with several located zones sends `zones`; every
+        // other staff sends a single flat zone. Normalise both to _zones.
+        final rawZones = data['zones'];
+        final entries = (rawZones is List && rawZones.isNotEmpty)
+            ? rawZones.whereType<Map>().toList()
+            : <Map>[data];
+        for (final z in entries) {
+          final lat = (z['latitude'] as num?)?.toDouble();
+          final lng = (z['longitude'] as num?)?.toDouble();
+          if (lat == null || lng == null) continue;
+          _zones.add({
+            'name': z['court_name'] as String?,
+            'lat': lat,
+            'lng': lng,
+            'radius': (z['geofence_radius'] as num?)?.toInt() ?? 150,
+          });
+        }
+      }
+      _hasGeofence = _zones.isNotEmpty;
+      if (_zones.isNotEmpty) {
+        // Seed display fields from the first zone; _evaluateZone updates them
+        // to the nearest zone once a position is known.
+        _courtName = _zones.first['name'] as String?;
+        _radius = _zones.first['radius'] as int;
       }
     } catch (_) {
       // If we can't fetch the geofence, don't block the user client-side —
@@ -72,24 +92,35 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen> {
 
   /// Recompute whether the current position is inside the court's circle.
   void _evaluateZone() {
-    if (!_hasGeofence ||
-        _currentPosition == null ||
-        _courtLat == null ||
-        _courtLng == null) {
+    if (!_hasGeofence || _currentPosition == null || _zones.isEmpty) {
       _withinZone = true;
       _distanceFromCourt = null;
       return;
     }
-    final dist = Geolocator.distanceBetween(
-      _currentPosition!.latitude,
-      _currentPosition!.longitude,
-      _courtLat!,
-      _courtLng!,
-    );
-    final allowed = _radius +
-        (_currentPosition!.accuracy.clamp(0, _accuracyBuffer));
-    _distanceFromCourt = dist;
-    _withinZone = dist <= allowed;
+    final acc = _currentPosition!.accuracy.clamp(0, _accuracyBuffer);
+    double? nearestDist;
+    Map<String, dynamic>? nearest;
+    bool within = false;
+    for (final z in _zones) {
+      final dist = Geolocator.distanceBetween(
+        _currentPosition!.latitude,
+        _currentPosition!.longitude,
+        z['lat'] as double,
+        z['lng'] as double,
+      );
+      if (nearestDist == null || dist < nearestDist) {
+        nearestDist = dist;
+        nearest = z;
+      }
+      // Within ANY assigned zone is enough.
+      if (dist <= (z['radius'] as int) + acc) within = true;
+    }
+    _withinZone = within;
+    _distanceFromCourt = nearestDist;
+    if (nearest != null) {
+      _courtName = nearest['name'] as String?;
+      _radius = nearest['radius'] as int;
+    }
   }
 
   Future<void> _refreshLocation() async {

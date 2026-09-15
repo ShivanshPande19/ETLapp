@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, s
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import httpx
+import json
 import os
 import uuid
 
@@ -116,47 +117,72 @@ def _resolve_staff(user: CurrentUser, db: Session) -> Staff:
     return staff
 
 
-def _is_roaming_maintenance(staff: Staff) -> bool:
-    """A Crownest Maintenance Head covers every zone, so their attendance is a
-    simple presence log: no fixed shift, no geofence, no early-check-in window.
-    Every other staff role keeps the standard shift + geofence rules."""
+def _is_maintenance_head(staff: Staff) -> bool:
+    """Crownest Maintenance Head — a staff role that can cover MULTIPLE zones."""
     return staff.role == "crownest_maintenance_head"
+
+
+def _assigned_courts(db: Session, staff: Staff) -> list[Court]:
+    """Every zone a staff covers. A Crownest Maintenance Head may be assigned to
+    several (zone_court_ids); everyone else has their single court (via
+    _staff_court, which also resolves an outlet staff's outlet → court)."""
+    if _is_maintenance_head(staff):
+        ids: list[int] = []
+        raw = getattr(staff, "zone_court_ids", None)
+        if raw:
+            try:
+                v = json.loads(raw)
+                if isinstance(v, list):
+                    ids = [int(x) for x in v]
+            except Exception:
+                ids = []
+        if not ids and staff.court_id:
+            ids = [staff.court_id]
+        if not ids:
+            return []
+        return db.query(Court).filter(Court.id.in_(ids)).all()
+    c = _staff_court(db, staff)
+    return [c] if c else []
 
 
 def _enforce_geofence(
     db: Session, staff: Staff, lat: float, lng: float, accuracy: Optional[float]
-) -> None:
-    """Block attendance if the staff is outside their court's geofence.
+) -> Optional[Court]:
+    """Ensure the check-in is inside the geofence of at least ONE of the staff's
+    assigned zones, and return the zone it's credited to. A Crownest Maintenance
+    Head may cover several zones — being within ANY of them is enough.
 
-    Skipped silently when:
-      • the staff has no court linked, or
-      • the court has no location set (legacy courts) — until a manager sets a
-        location via the map, geofencing simply doesn't apply.
+    Returns the primary zone (or None) without a check when no assigned zone has
+    a location set (legacy courts) — geofencing simply doesn't apply yet.
 
     A small buffer (capped) based on the device-reported GPS accuracy is added
     to the allowed radius so a poor fix doesn't reject a genuine staff member.
     """
-    # ROLE SPLIT: a Crownest Maintenance Head roams every zone, so no single
-    # court's geofence applies — they may check in from wherever they are.
-    if _is_roaming_maintenance(staff):
-        return
-    court = _staff_court(db, staff)
-    if not court or court.latitude is None or court.longitude is None:
-        return  # no court / no geofence configured → allow
+    courts = _assigned_courts(db, staff)
+    configured = [c for c in courts if c.latitude is not None and c.longitude is not None]
+    if not configured:
+        return courts[0] if courts else None  # no geofence set → allow
 
-    radius = court.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M
     buffer = min(accuracy or 0.0, MAX_ACCURACY_BUFFER_M)
-    distance = distance_meters(lat, lng, court.latitude, court.longitude)
+    for c in configured:
+        radius = c.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M
+        if distance_meters(lat, lng, c.latitude, c.longitude) <= radius + buffer:
+            return c  # inside this zone → credit the check-in here
 
-    if distance > radius + buffer:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                f"You are about {int(round(distance))} m away from "
-                f"{court.name}. You must be within {radius} m of the court to "
-                f"mark attendance."
-            ),
-        )
+    # Outside every configured zone — reject, pointing at the nearest one.
+    nearest = min(
+        configured,
+        key=lambda c: distance_meters(lat, lng, c.latitude, c.longitude),
+    )
+    dist = distance_meters(lat, lng, nearest.latitude, nearest.longitude)
+    zone_names = ", ".join(c.name for c in configured)
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            f"You are about {int(round(dist))} m from {nearest.name}. You must "
+            f"be within one of your zones ({zone_names}) to mark attendance."
+        ),
+    )
 
 
 def _staff_court(db: Session, staff: Staff) -> Optional[Court]:
@@ -263,14 +289,30 @@ def my_geofence(
     restriction applies (legacy court / no location set)."""
     staff = _resolve_staff(user, db)
 
-    # Roaming maintenance heads have no fixed geofence (they cover every zone).
-    if _is_roaming_maintenance(staff):
+    courts = _assigned_courts(db, staff)
+    configured = [c for c in courts if c.latitude is not None and c.longitude is not None]
+    if not configured:
         return {"has_geofence": False}
 
-    court = _staff_court(db, staff)
-    if not court or court.latitude is None or court.longitude is None:
-        return {"has_geofence": False}
+    # A Maintenance Head with several located zones → return them all so the
+    # client can pre-check "within ANY of my zones".
+    if len(configured) > 1:
+        return {
+            "has_geofence": True,
+            "accuracy_buffer": MAX_ACCURACY_BUFFER_M,
+            "zones": [
+                {
+                    "court_id": c.id,
+                    "court_name": c.name,
+                    "latitude": c.latitude,
+                    "longitude": c.longitude,
+                    "geofence_radius": c.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M,
+                }
+                for c in configured
+            ],
+        }
 
+    court = configured[0]
     return {
         "has_geofence": True,
         "court_id": court.id,
@@ -367,14 +409,10 @@ async def mark_attendance(
 ):
     staff = _resolve_staff(user, db)
 
-    # ROLE SPLIT: a roaming Crownest Maintenance Head logs a simple presence —
-    # no fixed shift, no geofence, no early-check-in window (they can start
-    # anywhere, anytime). Every other role keeps the mandatory-shift rule.
-    roaming = _is_roaming_maintenance(staff)
-
-    # ✅ Shift is mandatory — staff can't mark attendance until the manager
-    # has assigned their shift timings.
-    if not roaming and (not staff.shift_start or not staff.shift_end):
+    # ✅ Shift is mandatory — staff can't mark attendance until a manager has
+    # assigned their shift timings. A Maintenance Head's shift can be set at
+    # creation or later from Manage Accounts (exactly like ETL staff).
+    if not staff.shift_start or not staff.shift_end:
         raise HTTPException(
             status_code=403,
             detail="Your shift timings haven't been set yet. Please ask your manager.",
@@ -394,7 +432,7 @@ async def mark_attendance(
     _reject_if_mocked(is_mocked)
 
     # ⏰ Can't check in too early (more than the early window before shift start).
-    start_utc = None if roaming else scheduled_shift_start_utc(biz_date, staff.shift_start)
+    start_utc = scheduled_shift_start_utc(biz_date, staff.shift_start)
     if start_utc is not None:
         from datetime import timedelta
 
@@ -409,17 +447,17 @@ async def mark_attendance(
                 ),
             )
 
-    # ✅ Geofence: must be within the assigned court's radius (if configured).
-    _enforce_geofence(db, staff, lat, lng, accuracy)
+    # ✅ Geofence: must be within ONE of the staff's assigned zones (a
+    #    Maintenance Head can cover several). Returns the credited zone.
+    matched_court = _enforce_geofence(db, staff, lat, lng, accuracy)
 
     file_path = await _save_selfie(photo, "in")
     real_address = await get_address_from_coords(lat, lng)
 
-    _court = _staff_court(db, staff)
     new_record = Attendance(
         staff_id=staff.id,
         outlet_id=staff.outlet_id,
-        court_id=(_court.id if _court else staff.court_id),
+        court_id=(matched_court.id if matched_court else staff.court_id),
         business_date=biz_date,
         check_in_lat=lat,
         check_in_lng=lng,
