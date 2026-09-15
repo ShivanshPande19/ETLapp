@@ -32,6 +32,12 @@ class MaintenanceIssueModel {
   final DateTime? closedAt;
   final DateTime? autoCloseAt; // 24h verification deadline
 
+  // ── ROLE SPLIT fields (for display) ────────────────────────────────────────
+  final bool isUrgent;
+  final String scope;         // "general" | "outlet"
+  final String triageStatus;  // "pending" | "routed"
+  final List<String> targetTeams;
+
   MaintenanceIssueModel({
     required this.id,
     required this.courtId,
@@ -51,6 +57,10 @@ class MaintenanceIssueModel {
     this.resolvedAt,
     this.closedAt,
     this.autoCloseAt,
+    this.isUrgent = false,
+    this.scope = 'outlet',
+    this.triageStatus = 'routed',
+    this.targetTeams = const [],
   });
 
   // ✅ Backend ab explicit UTC ('Z' suffix) bhejta hai — toLocal() sahi IST dega
@@ -79,6 +89,12 @@ class MaintenanceIssueModel {
       resolvedAt: _dt(json['resolved_at']),
       closedAt: _dt(json['closed_at']),
       autoCloseAt: _dt(json['auto_close_at']),
+      isUrgent: json['is_urgent'] == true,
+      scope: (json['scope'] as String?) ?? 'outlet',
+      triageStatus: (json['triage_status'] as String?) ?? 'routed',
+      targetTeams:
+          (json['target_teams'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
     );
   }
 

@@ -79,12 +79,8 @@ class _BiometricGateState extends ConsumerState<BiometricGate> {
     final push = ref.read(pushServiceProvider);
     push.initialise();
 
-    print('[BIOMETRIC] Navigating — isStaff: ${authState.isStaff}');
-    if (authState.isStaff) {
-      context.go('/staff/home');
-    } else {
-      context.go('/home');
-    }
+    print('[BIOMETRIC] Navigating — role: ${authState.role} → ${authState.landingRoute}');
+    context.go(authState.landingRoute);
 
     // Release any notification tap that arrived while the app was starting.
     // Must come AFTER the go() above: the router's redirect pins everything to

@@ -215,7 +215,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         // idempotent (connect() disconnects first), and guarantees SSE is live
         // even if this login flow doesn't pass through the biometric gate.
         ref.read(sseServiceProvider).connect();
-        context.go(next.isStaff ? '/staff/home' : '/home');
+        context.go(next.landingRoute);
       }
       if (next.status == AuthStatus.error) {
         _showError(next.errorMessage ?? 'Login failed');
