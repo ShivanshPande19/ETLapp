@@ -32,6 +32,8 @@ import '../features/staff/presentation/etl_roster_screen.dart';
 
 import '../features/notices/presentation/notices_screen.dart';
 
+import '../features/maintenance/presentation/maintenance_home_screen.dart';
+
 import 'shell_screen.dart';
 import 'biometric_gate.dart';
 import 'splash_screen.dart';
@@ -128,8 +130,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (onBioGate) return null;
 
       if (isLoggedIn) {
-        final role = authState.role;
-
         // ── Routes every signed-in role may open ─────────────────────────────
         // Checked BEFORE the per-role rules below, which otherwise rewrite any
         // unrecognised location back to that role's home. A push notification
@@ -137,9 +137,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         // would be bounced to /staff/home and never see what they tapped.
         if (_roleAgnosticRoutes.contains(loc)) return null;
 
-        if (role == 'etl_staff') {
+        // ── ROLE SPLIT: maintenance workers (Azimuth Maintenance / Crownest
+        //    Maintenance Head) get a single tickets-only home. Crownest
+        //    Maintenance Head may also open the attendance capture screen.
+        //    Everything else is bounced to their home.
+        if (authState.isMaintenanceWorker) {
+          if (loc == '/maintenance-home') return null;
+          if (authState.isCrownestMaintenanceHead &&
+              loc == '/staff/mark-attendance') {
+            return null;
+          }
+          return '/maintenance-home';
+        }
+
+        if (authState.isEtlStaff) {
           if (!loc.startsWith('/staff')) return '/staff/home';
-        } else if (role == 'outlet_staff') {
+        } else if (authState.isOutletStaff) {
           if (loc == '/staff/mark-attendance') return null;
 
           // ETL-only routes (attendance roster, complaints, court detail) are
@@ -157,7 +170,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               loc == '/') {
             return '/outlet-staff-home';
           }
-        } else if (role == 'outlet_manager') {
+        } else if (authState.isOutletManager) {
           if (loc == '/home') return '/outlet-home';
           if (loc == '/sales') return '/outlet-sales';
           if (loc == '/housekeeping' ||
@@ -168,11 +181,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               loc == '/outlet-staff-home') {
             return '/outlet-home';
           }
-        } else if (role == 'etl_manager') {
+        } else if (authState.isManagement) {
+          // Full-access management (Azimuth Management / Crownest Ops Head /
+          // Crownest Head + legacy etl_manager): the whole ETL manager app.
           if (loc == '/outlet-home' || loc == '/outlet-staff-home')
             return '/home';
           if (loc == '/outlet-sales') return '/sales';
-          // ETL managers use /attendance-roster, not the ETL-staff shell.
+          if (loc == '/maintenance-home') return '/home';
+          // Management uses /attendance-roster, not the ETL-staff shell.
           if (loc.startsWith('/staff')) return '/home';
         }
       }
@@ -249,6 +265,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // ROLE SPLIT: tickets-only home for Azimuth Maintenance & Crownest
+      // Maintenance Head. Full-screen (no shell) — see the per-role redirects.
+      GoRoute(
+        path: '/maintenance-home',
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: const MaintenanceHomeScreen(),
+          fade: true,
+        ),
+      ),
+
       ShellRoute(
         builder: (context, state, child) => ShellScreen(child: child),
         routes: [
@@ -313,13 +341,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/feedbacks',
             pageBuilder: (context, state) {
-              final isEtlManager =
-                  authState.role == 'etl_manager' ||
-                  authState.role == 'manager';
+              // Any full-access management role (incl. the new Azimuth
+              // Management / Crownest Ops Head / Crownest Head) gets the ETL
+              // company-wide feedbacks view; outlet users get their own.
+              final isManagement = authState.isManagement;
               return _buildPage(
                 context: context,
                 state: state,
-                child: isEtlManager
+                child: isManagement
                     ? const EtlFeedbacksScreen()
                     : const OutletFeedbacksScreen(),
               );

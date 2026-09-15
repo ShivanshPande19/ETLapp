@@ -32,20 +32,58 @@ class AuthState {
     this.outletId,
   });
 
-  // ✅ Naye Roles ke helpers
+  // ── ROLE SPLIT ───────────────────────────────────────────────────────────
+  // The single old `etl_manager` is split into full-access MANAGEMENT roles
+  // (Azimuth Management, Crownest Ops Head, Crownest Head) + narrow MAINTENANCE
+  // worker roles (Azimuth Maintenance, Crownest Maintenance Head). This mirrors
+  // deps.MANAGEMENT_ROLES / MAINTENANCE_ROLES on the backend.
+
+  bool get isAzimuthManagement => role == 'azimuth_management';
+  bool get isCrownestOpsHead => role == 'crownest_ops_head';
+  bool get isCrownestHead => role == 'crownest_head';
+  bool get isAzimuthMaintenance => role == 'azimuth_maintenance';
+  bool get isCrownestMaintenanceHead => role == 'crownest_maintenance_head';
+
+  /// Full company-wide access (drives every ETL-manager-only screen). Legacy
+  /// etl_manager/manager + the three new management roles all qualify — exactly
+  /// like the backend's `is_management`.
+  bool get isManagement =>
+      role == 'etl_manager' ||
+      role == 'manager' ||
+      role == 'azimuth_management' ||
+      role == 'crownest_ops_head' ||
+      role == 'crownest_head';
+
+  /// Only Crownest Ops Head may RAISE / route maintenance tickets.
+  bool get isOpsHead => role == 'crownest_ops_head';
+
+  /// Narrow maintenance worker (tickets-only home).
+  bool get isMaintenanceWorker =>
+      role == 'azimuth_maintenance' || role == 'crownest_maintenance_head';
+
   // NOTE: legacy accounts may still carry role == 'manager' / 'staff'. The
   // backend treats {etl_manager, manager} and {etl_staff, staff} as the same
   // ETL identities, so we MUST mirror that here — otherwise a legacy 'manager'
   // logs in fine but every ETL-only screen hides itself client-side.
-  bool get isEtlManager => role == 'etl_manager' || role == 'manager';
+  //
+  // is_management now folds in the 3 new management roles, so every existing
+  // `isEtlManager` check in the UI grants them the full app automatically.
+  bool get isEtlManager => isManagement;
   bool get isOutletManager => role == 'outlet_manager';
   bool get isEtlStaff => role == 'etl_staff' || role == 'staff';
   bool get isOutletStaff => role == 'outlet_staff';
 
   // ✅ CORRECTION: isStaff sirf ETL/Housekeeping staff ke liye true hoga, outlet_staff ke liye nahi!
-  bool get isManager =>
-      role == 'etl_manager' || role == 'outlet_manager' || role == 'manager';
+  bool get isManager => isManagement || role == 'outlet_manager';
   bool get isStaff => role == 'etl_staff' || role == 'staff';
+
+  /// Where this identity should land after login / biometric unlock. The router
+  /// still enforces per-role access, so this is just the first destination.
+  String get landingRoute {
+    if (isMaintenanceWorker) return '/maintenance-home';
+    if (isStaff) return '/staff/home';
+    return '/home';
+  }
 
   AuthState copyWith({
     AuthStatus? status,
