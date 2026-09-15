@@ -70,7 +70,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_manager_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref, backfill_role_split
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_manager_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, ensure_maintenance_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref, backfill_role_split
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -133,6 +133,11 @@ async def lifespan(app: FastAPI):
     # ✅ Add FCM device-token columns if the table predates them
     ensure_device_token_columns()
     print("[DB] Device token schema ensured ✓")
+
+    # ✅ Add role-split maintenance ticket columns (scope, targets, mentions,
+    #    urgent, raised_by, triage + reminder/escalation bookkeeping)
+    ensure_maintenance_columns()
+    print("[DB] Maintenance schema ensured ✓")
 
     # ✅ Multi-outlet ownership: seed outlet_memberships from the legacy
     #    Manager.outlet_id (idempotent). The table itself is created by
