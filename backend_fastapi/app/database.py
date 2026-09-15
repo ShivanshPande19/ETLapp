@@ -575,3 +575,65 @@ def ensure_device_token_columns() -> None:
                     )
     except Exception as e:
         print(f"[MIGRATION] ensure_device_token_columns skipped: {e}")
+
+
+
+def ensure_maintenance_columns() -> None:
+    """Add the role-split columns to an existing `maintenance_issues` table.
+
+    create_all builds the table fresh with every column, so this only matters on
+    a deploy where the table already exists. Best-effort + idempotent + dialect
+    aware, exactly like the other ensure_* helpers. All columns are additive and
+    carry a DEFAULT so existing rows backfill via the DDL itself (a legacy
+    ticket becomes scope='outlet', triage_status='routed', not urgent, no
+    targets/mentions — i.e. behaves exactly as before).
+    """
+    if _is_sqlite:
+        types = {
+            "scope": "VARCHAR DEFAULT 'outlet'",
+            "raised_by_role": "VARCHAR",
+            "raised_by_id": "INTEGER",
+            "raised_by_table": "VARCHAR",
+            "is_urgent": "BOOLEAN DEFAULT 0",
+            "target_teams": "TEXT",
+            "mentions": "TEXT",
+            "triage_status": "VARCHAR DEFAULT 'routed'",
+            "last_reminder_at": "DATETIME",
+            "escalated_2d": "BOOLEAN DEFAULT 0",
+            "escalated_4d": "BOOLEAN DEFAULT 0",
+        }
+    else:
+        types = {
+            "scope": "VARCHAR DEFAULT 'outlet'",
+            "raised_by_role": "VARCHAR",
+            "raised_by_id": "INTEGER",
+            "raised_by_table": "VARCHAR",
+            "is_urgent": "BOOLEAN DEFAULT FALSE",
+            "target_teams": "TEXT",
+            "mentions": "TEXT",
+            "triage_status": "VARCHAR DEFAULT 'routed'",
+            "last_reminder_at": "TIMESTAMP",
+            "escalated_2d": "BOOLEAN DEFAULT FALSE",
+            "escalated_4d": "BOOLEAN DEFAULT FALSE",
+        }
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "maintenance_issues" not in insp.get_table_names():
+                return  # create_all builds it fresh with all columns
+            existing = {c["name"] for c in insp.get_columns("maintenance_issues")}
+    except Exception as e:
+        print(f"[MIGRATION] ensure_maintenance_columns inspect skipped: {e}")
+        return
+
+    # Each column in its own transaction so one failure can't roll back the rest.
+    for col, col_type in types.items():
+        if col in existing:
+            continue
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(f"ALTER TABLE maintenance_issues ADD COLUMN {col} {col_type}")
+                )
+        except Exception as e:
+            print(f"[MIGRATION] add maintenance_issues.{col} skipped: {e}")
