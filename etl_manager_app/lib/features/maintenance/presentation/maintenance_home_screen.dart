@@ -362,7 +362,7 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
           final err = await ref
               .read(maintenanceNotifierProvider.notifier)
               .assignTechnician(t.id, name, phone);
-          if (!mounted) return;
+          if (!mounted) return false;
           if (err == null) {
             _toast('Technician assigned.');
           } else {
@@ -374,7 +374,7 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
           final err = await ref
               .read(maintenanceNotifierProvider.notifier)
               .markResolved(t.id);
-          if (!mounted) return;
+          if (!mounted) return false;
           if (err == null) {
             _toast('Marked resolved.');
           } else {
