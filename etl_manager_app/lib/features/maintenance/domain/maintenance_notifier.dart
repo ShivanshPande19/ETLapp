@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // ✅ FIX: Ye wala dio JWT token attach karta hai (app/dio_provider.dart nahi karta tha)
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/photo_upload_service.dart';
+import '../../auth/domain/auth_notifier.dart'; // refetch on account switch
 import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected outlet
 
 // ─── Data Model ──────────────────────────────────────────────────────────────
@@ -158,6 +159,13 @@ class MaintenanceNotifier
     // MULTI-OUTLET: refetch when the owner switches outlet (no-op for ETL,
     // whose selected outlet stays null).
     ref.listen(selectedOutletIdProvider, (prev, next) {
+      if (prev != next) refresh();
+    });
+    // Account switch (login/logout) → refetch so a new maintenance login never
+    // shows the previous account's role-scoped tickets. Handled HERE (watching
+    // the auth identity) rather than invalidating from AuthNotifier, which would
+    // create a provider dependency cycle (maintenance → dio → auth).
+    ref.listen(authNotifierProvider.select((s) => s.managerEmail), (prev, next) {
       if (prev != next) refresh();
     });
     Future.microtask(() => refresh());

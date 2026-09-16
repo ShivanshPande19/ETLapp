@@ -6,7 +6,6 @@ import '../data/auth_repository.dart';
 import '../../../core/services/push_service.dart';
 import '../../../core/utils/token_storage.dart';
 import '../../notices/domain/notices_notifier.dart';
-import '../../maintenance/domain/maintenance_notifier.dart';
 
 enum AuthStatus { unknown, idle, loading, success, error }
 
@@ -306,11 +305,10 @@ class AuthNotifier extends Notifier<AuthState> {
   void _clearUserScopedProviders() {
     ref.invalidate(noticesNotifierProvider);
     ref.invalidate(unreadCountProvider);
-    // Maintenance tickets are role-scoped and the provider is keep-alive, so it
-    // MUST be dropped on account switch — otherwise a new maintenance login
-    // would see the previous account's cached ticket list (e.g. Azimuth
-    // Maintenance seeing Crownest-only tickets).
-    ref.invalidate(maintenanceNotifierProvider);
+    // NOTE: the maintenance ticket list is refreshed on account switch by
+    // MaintenanceNotifier itself (it listens to the auth identity). Invalidating
+    // it from here would create a provider dependency cycle (maintenance → dio
+    // → auth), so it must NOT be invalidated here.
   }
 }
 
