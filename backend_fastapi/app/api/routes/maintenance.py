@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...models.maintenance import MaintenanceIssue
 from ...models.sale import Court, Outlet
+from ...models.staff import Staff
 from ...core.uploads import save_upload_image
 from ...services.notice_service import create_notice
 from ..deps import (
@@ -115,6 +116,12 @@ class ResolveInput(BaseModel):
     photo_urls: Optional[List[str]] = None
 
 
+class AssigneeOut(BaseModel):
+    role: str
+    role_label: str   # "Crownest Maintenance" | "Azimuth Maintenance"
+    name: str
+
+
 class IssueOut(BaseModel):
     id: int
     court_id: int
@@ -146,6 +153,8 @@ class IssueOut(BaseModel):
     resolution_photos: List[str] = Field(default_factory=list)
     pending_verifier: Optional[str] = None   # 'ops' | 'outlet' | None
     raised_by_outlet: bool = False
+    # WHO the ticket is assigned to, by team → the registered account name(s).
+    assignees: List[AssigneeOut] = Field(default_factory=list)
 
 
 class IssueListOut(BaseModel):
@@ -190,6 +199,26 @@ def _pending_verifier(issue: "MaintenanceIssue") -> Optional[str]:
     if _is_outlet_raised(issue):
         return "outlet" if issue.ops_verified_at else "ops"
     return "ops"
+
+
+_TEAM_LABELS = {
+    "azimuth_maintenance": "Azimuth Maintenance",
+    "crownest_maintenance_head": "Crownest Maintenance",
+}
+
+
+def _assignee_map(db: Session) -> dict:
+    """role -> [active account name(s)] for the maintenance teams, so a ticket
+    can show WHO (by name) it's assigned to per team. One name today; lists them
+    all if more accounts are added to a team later."""
+    rows = db.query(Staff.role, Staff.name).filter(
+        Staff.role.in_(tuple(MAINTENANCE_ROLES)),
+        Staff.is_active == True,  # noqa: E712
+    ).all()
+    out: dict = {}
+    for role, name in rows:
+        out.setdefault(role, []).append(name)
+    return out
 
 
 def _validate_targets(targets: Optional[List[str]]) -> list:
@@ -262,8 +291,16 @@ def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() + "Z"
 
 
-def _to_out(i: MaintenanceIssue) -> IssueOut:
+def _to_out(i: MaintenanceIssue, assignee_map: Optional[dict] = None) -> IssueOut:
     pending = _pending_verifier(i)
+
+    # Resolve target team(s) → the registered account name(s) for display.
+    assignees: list = []
+    if assignee_map is not None:
+        for role in _json_list(i.target_teams):
+            label = _TEAM_LABELS.get(role, role)
+            for nm in assignee_map.get(role, []):
+                assignees.append(AssigneeOut(role=role, role_label=label, name=nm))
     # The 24h auto-close countdown applies ONLY to the outlet-verification stage
     # (an outlet-raised ticket the Ops Head has already verified). The ops stage
     # has no auto-close — the Ops Head must act on it.
@@ -301,6 +338,7 @@ def _to_out(i: MaintenanceIssue) -> IssueOut:
         resolution_photos=_json_list(i.resolution_photos),
         pending_verifier=pending,
         raised_by_outlet=_is_outlet_raised(i),
+        assignees=assignees,
     )
 
 
@@ -701,8 +739,9 @@ async def list_issues(
         .limit(limit)
         .all()
     )
+    a_map = _assignee_map(db)
     return IssueListOut(
-        items=[_to_out(i) for i in rows],
+        items=[_to_out(i, a_map) for i in rows],
         total=total,
         limit=limit,
         offset=offset,
