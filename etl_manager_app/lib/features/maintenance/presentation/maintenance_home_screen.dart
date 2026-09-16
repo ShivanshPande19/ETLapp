@@ -17,7 +17,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../domain/maintenance_notifier.dart';
 import '../../staff/domain/attendance_notifier.dart';
@@ -46,6 +48,14 @@ class MaintenanceHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
+  // Ticket-list filters + client-side pagination (keeps the list uncrowded so
+  // the maintenance head can see what needs doing).
+  static const int _pageSize = 12;
+  String _statusFilter = 'open'; // 'open' | 'closed' | 'all'
+  int? _zoneCourtId; // null = every zone
+  DateTime? _dateFilter; // null = any date
+  int _visibleCount = _pageSize;
+
   bool get _isCrownestHead =>
       ref.read(authNotifierProvider).isCrownestMaintenanceHead;
 
@@ -297,39 +307,29 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
                         ),
                         const SizedBox(height: 26),
                       ],
-                      Row(
-                        children: [
-                          Expanded(child: _sectionLabel('Assigned Tickets')),
-                          ticketsAsync.maybeWhen(
-                            data: (list) => _CountPill(count: list.length),
-                            orElse: () => const SizedBox.shrink(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
                       ticketsAsync.when(
-                        loading: () => const _Loader(),
-                        error: (e, _) => _ErrorBox(
-                          message: '$e',
-                          onRetry: () => ref
-                              .read(maintenanceNotifierProvider.notifier)
-                              .refresh(),
+                        loading: () => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _sectionLabel('Assigned Tickets'),
+                            const SizedBox(height: 12),
+                            const _Loader(),
+                          ],
                         ),
-                        data: (list) {
-                          if (list.isEmpty) return const _EmptyBox();
-                          return Column(
-                            children: [
-                              for (final t in list)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _TicketCard(
-                                    issue: t,
-                                    onTap: () => _openTicket(t),
-                                  ),
-                                ),
-                            ],
-                          );
-                        },
+                        error: (e, _) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _sectionLabel('Assigned Tickets'),
+                            const SizedBox(height: 12),
+                            _ErrorBox(
+                              message: '$e',
+                              onRetry: () => ref
+                                  .read(maintenanceNotifierProvider.notifier)
+                                  .refresh(),
+                            ),
+                          ],
+                        ),
+                        data: (all) => _ticketsSection(all),
                       ),
                     ],
                   ),
@@ -351,6 +351,237 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
           letterSpacing: -0.3,
         ),
       );
+
+  // ─── Ticket filters + pagination ────────────────────────────────────────────
+
+  void _setStatus(String s) =>
+      setState(() {
+        _statusFilter = s;
+        _visibleCount = _pageSize;
+      });
+
+  void _setZone(int? id) =>
+      setState(() {
+        _zoneCourtId = id;
+        _visibleCount = _pageSize;
+      });
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dateFilter ?? DateTime.now(),
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      builder: AppTheme.datePickerBuilder,
+    );
+    if (picked != null) {
+      setState(() {
+        _dateFilter = picked;
+        _visibleCount = _pageSize;
+      });
+    }
+  }
+
+  Widget _ticketsSection(List<MaintenanceIssueModel> all) {
+    // 1) Status: Open (not closed) / Closed / All.
+    final byStatus = all.where((t) {
+      if (_statusFilter == 'open') return t.status != 'CLOSED';
+      if (_statusFilter == 'closed') return t.status == 'CLOSED';
+      return true;
+    }).toList();
+
+    // 2) Zones present in the current status set.
+    final zones = <int, String>{};
+    for (final t in byStatus) {
+      if (t.courtId != 0 && t.courtName.isNotEmpty) {
+        zones[t.courtId] = t.courtName;
+      }
+    }
+    final zoneId = (_zoneCourtId != null && zones.containsKey(_zoneCourtId))
+        ? _zoneCourtId
+        : null;
+
+    var filtered = zoneId == null
+        ? byStatus
+        : byStatus.where((t) => t.courtId == zoneId).toList();
+
+    // 3) Date (by raised date).
+    if (_dateFilter != null) {
+      filtered = filtered
+          .where((t) =>
+              t.createdAt != null && _sameDay(t.createdAt!, _dateFilter!))
+          .toList();
+    }
+
+    // Newest first.
+    filtered.sort((a, b) =>
+        (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+
+    final total = filtered.length;
+    final visible = filtered.take(_visibleCount).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(child: _sectionLabel('Assigned Tickets')),
+            _CountPill(count: total),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _filterBar(zones, zoneId),
+        const SizedBox(height: 14),
+        if (filtered.isEmpty)
+          const _EmptyBox()
+        else ...[
+          for (final t in visible)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _TicketCard(issue: t, onTap: () => _openTicket(t)),
+            ),
+          if (total > visible.length) _loadMoreBtn(total - visible.length),
+        ],
+      ],
+    );
+  }
+
+  Widget _filterBar(Map<int, String> zones, int? effectiveZone) {
+    final dateLabel = _dateFilter == null
+        ? 'Any date'
+        : DateFormat('d MMM').format(_dateFilter!);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            children: [
+              _filterChip('Open', _statusFilter == 'open', () => _setStatus('open')),
+              const SizedBox(width: 8),
+              _filterChip(
+                  'Closed', _statusFilter == 'closed', () => _setStatus('closed')),
+              const SizedBox(width: 8),
+              _filterChip('All', _statusFilter == 'all', () => _setStatus('all')),
+              const SizedBox(width: 8),
+              _dateChip(dateLabel),
+            ],
+          ),
+        ),
+        if (zones.length > 1) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              children: [
+                _filterChip(
+                    'All zones', effectiveZone == null, () => _setZone(null)),
+                for (final e in zones.entries) ...[
+                  const SizedBox(width: 8),
+                  _filterChip(e.value, effectiveZone == e.key, () => _setZone(e.key)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _filterChip(String label, bool active, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: active ? _black : _white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? _black : _line, width: 1.4),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+            color: active ? _white : _grey,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dateChip(String label) {
+    final active = _dateFilter != null;
+    return GestureDetector(
+      onTap: _pickDate,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? _black : _white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? _black : _line, width: 1.4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.calendar_today_rounded,
+                size: 12, color: active ? _white : _grey),
+            const SizedBox(width: 6),
+            Text(label,
+                style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: active ? _white : _grey)),
+            if (active) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: () => setState(() {
+                  _dateFilter = null;
+                  _visibleCount = _pageSize;
+                }),
+                child: const Icon(Icons.close_rounded, size: 13, color: _white),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _loadMoreBtn(int remaining) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 6),
+      child: GestureDetector(
+        onTap: () => setState(() => _visibleCount += _pageSize),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _line),
+          ),
+          child: Text('Load more ($remaining)',
+              style: GoogleFonts.inter(
+                  fontSize: 13.5, fontWeight: FontWeight.w800, color: _black)),
+        ),
+      ),
+    );
+  }
 
   // ─── Ticket detail sheet ────────────────────────────────────────────────────
   void _openTicket(MaintenanceIssueModel t) {
