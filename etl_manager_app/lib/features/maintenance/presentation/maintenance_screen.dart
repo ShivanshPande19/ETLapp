@@ -2215,7 +2215,7 @@ class _OpsBadges extends StatelessWidget {
 
   static const _teamLabels = {
     'azimuth_maintenance': 'Azimuth Maintenance',
-    'crownest_maintenance_head': 'Crownest Maint Head',
+    'crownest_maintenance_head': 'Crownest Maintenance',
   };
 
   @override
@@ -2235,11 +2235,14 @@ class _OpsBadges extends StatelessWidget {
       chips.add(_chip('Needs routing', _warn, Icons.alt_route_rounded));
     } else {
       for (final t in issue.targetTeams) {
-        chips.add(_chip(
-          _teamLabels[t] ?? t,
-          _ok,
-          Icons.engineering_rounded,
-        ));
+        final names = issue.assignees
+            .where((a) => a.role == t)
+            .map((a) => a.name)
+            .where((n) => n.isNotEmpty)
+            .toList();
+        final base = _teamLabels[t] ?? t;
+        final label = names.isEmpty ? base : '$base · ${names.join(', ')}';
+        chips.add(_chip(label, _ok, Icons.engineering_rounded));
       }
     }
 

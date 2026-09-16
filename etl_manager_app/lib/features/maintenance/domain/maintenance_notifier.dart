@@ -12,6 +12,22 @@ import '../../outlets/domain/outlet_providers.dart'; // multi-outlet: selected o
 
 // ─── Data Model ──────────────────────────────────────────────────────────────
 
+class MaintAssignee {
+  final String role;
+  final String roleLabel; // "Crownest Maintenance" | "Azimuth Maintenance"
+  final String name;
+  const MaintAssignee({
+    required this.role,
+    required this.roleLabel,
+    required this.name,
+  });
+  factory MaintAssignee.fromJson(Map<String, dynamic> j) => MaintAssignee(
+        role: (j['role'] ?? '').toString(),
+        roleLabel: (j['role_label'] ?? '').toString(),
+        name: (j['name'] ?? '').toString(),
+      );
+}
+
 class MaintenanceIssueModel {
   final int id;
   final int courtId;
@@ -43,6 +59,7 @@ class MaintenanceIssueModel {
   final List<String> resolutionPhotos;   // proof photos added at resolve
   final String? pendingVerifier;         // 'ops' | 'outlet' | null
   final bool raisedByOutlet;             // outlet-raised → two-stage verify
+  final List<MaintAssignee> assignees;   // team(s) + registered name(s)
 
   MaintenanceIssueModel({
     required this.id,
@@ -71,6 +88,7 @@ class MaintenanceIssueModel {
     this.resolutionPhotos = const [],
     this.pendingVerifier,
     this.raisedByOutlet = false,
+    this.assignees = const [],
   });
 
   // ✅ Backend ab explicit UTC ('Z' suffix) bhejta hai — toLocal() sahi IST dega
@@ -113,6 +131,11 @@ class MaintenanceIssueModel {
           const [],
       pendingVerifier: json['pending_verifier'] as String?,
       raisedByOutlet: json['raised_by_outlet'] == true,
+      assignees: (json['assignees'] as List?)
+              ?.map((e) =>
+                  MaintAssignee.fromJson(Map<String, dynamic>.from(e as Map)))
+              .toList() ??
+          const [],
     );
   }
 
