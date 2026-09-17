@@ -55,9 +55,19 @@ from ..models.sale import Outlet
 from ..models.staff import Staff
 from ..models.outlet_membership import OutletMembership
 
-# Legacy rows created by /auth/seed carry the bare value "manager"; treat it as
-# an ETL manager exactly like deps.CurrentUser.is_etl_manager does.
-ETL_MANAGER_ROLES = ("etl_manager", "manager")
+# Full-access management accounts. Mirrors deps.MANAGEMENT_ROLES so manager-
+# audience, court-level (outlet_id IS NULL) pushes reach the ROLE-SPLIT
+# management roles too — not just the legacy etl_manager/manager. Kept in
+# lock-step with notices.py::_scoped_query, which scopes READS by is_management;
+# without these, a management account got the inbox notice but NO push (ticket
+# closed/disputed/auto-closed, early-logout, missed-checkout, etc.).
+ETL_MANAGER_ROLES = (
+    "etl_manager",
+    "manager",
+    "azimuth_management",
+    "crownest_ops_head",
+    "crownest_head",
+)
 STAFF_ROLES = ("etl_staff", "staff", "outlet_staff")
 
 
