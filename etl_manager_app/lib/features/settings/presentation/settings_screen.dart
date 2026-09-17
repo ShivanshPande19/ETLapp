@@ -604,7 +604,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                               _InfoTile(
                                 icon: Icons.business_rounded,
                                 label: 'Organisation',
-                                value: 'ETL Food Courts',
+                                value: 'Eat Truck Love',
                               ),
                               _GroupDivider(),
                               _InfoTile(

@@ -409,7 +409,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                   opacity: _btnFade!,
                                   child: Center(
                                     child: Text(
-                                      'ETL Food Courts  ·  Internal use only',
+                                      'Eat Truck Love  ·  Internal use only',
                                       style: GoogleFonts.inter(
                                         fontSize: 11,
                                         color: _grey.withOpacity(0.5),
@@ -831,7 +831,7 @@ class _BrandSection extends StatelessWidget {
                       ),
                     ),
                     child: Text(
-                      'Food Court Management',
+                      'Eat Truck Love',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
