@@ -1,5 +1,7 @@
 // lib/features/auth/domain/auth_notifier.dart
 
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/auth_repository.dart';
@@ -245,17 +247,38 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> logout() async {
-    // Unregister the push token FIRST — this is an authenticated call, and
-    // authRepository.logout() wipes the JWT it needs.
+    // Sign out INSTANTLY. Flip the auth state (and drop user-scoped caches)
+    // right away so the router redirects to the login screen with zero wait.
     //
-    // This is what stops the next person who signs in on a SHARED DEVICE from
-    // receiving this user's notifications: the FCM token belongs to the app
-    // installation, not the person.
-    await _unregisterPushDevice();
-
-    await ref.read(authRepositoryProvider).logout();
+    // Previously we AWAITED an authenticated push-unregister network call FIRST
+    // and only flipped the state afterwards — so on a slow connection the user
+    // sat on the current/home screen for several seconds before the logout
+    // actually took effect. That teardown doesn't need to block the user.
     _clearUserScopedProviders();
     state = const AuthState(status: AuthStatus.idle);
+
+    // Finish the teardown in the BACKGROUND (best-effort). Ordering still
+    // matters: the push unregister is an authenticated call, so it must run
+    // BEFORE authRepository.logout() wipes the JWT it needs (see below).
+    unawaited(_finishLogoutCleanup());
+  }
+
+  /// Background, best-effort logout teardown. Unregisters this device's push
+  /// token (so the next person on a SHARED DEVICE never inherits this user's
+  /// notifications) and THEN wipes the stored credentials. The unregister is
+  /// capped so a slow/offline network can't keep the stored token alive for
+  /// long, and the local token wipe always runs regardless. Never throws.
+  Future<void> _finishLogoutCleanup() async {
+    try {
+      await _unregisterPushDevice().timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Timed out or failed — fall through and wipe the token anyway.
+    }
+    try {
+      await ref.read(authRepositoryProvider).logout();
+    } catch (_) {
+      // Local token wipe should never realistically fail; ignore if it does.
+    }
   }
 
   /// Best-effort push cleanup. Never throws and never blocks sign-out.
