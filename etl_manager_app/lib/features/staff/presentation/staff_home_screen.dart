@@ -477,8 +477,8 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Brand: "EAT TRUCK LOVE" — the red first letters
-                            // (E, T, L) still spell ETL.
+                            // Brand: "EAT TRUCK" / "LOVE" — the red first
+                            // letters (E, T, L) still spell ETL.
                             RichText(
                               text: TextSpan(
                                 style: GoogleFonts.antonSc(
@@ -488,18 +488,7 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
                                 ),
                                 children: const [
                                   TextSpan(text: 'E', style: TextStyle(color: _red)),
-                                  TextSpan(text: 'AT', style: TextStyle(color: _white)),
-                                ],
-                              ),
-                            ),
-                            RichText(
-                              text: TextSpan(
-                                style: GoogleFonts.antonSc(
-                                  fontSize: 50,
-                                  height: 0.95,
-                                  letterSpacing: -1,
-                                ),
-                                children: const [
+                                  TextSpan(text: 'AT ', style: TextStyle(color: _white)),
                                   TextSpan(text: 'T', style: TextStyle(color: _red)),
                                   TextSpan(text: 'RUCK', style: TextStyle(color: _white)),
                                 ],
