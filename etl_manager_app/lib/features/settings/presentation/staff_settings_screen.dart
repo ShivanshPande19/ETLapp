@@ -411,7 +411,7 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                               _InfoTile(
                                 icon: Icons.business_rounded,
                                 label: 'Organisation',
-                                value: 'ETL Food Courts',
+                                value: 'Eat Truck Love',
                               ),
                               _GroupDivider(),
                               _InfoTile(

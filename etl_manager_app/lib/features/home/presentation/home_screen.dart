@@ -207,6 +207,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // Brand: "EAT TRUCK LOVE" — the red first letters
+                            // (E, T, L) still spell ETL.
                             RichText(
                               text: TextSpan(
                                 style: GoogleFonts.antonSc(
@@ -220,15 +222,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     style: TextStyle(color: _red),
                                   ),
                                   TextSpan(
-                                    text: 'TL ',
-                                    style: TextStyle(color: _white),
-                                  ),
-                                  TextSpan(
-                                    text: 'F',
-                                    style: TextStyle(color: _red),
-                                  ),
-                                  TextSpan(
-                                    text: 'OOD',
+                                    text: 'AT',
                                     style: TextStyle(color: _white),
                                   ),
                                 ],
@@ -243,11 +237,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 ),
                                 children: const [
                                   TextSpan(
-                                    text: 'C',
+                                    text: 'T',
                                     style: TextStyle(color: _red),
                                   ),
                                   TextSpan(
-                                    text: 'OURT',
+                                    text: 'RUCK',
+                                    style: TextStyle(color: _white),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            RichText(
+                              text: TextSpan(
+                                style: GoogleFonts.antonSc(
+                                  fontSize: 54,
+                                  height: 0.95,
+                                  letterSpacing: -1,
+                                ),
+                                children: const [
+                                  TextSpan(
+                                    text: 'L',
+                                    style: TextStyle(color: _red),
+                                  ),
+                                  TextSpan(
+                                    text: 'OVE',
                                     style: TextStyle(color: _white),
                                   ),
                                 ],
