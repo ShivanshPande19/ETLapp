@@ -209,7 +209,10 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
 
     final bool isOutletUser =
         authState.isOutletManager || authState.isOutletStaff;
-    final bool isManager = authState.isEtlManager;
+    // A view-only Zone Manager is management for the UI shell, but must NOT get
+    // any action (assign/resolve/verify) — so it is NEVER treated as a manager
+    // that can act on tickets.
+    final bool isManager = authState.isEtlManager && !authState.isReadOnly;
     // ROLE SPLIT: only the Crownest Ops Head can raise + route tickets.
     final bool isOpsHead = authState.isOpsHead;
 

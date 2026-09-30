@@ -156,11 +156,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     final courtsAsync = ref.watch(courtsNotifierProvider); // NEW WATCH
     final name = auth.managerName ?? 'Manager';
     final email = auth.managerEmail ?? 'manager@etl.com';
-    final roleLabel = auth.isEtlManager
-        ? 'Admin Access'
-        : auth.isOutletManager
-            ? 'Outlet Manager'
-            : 'Staff Access';
+    final roleLabel = auth.isReadOnly
+        ? 'Zone Manager · View-only'
+        : auth.isEtlManager
+            ? 'Admin Access'
+            : auth.isOutletManager
+                ? 'Outlet Manager'
+                : 'Staff Access';
     final outletName =
         ref.watch(currentOutletNameProvider).value ?? 'Your Outlet';
     // MULTI-OUTLET: act on the currently-selected outlet (defaults to the
@@ -356,8 +358,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                             ],
                           ),
                         ),
-                        // ── Role-specific section ─────────────────────
-                        if (auth.isEtlManager) ...[
+        // ── Role-specific section ─────────────────────
+        // Hidden for the view-only Zone Manager: it never manages courts,
+        // staff-admin, POS, or accounts — it only VIEWS its zone's dashboards.
+                        if (auth.isEtlManager && !auth.isReadOnly) ...[
                           const SizedBox(height: 24),
                           _StaggerItem(
                             anim: _itemAnim(3),

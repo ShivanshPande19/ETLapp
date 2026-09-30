@@ -72,6 +72,14 @@ const List<_RoleOption> _roleOptions = [
     hint: 'Full management access. Owns the Crownest org.',
   ),
   _RoleOption(
+    'crownest_zone_manager',
+    'Crownest Zone Manager',
+    'management',
+    needsZone: true,
+    hint: 'View-only. Sees sales, housekeeping, maintenance & feedback for the '
+        'selected zone(s) only — cannot make any changes.',
+  ),
+  _RoleOption(
     'azimuth_maintenance',
     'Azimuth Maintenance',
     'maintenance',
@@ -298,40 +306,44 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                           }
                         }),
                       ),
-                      const SizedBox(height: 18),
-                      Text('SHIFT  ·  optional (a manager can set it later)',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: _grey,
-                            letterSpacing: 1.0,
-                          )),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _timeBtn('Start', shiftStart, () async {
-                              final t = await showTimePicker(
-                                context: ctx,
-                                initialTime: shiftStart ??
-                                    const TimeOfDay(hour: 9, minute: 0),
-                              );
-                              if (t != null) setSheet(() => shiftStart = t);
-                            }),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _timeBtn('End', shiftEnd, () async {
-                              final t = await showTimePicker(
-                                context: ctx,
-                                initialTime: shiftEnd ??
-                                    const TimeOfDay(hour: 21, minute: 0),
-                              );
-                              if (t != null) setSheet(() => shiftEnd = t);
-                            }),
-                          ),
-                        ],
-                      ),
+                      // Shift only applies to the maintenance head (it logs
+                      // attendance). The view-only zone manager has no shift.
+                      if (selectedRole == 'crownest_maintenance_head') ...[
+                        const SizedBox(height: 18),
+                        Text('SHIFT  ·  optional (a manager can set it later)',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: _grey,
+                              letterSpacing: 1.0,
+                            )),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _timeBtn('Start', shiftStart, () async {
+                                final t = await showTimePicker(
+                                  context: ctx,
+                                  initialTime: shiftStart ??
+                                      const TimeOfDay(hour: 9, minute: 0),
+                                );
+                                if (t != null) setSheet(() => shiftStart = t);
+                              }),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _timeBtn('End', shiftEnd, () async {
+                                final t = await showTimePicker(
+                                  context: ctx,
+                                  initialTime: shiftEnd ??
+                                      const TimeOfDay(hour: 21, minute: 0),
+                                );
+                                if (t != null) setSheet(() => shiftEnd = t);
+                              }),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
 
                     // ─── Contextual hint ───
@@ -382,11 +394,10 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                                 return;
                               }
                               if (needsZone && selectedCourtIds.isEmpty) {
-                                _snack('Pick at least one zone for the '
-                                    'maintenance head.');
+                                _snack('Pick at least one zone.');
                                 return;
                               }
-                              if (needsZone &&
+                              if (selectedRole == 'crownest_maintenance_head' &&
                                   (shiftStart == null) != (shiftEnd == null)) {
                                 _snack('Set both shift start and end, or leave '
                                     'both empty.');
