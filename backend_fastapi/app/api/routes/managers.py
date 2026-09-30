@@ -33,8 +33,13 @@ from ...services.email_service import send_email
 from ...services.push_targeting import deactivate_tokens_for_user
 from ..deps import (
     CurrentUser, require_etl_manager, require_management,
-    MANAGEMENT_ROLES, MAINTENANCE_ROLES,
+    MANAGEMENT_ROLES, MAINTENANCE_ROLES, ZONE_MANAGER_ROLES,
+    _parse_zone_court_ids,
 )
+
+# Manager-table roles this admin surface lists/manages: full-access management
+# + the view-only zone manager (also a managers row, but NOT in MANAGEMENT_ROLES).
+_MANAGER_TABLE_ROLES = tuple(MANAGEMENT_ROLES | ZONE_MANAGER_ROLES)
 
 logger = logging.getLogger("managers")
 router = APIRouter()
@@ -281,6 +286,7 @@ _CREATABLE_ROLES = {
     "azimuth_management":        "manager",
     "crownest_ops_head":         "manager",
     "crownest_head":             "manager",
+    "crownest_zone_manager":     "manager",   # view-only, zone-scoped
     "azimuth_maintenance":       "staff",
     "crownest_maintenance_head": "staff",
 }
@@ -288,6 +294,7 @@ _ROLE_LABELS = {
     "azimuth_management":        "Azimuth Management",
     "crownest_ops_head":         "Crownest Ops Head",
     "crownest_head":             "Crownest Head",
+    "crownest_zone_manager":     "Crownest Zone Manager",
     "azimuth_maintenance":       "Azimuth Maintenance",
     "crownest_maintenance_head": "Crownest Maintenance Head",
     # Legacy — shown in listings so existing accounts are visible/manageable.
@@ -299,8 +306,14 @@ _ORG_BY_ROLE = {
     "azimuth_maintenance":       "azimuth",
     "crownest_ops_head":         "crownest",
     "crownest_head":             "crownest",
+    "crownest_zone_manager":     "crownest",
     "crownest_maintenance_head": "crownest",
 }
+
+# Roles that REQUIRE at least one zone (court) at creation:
+#   crownest_maintenance_head — attendance geofence + roster grouping
+#   crownest_zone_manager     — the courts its read access is limited to
+_ZONE_REQUIRED_ROLES = ("crownest_maintenance_head", "crownest_zone_manager")
 
 
 class CreateAccountRequest(BaseModel):
@@ -430,6 +443,28 @@ def _staff_account_out(
     )
 
 
+def _manager_account_out(
+    m: Manager, court_names: dict, *, is_self: bool = False
+) -> AccountOut:
+    """Build the AccountOut for a manager-table account. Full-access management
+    rows carry no zones; the view-only crownest_zone_manager exposes the courts
+    it's scoped to (parsed from `zone_court_ids`)."""
+    ids = (
+        _parse_zone_court_ids(getattr(m, "zone_court_ids", None))
+        if m.role in ZONE_MANAGER_ROLES else []
+    )
+    return AccountOut(
+        kind="manager", account_id=m.id, name=m.name, email=m.email,
+        role=m.role, role_label=_ROLE_LABELS.get(m.role, m.role),
+        org=getattr(m, "org", None),
+        zone_court_id=(ids[0] if ids else None),
+        zone_name=(court_names.get(ids[0]) if ids else None),
+        zones=[ZoneOut(court_id=i, name=court_names.get(i)) for i in ids],
+        is_active=bool(m.is_active),
+        is_self=is_self,
+    )
+
+
 @router.post("/accounts", response_model=CreateAccountResponse)
 async def create_account(
     req: CreateAccountRequest,
@@ -472,22 +507,27 @@ async def create_account(
     zone_ids_json = None
     shift_start = None
     shift_end = None
-    if role == "crownest_maintenance_head":
+    if role in _ZONE_REQUIRED_ROLES:
         ids = list(dict.fromkeys(req.court_ids or ([req.court_id] if req.court_id else [])))
         if not ids:
-            raise HTTPException(status_code=400, detail="At least one zone (court) is required for a Maintenance Head.")
+            raise HTTPException(status_code=400, detail="At least one zone (court) is required for this role.")
         found = {c.id for c in db.query(Court.id).filter(Court.id.in_(ids), Court.is_active == 1).all()}
         missing = [i for i in ids if i not in found]
         if missing:
             raise HTTPException(status_code=404, detail=f"Zone(s) not found or inactive: {missing}")
         court_id = ids[0]
         zone_ids_json = json.dumps(ids)
-        shift_start, shift_end = _validate_optional_shift(req.shift_start, req.shift_end)
+        # Shift applies ONLY to the maintenance head (it marks attendance); the
+        # zone manager is view-only and has no shift.
+        if role == "crownest_maintenance_head":
+            shift_start, shift_end = _validate_optional_shift(req.shift_start, req.shift_end)
 
     if kind == "manager":
         acct = Manager(
             name=name, email=email, hashed_password=random_pw,
             role=role, org=org, outlet_id=None, is_active=True,
+            # Only set for crownest_zone_manager; NULL for full-access management.
+            zone_court_ids=zone_ids_json,
         )
         db.add(acct); db.commit(); db.refresh(acct)
         token = create_token(
@@ -537,20 +577,18 @@ def list_accounts(
     Outlet managers/staff and court/etl_staff are intentionally NOT listed here
     (this surface is for the ETL org roles only)."""
     out: list[AccountOut] = []
+    court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
 
+    # Managers table: full-access management + the view-only zone manager.
     mgrs = (
         db.query(Manager)
-        .filter(Manager.role.in_(tuple(MANAGEMENT_ROLES)))
+        .filter(Manager.role.in_(_MANAGER_TABLE_ROLES))
         .order_by(Manager.is_active.desc(), func.lower(Manager.name))
         .all()
     )
     for m in mgrs:
-        out.append(AccountOut(
-            kind="manager", account_id=m.id, name=m.name, email=m.email,
-            role=m.role, role_label=_ROLE_LABELS.get(m.role, m.role),
-            org=getattr(m, "org", None),
-            is_active=bool(m.is_active),
-            is_self=(user.is_manager_account and m.id == user.id),
+        out.append(_manager_account_out(
+            m, court_names, is_self=(user.is_manager_account and m.id == user.id)
         ))
 
     maint = (
@@ -559,7 +597,6 @@ def list_accounts(
         .order_by(Staff.is_active.desc(), func.lower(Staff.name))
         .all()
     )
-    court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
     for s in maint:
         out.append(_staff_account_out(
             s, court_names, is_self=(user.is_staff_account and s.id == user.id)
@@ -589,22 +626,21 @@ def deactivate_account(
 
     if kind == "manager":
         target = db.query(Manager).filter(
-            Manager.id == account_id, Manager.role.in_(tuple(MANAGEMENT_ROLES))
+            Manager.id == account_id, Manager.role.in_(_MANAGER_TABLE_ROLES)
         ).first()
         if not target:
-            raise HTTPException(status_code=404, detail="Management account not found.")
+            raise HTTPException(status_code=404, detail="Account not found.")
         if user.is_manager_account and target.id == user.id:
             raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
-        if target.is_active and _active_management_count(db) <= 1:
+        # Lock-out safety applies ONLY to full-access management (a view-only
+        # zone manager can never be the last account that keeps the org running).
+        if target.role in MANAGEMENT_ROLES and target.is_active and _active_management_count(db) <= 1:
             raise HTTPException(status_code=400, detail="Cannot deactivate the last active management account.")
         target.is_active = False
         db.commit(); db.refresh(target)
         _safe_kill_tokens(db, "manager", target.id)
-        return AccountOut(
-            kind="manager", account_id=target.id, name=target.name, email=target.email,
-            role=target.role, role_label=_ROLE_LABELS.get(target.role, target.role),
-            org=getattr(target, "org", None), is_active=False,
-        )
+        court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
+        return _manager_account_out(target, court_names)
     else:
         target = db.query(Staff).filter(
             Staff.id == account_id, Staff.role.in_(tuple(MAINTENANCE_ROLES))
@@ -632,17 +668,14 @@ def reactivate_account(
         raise HTTPException(status_code=400, detail="Unknown account kind.")
     if kind == "manager":
         target = db.query(Manager).filter(
-            Manager.id == account_id, Manager.role.in_(tuple(MANAGEMENT_ROLES))
+            Manager.id == account_id, Manager.role.in_(_MANAGER_TABLE_ROLES)
         ).first()
         if not target:
-            raise HTTPException(status_code=404, detail="Management account not found.")
+            raise HTTPException(status_code=404, detail="Account not found.")
         target.is_active = True
         db.commit(); db.refresh(target)
-        return AccountOut(
-            kind="manager", account_id=target.id, name=target.name, email=target.email,
-            role=target.role, role_label=_ROLE_LABELS.get(target.role, target.role),
-            org=getattr(target, "org", None), is_active=True,
-        )
+        court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}
+        return _manager_account_out(target, court_names)
     else:
         target = db.query(Staff).filter(
             Staff.id == account_id, Staff.role.in_(tuple(MAINTENANCE_ROLES))

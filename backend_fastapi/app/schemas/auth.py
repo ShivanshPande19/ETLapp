@@ -14,3 +14,7 @@ class TokenResponse(BaseModel):
     role: str
     zone: Optional[int] = None       # Ye etl_staff (court_id) ke liye kaam aayega
     outlet_id: Optional[int] = None  # Naya column outlet_manager/outlet_staff ke liye
+    # Assigned zone (court) ids for zone-scoped roles — the view-only
+    # crownest_zone_manager (and maintenance heads). Lets the app lock its court
+    # switcher/counts to just these courts. NULL/empty for everyone else.
+    court_ids: Optional[list[int]] = None

@@ -46,6 +46,11 @@ class AuthState {
   bool get isAzimuthMaintenance => role == 'azimuth_maintenance';
   bool get isCrownestMaintenanceHead => role == 'crownest_maintenance_head';
 
+  /// Crownest Zone Manager — a VIEW-ONLY account scoped (by the backend) to
+  /// specific court(s). It sees the full management dashboard but for its
+  /// zone(s) only, and performs NO write actions anywhere.
+  bool get isCrownestZoneManager => role == 'crownest_zone_manager';
+
   /// Full company-wide access (drives every ETL-manager-only screen). Legacy
   /// etl_manager/manager + the three new management roles all qualify — exactly
   /// like the backend's `is_management`.
@@ -54,7 +59,17 @@ class AuthState {
       role == 'manager' ||
       role == 'azimuth_management' ||
       role == 'crownest_ops_head' ||
-      role == 'crownest_head';
+      role == 'crownest_head' ||
+      // Zone manager rides the SAME management app shell/routing/nav, but the
+      // backend scopes its data to its zone(s) and `isReadOnly` (below) hides
+      // every write control from it.
+      role == 'crownest_zone_manager';
+
+  /// VIEW-ONLY identities: they may open the management dashboard (scoped by
+  /// the backend) but must NOT see any write/action control. Currently just the
+  /// Crownest Zone Manager. Every write button/gate is additionally guarded by
+  /// `&& !isReadOnly`.
+  bool get isReadOnly => isCrownestZoneManager;
 
   /// Only Crownest Ops Head may RAISE / route maintenance tickets.
   bool get isOpsHead => role == 'crownest_ops_head';

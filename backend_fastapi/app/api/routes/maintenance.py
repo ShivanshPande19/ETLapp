@@ -717,6 +717,19 @@ async def list_issues(
             q = q.filter(MaintenanceIssue.court_id == court_id)
         if outlet_id:
             q = q.filter(MaintenanceIssue.outlet_id == outlet_id)
+    elif user.is_zone_manager:
+        # VIEW-ONLY zone manager: only tickets in its assigned court(s).
+        if not user.court_ids:
+            raise HTTPException(status_code=403, detail="No zone assigned.")
+        allowed = set(user.court_ids)
+        if court_id is not None:
+            if court_id not in allowed:
+                raise HTTPException(status_code=403, detail="You cannot access that court.")
+            q = q.filter(MaintenanceIssue.court_id == court_id)
+        else:
+            q = q.filter(MaintenanceIssue.court_id.in_(user.court_ids))
+        if outlet_id:
+            q = q.filter(MaintenanceIssue.outlet_id == outlet_id)
     elif user.is_maintenance:
         # Maintenance worker: only tickets that target their role or mention them.
         q = _apply_maintenance_visibility(q, user)
@@ -767,6 +780,12 @@ async def get_issue(
         # Scope ETL staff to their own court (mirrors list_issues); without this
         # any ETL staff could read any court's ticket by guessing its id.
         if user.court_id is None or issue.court_id != user.court_id:
+            raise HTTPException(
+                status_code=403, detail="This ticket belongs to another court."
+            )
+    elif user.is_zone_manager:
+        # VIEW-ONLY zone manager: only tickets within its assigned court(s).
+        if not user.court_ids or issue.court_id not in set(user.court_ids):
             raise HTTPException(
                 status_code=403, detail="This ticket belongs to another court."
             )

@@ -59,6 +59,32 @@ def _apply_date_range(query, start: Optional[datetime], end: Optional[datetime])
     return query
 
 
+def _zone_scope_or_403(user: CurrentUser) -> Optional[set]:
+    """Company-wide feedback access gate.
+
+    Returns None for a full-access manager (no court restriction), or the set of
+    court ids for a view-only Crownest Zone Manager (its reads are limited to
+    those courts). Anyone else is denied.
+    """
+    if user.is_etl_manager:
+        return None
+    if user.is_zone_manager:
+        if not user.court_ids:
+            raise HTTPException(status_code=403, detail="No zone assigned to your account.")
+        return set(user.court_ids)
+    raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+
+def _assert_court_readable(user: CurrentUser, court_id: int) -> None:
+    """A single-court feedback view is readable by a full-access manager, or by
+    a zone manager only when that court is one of its assigned zones."""
+    if user.is_etl_manager:
+        return
+    if user.is_zone_manager and court_id in set(user.court_ids or []):
+        return
+    raise HTTPException(status_code=403, detail="ETL manager access required.")
+
+
 def _avg(values: List[int]) -> Optional[float]:
     # ✅ FIX #3: explicit half-up rounding (avoid banker's rounding surprises)
     if not values:
@@ -396,8 +422,7 @@ def get_court_feedbacks(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    if not user.is_etl_manager:
-        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    _assert_court_readable(user, court_id)
 
     feedbacks = (
         db.query(Feedback)
@@ -414,8 +439,7 @@ def get_court_analytics(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    if not user.is_etl_manager:
-        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    _assert_court_readable(user, court_id)
 
     feedbacks = db.query(Feedback).filter(
         Feedback.court_id == court_id
@@ -576,11 +600,14 @@ def get_all_feedbacks(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    if not user.is_etl_manager:
-        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    restrict = _zone_scope_or_403(user)
 
     query = db.query(Feedback)
+    if restrict is not None:
+        query = query.filter(Feedback.court_id.in_(restrict))
     if court_id is not None:
+        if restrict is not None and court_id not in restrict:
+            raise HTTPException(status_code=403, detail="You cannot access that court.")
         query = query.filter(Feedback.court_id == court_id)
     if outlet_id is not None:
         query = query.filter(Feedback.outlet_id == outlet_id)
@@ -605,11 +632,14 @@ def get_all_analytics(
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
 ):
-    if not user.is_etl_manager:
-        raise HTTPException(status_code=403, detail="ETL manager access required.")
+    restrict = _zone_scope_or_403(user)
 
     query = db.query(Feedback)
+    if restrict is not None:
+        query = query.filter(Feedback.court_id.in_(restrict))
     if court_id is not None:
+        if restrict is not None and court_id not in restrict:
+            raise HTTPException(status_code=403, detail="You cannot access that court.")
         query = query.filter(Feedback.court_id == court_id)
     if outlet_id is not None:
         query = query.filter(Feedback.outlet_id == outlet_id)

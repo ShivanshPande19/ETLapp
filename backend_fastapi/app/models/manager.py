@@ -20,6 +20,13 @@ class Manager(Base):
     # (labels/badges); access is decided by `role`, never by org.
     org             = Column(String,  nullable=True)
 
+    # Zone (court) scope — JSON list of court ids, e.g. "[1, 4]". Only the
+    # view-only 'crownest_zone_manager' role uses this: it restricts EVERY read
+    # (sales/housekeeping/maintenance/feedback/attendance) to just these courts.
+    # NULL for full-access management roles (they see all zones). Mirrors
+    # Staff.zone_court_ids so the same multi-zone picker/parser is reused.
+    zone_court_ids  = Column(String,  nullable=True)
+
     # Agar outlet_manager hai toh uski outlet ID, ETL Manager ke liye Null
     outlet_id       = Column(Integer, ForeignKey("outlets.id"), nullable=True)
     

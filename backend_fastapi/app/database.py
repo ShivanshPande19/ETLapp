@@ -387,7 +387,9 @@ def ensure_manager_columns() -> None:
     `role` (see deps.MANAGEMENT_ROLES), never by org, so existing rows with a
     NULL org keep working exactly as before.
     """
-    needed = {"org": "VARCHAR"}
+    # `zone_court_ids` (nullable JSON list) added for the view-only
+    # crownest_zone_manager role — restricts its reads to specific courts.
+    needed = {"org": "VARCHAR", "zone_court_ids": "VARCHAR"}
     try:
         with engine.begin() as conn:
             insp = inspect(conn)
