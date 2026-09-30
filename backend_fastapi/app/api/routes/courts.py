@@ -54,7 +54,14 @@ def list_courts(
     # resolve court names/geofences — but anonymous access is now blocked.
     user: CurrentUser = Depends(get_current_user),
 ):
-    return get_all_courts(db)
+    resp = get_all_courts(db)
+    # A view-only Crownest Zone Manager only ever sees its assigned court(s) —
+    # scoping the list here also scopes the app's court switcher + the home
+    # "courts" count to just those zones (backend-enforced, not UI-only).
+    if user.is_zone_manager:
+        allowed = set(user.court_ids or [])
+        resp.courts = [c for c in resp.courts if c.id in allowed]
+    return resp
 
 
 @router.post("/", status_code=201)

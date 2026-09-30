@@ -22,10 +22,25 @@ from ..deps import get_current_user, require_etl_manager, CurrentUser
 router = APIRouter()
 
 
+def _zone_outlet_ids(db: Session, court_ids: list[int]) -> list[int]:
+    """All active outlet ids in the given courts — used to aggregate a zone
+    manager's 'all my zones' sales view. Empty list ⇒ the service's `or [-1]`
+    sentinel returns nothing (never all)."""
+    if not court_ids:
+        return []
+    rows = (
+        db.query(Outlet.id)
+        .filter(Outlet.court_id.in_(court_ids), Outlet.is_active == 1)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 def _scope_outlets(
     user: CurrentUser,
     court_id: Optional[int],
     outlet_id: Optional[int],
+    db: Session,
 ) -> tuple[Optional[int], Optional[int], Optional[list[int]]]:
     """Constrain a summary/trend request to what `user` may read.
 
@@ -34,6 +49,9 @@ def _scope_outlets(
     SECURITY (P0 + MULTI-OUTLET): the client can never widen its own scope.
       • ETL manager   → unrestricted; client court_id/outlet_id honored
                         (both None = whole company).
+      • Zone manager  → VIEW-ONLY, locked to its assigned court(s). A specific
+                        court/outlet must be within its zones; otherwise it
+                        aggregates across all outlets in those zones.
       • Outlet user   → if a specific outlet_id is requested it MUST be one of
                         theirs (else 403); otherwise aggregate across ALL their
                         outlets (multi-outlet owner "all my outlets" view).
@@ -41,6 +59,21 @@ def _scope_outlets(
     """
     if user.is_etl_manager:
         return court_id, outlet_id, None
+    if user.is_zone_manager:
+        allowed = set(user.court_ids)
+        if not allowed:
+            raise HTTPException(status_code=403, detail="No zone assigned to your account.")
+        if outlet_id is not None:
+            o = db.query(Outlet).filter(Outlet.id == outlet_id).first()
+            if not o or o.court_id not in allowed:
+                raise HTTPException(status_code=403, detail="You cannot access that outlet.")
+            return None, outlet_id, None
+        if court_id is not None:
+            if court_id not in allowed:
+                raise HTTPException(status_code=403, detail="You cannot access that court.")
+            return court_id, None, None
+        # No specific selection → aggregate across every outlet in the zones.
+        return None, None, _zone_outlet_ids(db, list(allowed))
     if user.is_outlet_user:
         if not user.outlet_ids:
             raise HTTPException(status_code=403, detail="No outlet assigned to your account.")
@@ -62,11 +95,22 @@ def _scope_single_outlet(
     court_id: Optional[int],
     outlet_id: Optional[int],
     vendor_name: Optional[str],
+    db: Session,
 ) -> tuple[Optional[int], Optional[int], Optional[str]]:
     """Vendor history returns ONE vendor's series, so resolve to a single
     outlet the caller may access."""
     if user.is_etl_manager:
         return court_id, outlet_id, vendor_name
+    if user.is_zone_manager:
+        allowed = set(user.court_ids)
+        if not allowed:
+            raise HTTPException(status_code=403, detail="No zone assigned to your account.")
+        if outlet_id is None:
+            raise HTTPException(status_code=400, detail="outlet_id is required.")
+        o = db.query(Outlet).filter(Outlet.id == outlet_id).first()
+        if not o or o.court_id not in allowed:
+            raise HTTPException(status_code=403, detail="You cannot access that outlet.")
+        return None, outlet_id, None
     if user.is_outlet_user:
         if not user.outlet_ids:
             raise HTTPException(status_code=403, detail="No outlet assigned to your account.")
@@ -95,7 +139,7 @@ async def sales_summary(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
+    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id, db)
     return await get_sales_summary(
         db=db,
         court_id=court_id,
@@ -117,7 +161,7 @@ async def sales_trend(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
+    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id, db)
     return await get_sales_trend(
         db=db,
         court_id=court_id,
@@ -140,7 +184,7 @@ async def sales_compare(
     """Fair same-span comparison (this-period-so-far vs the same days last
     period) with an aligned bucket series for a side-by-side chart. Scoped to
     exactly what the caller may read, just like /summary and /trend."""
-    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id)
+    court_id, outlet_id, outlet_ids = _scope_outlets(user, court_id, outlet_id, db)
     return await get_sales_comparison(
         db=db,
         court_id=court_id,
@@ -159,7 +203,7 @@ async def vendor_history(
     user: CurrentUser = Depends(get_current_user),
 ):
     court_id, outlet_id, vendor_name = _scope_single_outlet(
-        user, court_id, outlet_id, vendor_name
+        user, court_id, outlet_id, vendor_name, db
     )
     try:
         return await get_vendor_history(

@@ -20,15 +20,35 @@ def get_etl_roster(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """ETL manager: court-wise staff attendance roster. Sirf ETL manager
-    access kar sakta hai (outlet managers/staff ko 403)."""
-    if not user.is_etl_manager:
+    """Court-wise staff attendance roster. Full-access management sees every
+    court; a view-only Crownest Zone Manager sees ONLY its assigned court(s).
+    Outlet managers/staff get 403."""
+    if user.is_etl_manager:
+        pass
+    elif user.is_zone_manager:
+        if not user.court_ids:
+            raise HTTPException(status_code=403, detail="No zone assigned to your account.")
+        if court_id is not None and court_id not in set(user.court_ids):
+            raise HTTPException(status_code=403, detail="You cannot access that court.")
+    else:
         raise HTTPException(status_code=403, detail="ETL manager access required.")
 
     if not target_date:
         target_date = now_ist().date()
 
-    return get_etl_court_roster(db, target_date, court_id)
+    resp = get_etl_court_roster(db, target_date, court_id)
+
+    # Zone manager: keep only its courts + recompute totals; the roaming
+    # maintenance team spans all zones, so it's hidden from a zone-scoped view.
+    if user.is_zone_manager:
+        allowed = set(user.court_ids)
+        resp.courts = [c for c in resp.courts if c.court_id in allowed]
+        resp.maintenance_team = []
+        resp.total_courts = len(resp.courts)
+        resp.total_staff = sum(c.total_staff for c in resp.courts)
+        resp.total_present = sum(c.present_count for c in resp.courts)
+
+    return resp
 
 
 @router.get("/", response_model=RosterResponse)

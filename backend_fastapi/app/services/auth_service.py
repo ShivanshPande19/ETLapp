@@ -1,5 +1,6 @@
 # backend_fastapi/app/services/auth_service.py
 
+import json
 import logging
 
 from sqlalchemy.orm import Session
@@ -44,6 +45,19 @@ def login_manager(request: LoginRequest, db: Session) -> TokenResponse | None:
         "role": user.role,
     })
 
+    # Assigned zone (court) ids for zone-scoped roles (crownest_zone_manager /
+    # maintenance heads). Parsed from the JSON `zone_court_ids` column; NULL for
+    # everyone else. Lets the app scope its court switcher/counts.
+    court_ids = None
+    raw_zone = getattr(user, "zone_court_ids", None)
+    if raw_zone:
+        try:
+            v = json.loads(raw_zone)
+            if isinstance(v, list) and v:
+                court_ids = [int(x) for x in v]
+        except Exception:
+            court_ids = None
+
     # 5. Build the response
     try:
         return TokenResponse(
@@ -55,6 +69,7 @@ def login_manager(request: LoginRequest, db: Session) -> TokenResponse | None:
             # getattr keeps this resilient if a user type lacks these columns.
             zone=getattr(user, "court_id", None),
             outlet_id=getattr(user, "outlet_id", None),
+            court_ids=court_ids,
         )
     except Exception as e:  # noqa: BLE001 — log server-side, surface generic 500
         logger.exception("Failed to build login response: %s", e)

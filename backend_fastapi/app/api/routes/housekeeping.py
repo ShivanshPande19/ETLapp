@@ -299,6 +299,12 @@ def get_status(
         if user.court_id is None:
             raise HTTPException(status_code=403, detail="No court assigned to your account.")
         court_id = user.court_id
+    elif user.is_zone_manager:
+        # VIEW-ONLY zone manager: only its assigned court(s).
+        if not user.court_ids:
+            raise HTTPException(status_code=403, detail="No zone assigned to your account.")
+        if court_id is not None and court_id not in set(user.court_ids):
+            raise HTTPException(status_code=403, detail="You cannot access that court.")
     elif not user.is_etl_manager:
         raise HTTPException(
             status_code=403, detail="Housekeeping is available to court staff only."
@@ -309,6 +315,8 @@ def get_status(
     court_q = db.query(Court).filter(Court.is_active == 1)
     if court_id is not None:
         court_q = court_q.filter(Court.id == court_id)
+    elif user.is_zone_manager:
+        court_q = court_q.filter(Court.id.in_(user.court_ids))
     court_rows = court_q.order_by(Court.id).all()
 
     courts = []

@@ -1,4 +1,6 @@
 # app/api/deps.py
+import json
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, ExpiredSignatureError
@@ -37,6 +39,31 @@ MAINTENANCE_ROLES = frozenset({
 })
 OPS_HEAD_ROLE = "crownest_ops_head"
 
+# ─── Zone-scoped VIEW-ONLY roles ──────────────────────────────────────────────
+#
+# A Crownest Zone Manager (managers table) is DELIBERATELY NOT in
+# MANAGEMENT_ROLES: it has NO write access anywhere (every write is gated by
+# require_management / require_ops_head / inline is_management, all of which it
+# fails → 403). It only READS, and only for the courts in its `zone_court_ids`.
+# Each read route adds an `is_zone_manager` branch that filters to `court_ids`.
+ZONE_MANAGER_ROLES = frozenset({
+    "crownest_zone_manager",
+})
+
+
+def _parse_zone_court_ids(raw) -> list[int]:
+    """Parse a JSON list of court ids stored on a row (e.g. "[1, 4]").
+    Returns [] on missing/garbage. Mirrors managers._staff_zone_ids."""
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        if isinstance(v, list):
+            return [int(x) for x in v]
+    except Exception:
+        pass
+    return []
+
 
 class CurrentUser:
     """Authenticated user — resolved fresh from DB on every request."""
@@ -52,6 +79,7 @@ class CurrentUser:
         user_type: str = "manager",
         outlet_ids: list[int] | None = None,
         org: str | None = None,
+        court_ids: list[int] | None = None,
     ):
         self.id = id
         self.name = name
@@ -60,6 +88,16 @@ class CurrentUser:
         # Org label ('azimuth' | 'crownest' | None). Informational only.
         self.org = org
         self.court_id = court_id
+        # `court_ids` = the FULL set of courts this identity is scoped to.
+        # Populated for the view-only `crownest_zone_manager` (from its
+        # `zone_court_ids`); for a single-court staff identity it falls back to
+        # `[court_id]`; empty for full-access management (they see every court).
+        if court_ids:
+            self.court_ids = list(court_ids)
+        elif court_id is not None:
+            self.court_ids = [court_id]
+        else:
+            self.court_ids = []
         # `outlet_id` = the PRIMARY/default outlet (legacy single-outlet column).
         # Kept for backward compatibility and as the default selection.
         self.outlet_id = outlet_id
@@ -103,6 +141,12 @@ class CurrentUser:
         """Crownest Ops Head — the ONLY role that can raise maintenance tickets
         (in addition to full management access)."""
         return self.role == OPS_HEAD_ROLE
+
+    @property
+    def is_zone_manager(self) -> bool:
+        """Crownest Zone Manager — VIEW-ONLY, scoped to `court_ids`. Has NO
+        write access anywhere; every read route restricts it to its courts."""
+        return self.role in ZONE_MANAGER_ROLES
 
     @property
     def is_maintenance(self) -> bool:
@@ -223,6 +267,9 @@ def get_current_user(
             outlet_ids=outlet_ids,
             user_type="manager",
             org=getattr(user, "org", None),
+            # Zone scope for the view-only crownest_zone_manager (empty for
+            # full-access management, which sees every court).
+            court_ids=_parse_zone_court_ids(getattr(user, "zone_court_ids", None)),
         )
 
     staff = db.query(Staff).filter(
