@@ -66,10 +66,21 @@ class AuthState {
       role == 'crownest_zone_manager';
 
   /// VIEW-ONLY identities: they may open the management dashboard (scoped by
-  /// the backend) but must NOT see any write/action control. Currently just the
-  /// Crownest Zone Manager. Every write button/gate is additionally guarded by
-  /// `&& !isReadOnly`.
+  /// the backend) but must NOT see any management write/action control
+  /// (dashboard edits, account admin, assign/resolve/verify tickets, roster
+  /// edits). Currently just the Crownest Zone Manager. Every such write
+  /// button/gate is additionally guarded by `&& !isReadOnly`.
   bool get isReadOnly => isCrownestZoneManager;
+
+  /// Carve-outs from the otherwise view-only Zone Manager. These are the ONLY
+  /// two write actions it may perform (the backend enforces the same):
+  ///   • mark its OWN attendance (it's a staff-table identity, shift+geofence);
+  ///   • raise a maintenance ticket (always TRIAGED to the Crownest Ops Head,
+  ///     who routes it onward — the zone manager never assigns a team).
+  /// Keep these as explicit, narrow flags rather than relaxing `isReadOnly`, so
+  /// no OTHER write control ever leaks to the zone manager by accident.
+  bool get canMarkOwnAttendance => isCrownestZoneManager;
+  bool get canRaiseMaintenance => isCrownestZoneManager;
 
   /// Only Crownest Ops Head may RAISE / route maintenance tickets.
   bool get isOpsHead => role == 'crownest_ops_head';

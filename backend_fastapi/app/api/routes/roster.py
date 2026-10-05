@@ -45,8 +45,16 @@ def get_etl_roster(
         resp.courts = [c for c in resp.courts if c.court_id in allowed]
         resp.maintenance_team = []
         resp.total_courts = len(resp.courts)
-        resp.total_staff = sum(c.total_staff for c in resp.courts)
-        resp.total_present = sum(c.present_count for c in resp.courts)
+        # Count DISTINCT people across the visible courts. A multi-zone colleague
+        # (e.g. the zone manager themself) appears in several of its courts but
+        # must be counted ONCE in the summary.
+        seen: dict[int, bool] = {}
+        for c in resp.courts:
+            for s in c.staff_list:
+                if s.staff_id not in seen:
+                    seen[s.staff_id] = (s.status == "present")
+        resp.total_staff = len(seen)
+        resp.total_present = sum(1 for present in seen.values() if present)
 
     return resp
 

@@ -215,6 +215,9 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
     final bool isManager = authState.isEtlManager && !authState.isReadOnly;
     // ROLE SPLIT: only the Crownest Ops Head can raise + route tickets.
     final bool isOpsHead = authState.isOpsHead;
+    // The view-only Zone Manager may RAISE (its ticket is triaged to the Ops
+    // Head) but still cannot act/route — handled below.
+    final bool isZoneManager = authState.isCrownestZoneManager;
 
     return Scaffold(
       backgroundColor: _bg,
@@ -259,7 +262,9 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            isManager ? 'ALL COURTS' : 'YOUR OUTLET',
+                            isManager
+                                ? 'ALL COURTS'
+                                : (isZoneManager ? 'YOUR ZONE' : 'YOUR OUTLET'),
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               color: _grey,
@@ -441,14 +446,17 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen>
       ),
 
       // ─── FAB — outlet users (simple raise) OR Crownest Ops Head (full raise) ───
-      floatingActionButton: (isOutletUser || isOpsHead)
+      floatingActionButton: (isOutletUser || isOpsHead || isZoneManager)
           ? Padding(
               padding: const EdgeInsets.only(bottom: 90),
               child: FloatingActionButton.extended(
                 backgroundColor: _black,
                 elevation: 8,
-                onPressed:
-                    isOpsHead ? () => openOpsRaise(context) : _showRaiseSheet,
+                onPressed: isOpsHead
+                    ? () => openOpsRaise(context)
+                    : (isZoneManager
+                        ? () => openZoneManagerRaise(context)
+                        : _showRaiseSheet),
                 icon: const Icon(Icons.add_rounded, color: _white),
                 label: Text(
                   'Raise Ticket',

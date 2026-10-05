@@ -420,6 +420,35 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
                   ),
                 ),
               ],
+              if ((s['role'] ?? '').toString() == 'crownest_zone_manager') ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _blue.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _blue.withOpacity(0.30), width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.map_rounded, size: 12, color: _blue),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Zone Manager',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: _blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 22),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -968,6 +997,42 @@ class _StaffCard extends StatelessWidget {
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w800,
                                   color: _red,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (role == 'crownest_zone_manager') ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _blue.withOpacity(0.10),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: _blue.withOpacity(0.30),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.map_rounded,
+                                size: 10,
+                                color: _blue,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Zone Manager',
+                                style: GoogleFonts.inter(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: _blue,
                                 ),
                               ),
                             ],

@@ -76,8 +76,10 @@ const List<_RoleOption> _roleOptions = [
     'Crownest Zone Manager',
     'management',
     needsZone: true,
-    hint: 'View-only. Sees sales, housekeeping, maintenance & feedback for the '
-        'selected zone(s) only — cannot make any changes.',
+    hint: 'Zone-scoped. Sees sales, housekeeping, maintenance & feedback for '
+        'its zone(s) only; makes no management changes, but DOES mark its own '
+        'attendance and can raise maintenance tickets (routed to the Ops Head). '
+        'Set a shift so it can check in.',
   ),
   _RoleOption(
     'azimuth_maintenance',
@@ -287,7 +289,8 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                       }).toList(),
                     ),
 
-                    // ─── Zone picker (crownest_maintenance_head only) ───
+                    // ─── Zone picker (needsZone roles: maintenance head +
+                    //     zone manager) ───
                     if (needsZone) ...[
                       const SizedBox(height: 18),
                       Text('ZONES  ·  pick one or more',
@@ -306,9 +309,11 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                           }
                         }),
                       ),
-                      // Shift only applies to the maintenance head (it logs
-                      // attendance). The view-only zone manager has no shift.
-                      if (selectedRole == 'crownest_maintenance_head') ...[
+                      // Shift applies to the staff-table roles that LOG
+                      // ATTENDANCE: the maintenance head AND the zone manager
+                      // (it now marks its own attendance for its zone(s)).
+                      if (selectedRole == 'crownest_maintenance_head' ||
+                          selectedRole == 'crownest_zone_manager') ...[
                         const SizedBox(height: 18),
                         Text('SHIFT  ·  optional (a manager can set it later)',
                             style: GoogleFonts.inter(
@@ -397,7 +402,9 @@ class _ManageAccountsScreenState extends ConsumerState<ManageAccountsScreen>
                                 _snack('Pick at least one zone.');
                                 return;
                               }
-                              if (selectedRole == 'crownest_maintenance_head' &&
+                              if ((selectedRole == 'crownest_maintenance_head' ||
+                                      selectedRole ==
+                                          'crownest_zone_manager') &&
                                   (shiftStart == null) != (shiftEnd == null)) {
                                 _snack('Set both shift start and end, or leave '
                                     'both empty.');

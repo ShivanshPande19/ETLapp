@@ -37,9 +37,15 @@ from ..deps import (
     _parse_zone_court_ids,
 )
 
-# Manager-table roles this admin surface lists/manages: full-access management
-# + the view-only zone manager (also a managers row, but NOT in MANAGEMENT_ROLES).
-_MANAGER_TABLE_ROLES = tuple(MANAGEMENT_ROLES | ZONE_MANAGER_ROLES)
+# Manager-table roles this admin surface lists/manages: full-access management.
+# NOTE: the view-only crownest_zone_manager USED to be a managers row, but it now
+# lives in the STAFF table (so it can mark its own attendance + appear in the
+# roster like any staff member). It is therefore listed/managed via the staff
+# path below (_STAFF_TABLE_ROLES), not here.
+_MANAGER_TABLE_ROLES = tuple(MANAGEMENT_ROLES)
+# Staff-table roles this admin surface lists/manages: the two narrow maintenance
+# worker roles + the view-only, zone-scoped crownest_zone_manager.
+_STAFF_TABLE_ROLES = tuple(MAINTENANCE_ROLES | ZONE_MANAGER_ROLES)
 
 logger = logging.getLogger("managers")
 router = APIRouter()
@@ -286,7 +292,9 @@ _CREATABLE_ROLES = {
     "azimuth_management":        "manager",
     "crownest_ops_head":         "manager",
     "crownest_head":             "manager",
-    "crownest_zone_manager":     "manager",   # view-only, zone-scoped
+    # view-only, zone-scoped — a STAFF row so it can mark its own attendance +
+    # appear in the roster (reuses the maintenance-head attendance/roster path).
+    "crownest_zone_manager":     "staff",
     "azimuth_maintenance":       "staff",
     "crownest_maintenance_head": "staff",
 }
@@ -500,9 +508,12 @@ async def create_account(
     org = _ORG_BY_ROLE.get(role)
     random_pw = hash_password(secrets.token_urlsafe(24))
 
-    # Zone handling: only crownest_maintenance_head takes zone(s) (its attendance
-    # geofence + roster grouping) — ONE OR MORE. Shift is optional here; a
-    # manager can set it later. Both are ignored for every other role.
+    # Zone handling: crownest_maintenance_head AND crownest_zone_manager take
+    # zone(s) — ONE OR MORE (see _ZONE_REQUIRED_ROLES). For the maintenance head
+    # it drives attendance geofence + roster grouping; for the zone manager it is
+    # both its READ scope AND its attendance geofence. Shift is optional here (a
+    # manager can set it later via PATCH /staff/{id}/shift); ignored for roles
+    # that neither mark attendance nor need a zone.
     court_id = None
     zone_ids_json = None
     shift_start = None
@@ -517,9 +528,11 @@ async def create_account(
             raise HTTPException(status_code=404, detail=f"Zone(s) not found or inactive: {missing}")
         court_id = ids[0]
         zone_ids_json = json.dumps(ids)
-        # Shift applies ONLY to the maintenance head (it marks attendance); the
-        # zone manager is view-only and has no shift.
-        if role == "crownest_maintenance_head":
+        # Shift applies to the staff-table roles that LOG ATTENDANCE: the roaming
+        # maintenance head and the zone manager (it now marks its own attendance
+        # for its zones). Optional at creation; settable later from Manage
+        # Accounts / PATCH /staff/{id}/shift.
+        if role in ("crownest_maintenance_head", "crownest_zone_manager"):
             shift_start, shift_end = _validate_optional_shift(req.shift_start, req.shift_end)
 
     if kind == "manager":
@@ -593,7 +606,7 @@ def list_accounts(
 
     maint = (
         db.query(Staff)
-        .filter(Staff.role.in_(tuple(MAINTENANCE_ROLES)))
+        .filter(Staff.role.in_(_STAFF_TABLE_ROLES))
         .order_by(Staff.is_active.desc(), func.lower(Staff.name))
         .all()
     )
@@ -643,10 +656,10 @@ def deactivate_account(
         return _manager_account_out(target, court_names)
     else:
         target = db.query(Staff).filter(
-            Staff.id == account_id, Staff.role.in_(tuple(MAINTENANCE_ROLES))
+            Staff.id == account_id, Staff.role.in_(_STAFF_TABLE_ROLES)
         ).first()
         if not target:
-            raise HTTPException(status_code=404, detail="Maintenance account not found.")
+            raise HTTPException(status_code=404, detail="Account not found.")
         if user.is_staff_account and target.id == user.id:
             raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
         target.is_active = False
@@ -678,10 +691,10 @@ def reactivate_account(
         return _manager_account_out(target, court_names)
     else:
         target = db.query(Staff).filter(
-            Staff.id == account_id, Staff.role.in_(tuple(MAINTENANCE_ROLES))
+            Staff.id == account_id, Staff.role.in_(_STAFF_TABLE_ROLES)
         ).first()
         if not target:
-            raise HTTPException(status_code=404, detail="Maintenance account not found.")
+            raise HTTPException(status_code=404, detail="Account not found.")
         target.is_active = True
         db.commit(); db.refresh(target)
         court_names = {c.id: c.name for c in db.query(Court.id, Court.name).all()}

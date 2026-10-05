@@ -188,6 +188,13 @@ final routerProvider = Provider<GoRouter>((ref) {
             return '/home';
           if (loc == '/outlet-sales') return '/sales';
           if (loc == '/maintenance-home') return '/home';
+          // The view-only Crownest Zone Manager rides the management shell but
+          // may open the attendance capture screen to mark its OWN attendance
+          // (it's a staff-table identity with a shift + zone geofence).
+          if (authState.isCrownestZoneManager &&
+              loc == '/staff/mark-attendance') {
+            return null;
+          }
           // Management uses /attendance-roster, not the ETL-staff shell.
           if (loc.startsWith('/staff')) return '/home';
         }

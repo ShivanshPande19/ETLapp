@@ -279,6 +279,17 @@ def get_current_user(
     if staff:
         # Staff remain single-outlet (their own outlet only).
         staff_outlets = [staff.outlet_id] if staff.outlet_id is not None else []
+        # The view-only Crownest Zone Manager now lives in the STAFF table (so it
+        # can mark its own attendance + appear in the roster like a staff member),
+        # but it still needs its multi-zone READ scope. Populate `court_ids` from
+        # its `zone_court_ids` so every `is_zone_manager` read branch keeps
+        # scoping to exactly its assigned court(s), just as it did when the role
+        # lived in the managers table. Other staff keep court_ids=[court_id].
+        staff_court_ids = (
+            _parse_zone_court_ids(getattr(staff, "zone_court_ids", None))
+            if staff.role in ZONE_MANAGER_ROLES
+            else None
+        )
         return CurrentUser(
             id=staff.id,
             name=staff.name,
@@ -289,6 +300,7 @@ def get_current_user(
             outlet_ids=staff_outlets,
             user_type="staff",
             org=getattr(staff, "org", None),
+            court_ids=staff_court_ids,
         )
 
     raise HTTPException(status_code=401, detail="User not found or deactivated.")
