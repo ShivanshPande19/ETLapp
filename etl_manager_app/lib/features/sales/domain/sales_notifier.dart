@@ -1,4 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
+
 import '../data/sales_repository.dart';
 
 enum SalesLoadStatus { idle, loading, loaded, error }
@@ -118,6 +120,9 @@ class SalesNotifier extends Notifier<SalesState> {
   // Guards against out-of-order responses when the user taps chips quickly:
   // only the latest request is allowed to update state.
   int _reqCounter = 0;
+  // True while a background POS self-heal is running, so repeated pull-to-
+  // refreshes don't stack POS re-syncs.
+  bool _healing = false;
 
   @override
   SalesState build() {
@@ -218,22 +223,38 @@ class SalesNotifier extends Notifier<SalesState> {
 
     final repo = ref.read(salesRepositoryProvider);
 
-    // 1.5) Self-heal (pull-to-refresh only): re-sync this exact scope + window
-    //      from the POS first, then fall through to re-read the (now-healed)
-    //      cache below. Best-effort — if the POS sync fails or times out we
-    //      still read the cache, so a refresh never leaves the screen stuck.
-    if (syncFirst) {
-      try {
-        await repo.refreshFromPos(
-          courtId: nextCourtId,
-          outletId: outletId,
-          dateFrom: df,
-          dateTo: dt,
-        );
-      } catch (_) {
-        // ignore — a failed heal just means we show the existing cached numbers
-      }
-      if (reqId != _reqCounter) return; // a newer request superseded us
+    // 1.5) Self-heal (pull-to-refresh only) — runs in the BACKGROUND so the
+    //      refresh spinner only waits for the quick cache read below, NOT for
+    //      the (possibly slow) POS round-trip. When the POS re-sync finishes we
+    //      drop this window's cached entry and re-read, so a ₹0 day corrects
+    //      itself a moment later. Best-effort + guarded so repeated pulls don't
+    //      stack syncs.
+    if (syncFirst && !_healing) {
+      _healing = true;
+      unawaited(() async {
+        try {
+          await repo.refreshFromPos(
+            courtId: nextCourtId,
+            outletId: outletId,
+            dateFrom: df,
+            dateTo: dt,
+          );
+          _cache.remove(key); // force a fresh read of the now-healed cache
+          await fetchSummary(
+            courtId: courtId,
+            outletId: outletId,
+            allCourts: allCourts,
+            period: period,
+            periodOffset: periodOffset,
+            customDateFrom: customDateFrom,
+            customDateTo: customDateTo,
+          );
+        } catch (_) {
+          // best-effort — a failed heal just leaves the existing numbers
+        } finally {
+          _healing = false;
+        }
+      }());
     }
 
     // 2) Fire summary + trend in parallel. Trend is best-effort. Both use the
