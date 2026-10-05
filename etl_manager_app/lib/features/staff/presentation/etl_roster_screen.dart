@@ -12,6 +12,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../home/presentation/home_providers.dart';
+import '../../auth/domain/auth_notifier.dart';
 import '../../../app/dio_provider.dart'; // baseUrl for selfie images
 import '../../../core/widgets/skeleton.dart';
 
@@ -237,10 +238,21 @@ class _EtlRosterScreenState extends ConsumerState<EtlRosterScreen>
     final totalAbsent = totalStaff - totalPresent;
 
     final rawCourts = (data['courts'] as List?) ?? [];
-    final courts = rawCourts
+    var courts = rawCourts
         .whereType<Map>()
         .map((c) => Map<String, dynamic>.from(c))
         .toList();
+
+    // Belt-and-braces zone scoping: a view-only Crownest Zone Manager only ever
+    // sees its assigned zone(s) here (the /roster/etl endpoint already scopes
+    // this, but never rely on a single layer).
+    final auth = ref.read(authNotifierProvider);
+    if (auth.isCrownestZoneManager && auth.courtIds.isNotEmpty) {
+      final allowed = auth.courtIds.toSet();
+      courts = courts
+          .where((c) => allowed.contains(c['court_id'] as int?))
+          .toList();
+    }
 
     // Roaming maintenance heads (Crownest Maintenance Head) — not tied to any
     // one zone, shown once in their own "all zones" section.

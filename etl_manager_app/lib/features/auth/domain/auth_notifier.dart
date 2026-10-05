@@ -21,6 +21,11 @@ class AuthState {
   final String? staffName;
   final int courtId;
   final int? outletId;
+  // Assigned zone (court) ids for a zone-scoped role (crownest_zone_manager).
+  // EMPTY for full-access management (they see every zone). Used to hide every
+  // UNassigned zone's chips/options client-side, as a hard guarantee on top of
+  // the backend scoping.
+  final List<int> courtIds;
 
   const AuthState({
     this.status = AuthStatus.idle,
@@ -32,6 +37,7 @@ class AuthState {
     this.staffName,
     this.courtId = 1,
     this.outletId,
+    this.courtIds = const [],
   });
 
   // ── ROLE SPLIT ───────────────────────────────────────────────────────────
@@ -123,6 +129,7 @@ class AuthState {
     String? staffName,
     int? courtId,
     int? outletId,
+    List<int>? courtIds,
   }) {
     return AuthState(
       status: status ?? this.status,
@@ -134,6 +141,7 @@ class AuthState {
       staffName: staffName ?? this.staffName,
       courtId: courtId ?? this.courtId,
       outletId: outletId ?? this.outletId,
+      courtIds: courtIds ?? this.courtIds,
     );
   }
 }
@@ -173,6 +181,7 @@ class AuthNotifier extends Notifier<AuthState> {
 
         final courtId = int.tryParse(zone ?? '') ?? 1;
         final outletId = int.tryParse(outletStr ?? '');
+        final courtIds = await TokenStorage.getCourtIds();
 
         next = AuthState(
           status: AuthStatus.success,
@@ -183,6 +192,7 @@ class AuthNotifier extends Notifier<AuthState> {
           staffName: name,
           courtId: courtId,
           outletId: outletId,
+          courtIds: courtIds,
         );
       }
     } catch (_) {
@@ -218,6 +228,16 @@ class AuthNotifier extends Notifier<AuthState> {
           ? outletRaw
           : int.tryParse(outletRaw?.toString() ?? '');
 
+      // Assigned zone (court) ids for a zone-scoped role; empty for everyone
+      // else. Drives client-side hiding of unassigned zones.
+      final courtIdsRaw = data['court_ids'];
+      final courtIds = courtIdsRaw is List
+          ? courtIdsRaw
+                .map((e) => e is int ? e : int.tryParse(e.toString()))
+                .whereType<int>()
+                .toList()
+          : <int>[];
+
       state = state.copyWith(
         status: AuthStatus.success,
         managerName: data['manager_name'] as String?,
@@ -227,6 +247,7 @@ class AuthNotifier extends Notifier<AuthState> {
         staffName: data['manager_name'] as String?,
         courtId: courtId,
         outletId: parsedOutletId,
+        courtIds: courtIds,
       );
     } on DioException catch (e) {
       // Give the user a clear idea of WHERE the problem is, so a network issue

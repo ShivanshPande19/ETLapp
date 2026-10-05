@@ -8,6 +8,10 @@ class TokenStorage {
   static const _roleKey = 'user_role';
   static const _zoneKey = 'user_zone';
   static const _outletKey = 'user_outlet_id';
+  // Assigned zone (court) ids for a zone-scoped role (crownest_zone_manager),
+  // stored as a comma-separated list, e.g. "1,4". Empty/absent for everyone
+  // else (full-access management sees all zones).
+  static const _courtIdsKey = 'user_court_ids';
 
   // In-memory cache of the auth token. The Dio interceptor reads the token on
   // EVERY request; hitting the Keychain/Keystore each time adds noticeable
@@ -49,6 +53,27 @@ class TokenStorage {
 
   static Future<String?> getOutletId() async =>
       await _storage.read(key: _outletKey);
+
+  /// Persist the assigned zone (court) ids. Writes a CSV; clears the key when
+  /// the list is null/empty (so a full-access account never carries a stale
+  /// scope from a previous zone-manager session on a shared device).
+  static Future<void> saveCourtIds(List<int>? courtIds) async {
+    if (courtIds == null || courtIds.isEmpty) {
+      await _storage.delete(key: _courtIdsKey);
+    } else {
+      await _storage.write(key: _courtIdsKey, value: courtIds.join(','));
+    }
+  }
+
+  static Future<List<int>> getCourtIds() async {
+    final raw = await _storage.read(key: _courtIdsKey);
+    if (raw == null || raw.trim().isEmpty) return const [];
+    return raw
+        .split(',')
+        .map((s) => int.tryParse(s.trim()))
+        .whereType<int>()
+        .toList();
+  }
 
   static Future<String?> getManagerName() async =>
       await _storage.read(key: _nameKey);
