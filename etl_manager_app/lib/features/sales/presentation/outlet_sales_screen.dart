@@ -425,8 +425,9 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                       strokeWidth: 2,
                       onRefresh: () async {
                         HapticFeedback.mediumImpact();
-                        // Await so the refresh spinner stays while the POS
-                        // re-sync + re-read run (self-heals a ₹0 day).
+                        // Quick refresh (reads cache); the POS self-heal runs in
+                        // the background and a ₹0 day corrects itself a moment
+                        // later — so the spinner never hangs on the POS.
                         await ref
                             .read(salesNotifierProvider.notifier)
                             .fetchSummary(
@@ -435,8 +436,6 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                               periodOffset: salesState.periodOffset,
                               customDateFrom: salesState.customDateFrom,
                               customDateTo: salesState.customDateTo,
-                              // Pull-to-refresh re-syncs from the POS first, so a
-                              // ₹0 day (POS posted late) self-corrects.
                               syncFirst: true,
                             );
                         ref.invalidate(weeklyInsightsProvider);
