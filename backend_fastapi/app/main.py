@@ -280,11 +280,20 @@ def get_all_outlets_safe(
     # anonymous access is now blocked.
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Fetch outlets with only the fields the client needs (no PII)."""
+    """Fetch outlets with only the fields the client needs (no PII).
+
+    A view-only Crownest Zone Manager is scoped to its assigned zone(s): it only
+    ever sees outlets whose court is in its `court_ids`, so no unassigned zone's
+    outlet can leak into the app's outlet filters/name lookups."""
     from .models.sale import Outlet
 
     try:
-        rows = db.query(Outlet.id, Outlet.vendor_name, Outlet.court_id).all()
+        q = db.query(Outlet.id, Outlet.vendor_name, Outlet.court_id)
+        if user.is_zone_manager:
+            if not user.court_ids:
+                return []
+            q = q.filter(Outlet.court_id.in_(user.court_ids))
+        rows = q.all()
         return [
             {"id": r.id, "vendor_name": r.vendor_name, "court_id": r.court_id}
             for r in rows
