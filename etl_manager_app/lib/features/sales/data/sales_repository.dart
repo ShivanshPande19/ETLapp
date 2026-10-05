@@ -244,6 +244,34 @@ class SalesRepository {
     );
     return VendorHistory.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Self-healing on-demand POS re-sync for the CURRENT scope + day(s). Called
+  /// by the Sales screen's pull-to-refresh BEFORE re-reading the summary, so a
+  /// day cached at ₹0 (POS posted after the scheduled sync) self-corrects.
+  ///
+  /// A single-outlet single-day sync is one cheap POS call; a wider scope (a
+  /// court with many outlets, or a slow POS) can take longer, so this uses a
+  /// generous receive timeout instead of the default 30s.
+  Future<void> refreshFromPos({
+    int? courtId,
+    int? outletId,
+    String? dateFrom,
+    String? dateTo,
+  }) async {
+    await _dio.post(
+      '/sales/refresh',
+      queryParameters: <String, dynamic>{
+        if (courtId != null) 'court_id': courtId,
+        if (outletId != null) 'outlet_id': outletId,
+        if (dateFrom != null) 'date_from': dateFrom,
+        if (dateTo != null) 'date_to': dateTo,
+      },
+      options: Options(
+        receiveTimeout: const Duration(seconds: 90),
+        sendTimeout: const Duration(seconds: 90),
+      ),
+    );
+  }
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────

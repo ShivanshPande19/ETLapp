@@ -431,6 +431,9 @@ class _SalesScreenState extends ConsumerState<SalesScreen>
                             periodOffset: salesState.periodOffset,
                             customDateFrom: salesState.customDateFrom,
                             customDateTo: salesState.customDateTo,
+                            // Pull-to-refresh re-syncs from the POS first, so a
+                            // ₹0 day (POS posted late) self-corrects.
+                            syncFirst: true,
                           ),
                       child: SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
