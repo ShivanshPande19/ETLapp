@@ -10,6 +10,7 @@ import '../../../core/widgets/skeleton.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/token_storage.dart';
+import '../../auth/domain/auth_notifier.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../notices/presentation/notice_bell.dart';
 import 'home_providers.dart';
@@ -141,6 +142,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final auth = ref.watch(authNotifierProvider);
     final yesterdayAsync = ref.watch(homeYesterdaySalesProvider);
     final monthAsync = ref.watch(homeMonthSalesProvider);
     final courtsAsync = ref.watch(courtsNotifierProvider);
@@ -863,6 +865,88 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                           const SizedBox(height: 24),
+
+                          // ── Mark Attendance (Crownest Zone Manager only) ──
+                          // The zone manager is a staff-table identity: it marks
+                          // its OWN attendance (shift + zone geofence) via the
+                          // shared capture screen. Hidden for every other
+                          // management role (they don't log attendance).
+                          if (auth.canMarkOwnAttendance) ...[
+                            _StaggerRow(
+                              anim: _stagger(4),
+                              child: GestureDetector(
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  context.push('/staff/mark-attendance');
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(18),
+                                  decoration: BoxDecoration(
+                                    color: _black,
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _black.withOpacity(0.12),
+                                        blurRadius: 18,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 46,
+                                        height: 46,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF22C55E)
+                                              .withOpacity(0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(13),
+                                        ),
+                                        child: const Icon(
+                                          Icons.how_to_reg_rounded,
+                                          color: Color(0xFF22C55E),
+                                          size: 24,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Mark Attendance',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w800,
+                                                color: _white,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Check in / out for your zone',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 12,
+                                                color: Colors.white60,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        size: 14,
+                                        color: Colors.white.withOpacity(0.5),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
 
                           // ── Courts — stagger 4 ────────────────────────
                           _StaggerRow(

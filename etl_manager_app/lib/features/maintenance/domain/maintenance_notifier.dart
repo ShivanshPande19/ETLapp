@@ -347,6 +347,53 @@ class MaintenanceNotifier
     }
   }
 
+  // ── 4c. RAISE TICKET (Crownest Zone Manager) ──────────────────────────────
+  // Zone-level (court) OR outlet-level, but NEVER assigns a team: the backend
+  // forces it into the Crownest Ops Head triage queue (triage_status='pending')
+  // to be routed onward. court_id/outlet_id must be within the zone manager's
+  // assigned zone(s) — the backend enforces this. Returns null on success.
+  Future<String?> raiseTicketAsZoneManager({
+    required String issueType,
+    required String priority,
+    required String description,
+    required String scope, // 'general' | 'outlet'
+    int? courtId,
+    int? outletId,
+    bool isUrgent = false,
+    File? photo,
+  }) async {
+    try {
+      final dio = ref.read(dioProvider);
+
+      String? photoUrl;
+      if (photo != null) {
+        photoUrl = await PhotoUploadService.uploadMaintenancePhoto(
+          dio: dio,
+          photo: photo,
+        );
+        if (photoUrl == null) {
+          return 'Photo upload failed. Check your connection.';
+        }
+      }
+
+      await dio.post('/maintenance/', data: {
+        'issue_type': issueType,
+        'priority': priority,
+        'description': description.trim(),
+        'scope': scope,
+        if (courtId != null) 'court_id': courtId,
+        if (outletId != null) 'outlet_id': outletId,
+        'is_urgent': isUrgent,
+        if (photoUrl != null) 'photo_url': photoUrl,
+      });
+      await refresh();
+      return null;
+    } catch (e) {
+      debugPrint('❌ [MAINTENANCE_ZM_RAISE] $e');
+      return _friendlyError(e);
+    }
+  }
+
   // ── 4b. ROUTE / TRIAGE (Crownest Ops Head) ────────────────────────────────
   // Set/replace target team(s) + mentions on an existing ticket.
   Future<String?> routeTicket(

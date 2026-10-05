@@ -117,16 +117,27 @@ def _resolve_staff(user: CurrentUser, db: Session) -> Staff:
     return staff
 
 
-def _is_maintenance_head(staff: Staff) -> bool:
-    """Crownest Maintenance Head — a staff role that can cover MULTIPLE zones."""
-    return staff.role == "crownest_maintenance_head"
+# Staff roles whose attendance geofence spans MULTIPLE zones — driven by the
+# `zone_court_ids` JSON list rather than a single `court_id`:
+#   • crownest_maintenance_head — roams across every zone it's assigned to.
+#   • crownest_zone_manager     — marks its OWN attendance for its assigned
+#                                 zone(s); may check in from within ANY of them.
+_MULTI_ZONE_STAFF_ROLES = {"crownest_maintenance_head", "crownest_zone_manager"}
+
+
+def _covers_multiple_zones(staff: Staff) -> bool:
+    """True for staff roles assigned to a SET of zones (via `zone_court_ids`)
+    instead of a single court — the Crownest Maintenance Head and the Crownest
+    Zone Manager."""
+    return staff.role in _MULTI_ZONE_STAFF_ROLES
 
 
 def _assigned_courts(db: Session, staff: Staff) -> list[Court]:
-    """Every zone a staff covers. A Crownest Maintenance Head may be assigned to
-    several (zone_court_ids); everyone else has their single court (via
-    _staff_court, which also resolves an outlet staff's outlet → court)."""
-    if _is_maintenance_head(staff):
+    """Every zone a staff covers. A multi-zone role (Crownest Maintenance Head /
+    Crownest Zone Manager) may be assigned to several (zone_court_ids); everyone
+    else has their single court (via _staff_court, which also resolves an outlet
+    staff's outlet → court)."""
+    if _covers_multiple_zones(staff):
         ids: list[int] = []
         raw = getattr(staff, "zone_court_ids", None)
         if raw:

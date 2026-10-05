@@ -233,8 +233,20 @@ Future<void> openOpsRaise(BuildContext context) =>
     Navigator.of(context, rootNavigator: true)
         .push(MaterialPageRoute(builder: (_) => const OpsRaiseTicketScreen()));
 
+/// Entry point for a Crownest Zone Manager. Reuses the Ops raise screen but in
+/// a stripped-down "zone manager mode": the zone picker is already scoped to
+/// its zones (backend-scoped courts list), there is NO team/mention selection,
+/// and submit TRIAGES the ticket to the Ops Head.
+Future<void> openZoneManagerRaise(BuildContext context) =>
+    Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+        builder: (_) => const OpsRaiseTicketScreen(zoneManagerMode: true)));
+
 class OpsRaiseTicketScreen extends ConsumerStatefulWidget {
-  const OpsRaiseTicketScreen({super.key});
+  /// When true, the raiser is a Crownest Zone Manager: hide team-assignment +
+  /// mentions (the ticket is always triaged to the Ops Head) and submit via
+  /// raiseTicketAsZoneManager instead of raiseTicketAsOps.
+  final bool zoneManagerMode;
+  const OpsRaiseTicketScreen({super.key, this.zoneManagerMode = false});
   @override
   ConsumerState<OpsRaiseTicketScreen> createState() =>
       _OpsRaiseTicketScreenState();
@@ -279,24 +291,37 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
       _snack(context, 'Select an outlet.');
       return;
     }
-    if (_targets.isEmpty) {
+    // A zone manager never picks a team (the ticket is triaged to the Ops Head);
+    // the Ops Head must choose at least one.
+    if (!widget.zoneManagerMode && _targets.isEmpty) {
       _snack(context, 'Choose at least one team to assign.');
       return;
     }
     setState(() => _busy = true);
-    final err =
-        await ref.read(maintenanceNotifierProvider.notifier).raiseTicketAsOps(
-              issueType: _issueType,
-              priority: _priority,
-              description: desc,
-              scope: _scope,
-              courtId: _scope == 'general' ? _courtId : null,
-              outletId: _scope == 'outlet' ? _outletId : null,
-              targetTeams: _targets.toList(),
-              mentions: _mentionPayload(_mentions),
-              isUrgent: _urgent,
-              photo: _photo,
-            );
+    final notifier = ref.read(maintenanceNotifierProvider.notifier);
+    final err = widget.zoneManagerMode
+        ? await notifier.raiseTicketAsZoneManager(
+            issueType: _issueType,
+            priority: _priority,
+            description: desc,
+            scope: _scope,
+            courtId: _scope == 'general' ? _courtId : null,
+            outletId: _scope == 'outlet' ? _outletId : null,
+            isUrgent: _urgent,
+            photo: _photo,
+          )
+        : await notifier.raiseTicketAsOps(
+            issueType: _issueType,
+            priority: _priority,
+            description: desc,
+            scope: _scope,
+            courtId: _scope == 'general' ? _courtId : null,
+            outletId: _scope == 'outlet' ? _outletId : null,
+            targetTeams: _targets.toList(),
+            mentions: _mentionPayload(_mentions),
+            isUrgent: _urgent,
+            photo: _photo,
+          );
     if (!mounted) return;
     setState(() => _busy = false);
     if (err == null) {
@@ -574,44 +599,75 @@ class _OpsRaiseTicketScreenState extends ConsumerState<OpsRaiseTicketScreen> {
                       ),
                     const SizedBox(height: 22),
 
-                    _sectionLabel('ASSIGN TO TEAM(S)'),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final t in _targetTeams)
-                          _chip(
-                            label: t.$2,
-                            selected: _targets.contains(t.$1),
-                            showCheck: true,
-                            onTap: () => setState(() => _targets.contains(t.$1)
-                                ? _targets.remove(t.$1)
-                                : _targets.add(t.$1)),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 22),
+                    // Team assignment + mentions are OPS-HEAD only. A zone
+                    // manager's ticket is always triaged to the Ops Head, who
+                    // then routes it onward — so hide these for it.
+                    if (!widget.zoneManagerMode) ...[
+                      _sectionLabel('ASSIGN TO TEAM(S)'),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final t in _targetTeams)
+                            _chip(
+                              label: t.$2,
+                              selected: _targets.contains(t.$1),
+                              showCheck: true,
+                              onTap: () => setState(() => _targets.contains(t.$1)
+                                  ? _targets.remove(t.$1)
+                                  : _targets.add(t.$1)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 22),
+                      _sectionLabel('ALSO NOTIFY  ·  optional'),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final r in _mentionRoles)
+                            _chip(
+                              label: r.$2,
+                              selected: _mentions.contains(r.$1),
+                              showCheck: true,
+                              onTap: () => setState(() =>
+                                  _mentions.contains(r.$1)
+                                      ? _mentions.remove(r.$1)
+                                      : _mentions.add(r.$1)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 30),
+                    ],
 
-                    _sectionLabel('ALSO NOTIFY  ·  optional'),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final r in _mentionRoles)
-                          _chip(
-                            label: r.$2,
-                            selected: _mentions.contains(r.$1),
-                            showCheck: true,
-                            onTap: () => setState(() =>
-                                _mentions.contains(r.$1)
-                                    ? _mentions.remove(r.$1)
-                                    : _mentions.add(r.$1)),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 30),
+                    if (widget.zoneManagerMode) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F5F5),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.info_outline_rounded,
+                                size: 15, color: _grey),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'This ticket goes to the Crownest Ops Head, '
+                                'who routes it to the right maintenance team.',
+                                style: GoogleFonts.inter(
+                                    color: _grey, fontSize: 11, height: 1.4),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                    ],
 
                     _submitBtn('Raise ticket', _busy, _submit),
                   ],

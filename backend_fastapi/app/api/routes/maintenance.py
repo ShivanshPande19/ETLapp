@@ -425,8 +425,12 @@ MANAGEMENT_TIER_ROLES = ["azimuth_management", "crownest_head"]
 
 
 def _notify_triage(db: Session, issue: MaintenanceIssue) -> None:
-    """Outlet-raised ticket → land in the Crownest Ops Head triage queue."""
+    """Outlet- or zone-manager-raised ticket → land in the Crownest Ops Head
+    triage queue to be routed to a maintenance team."""
     urgency = " — HIGH PRIORITY" if (issue.priority or "").lower() == "high" else ""
+    # Prefer the outlet name (outlet ticket); fall back to the raiser's name
+    # (a zone-level ticket has no outlet) so the ops head sees WHO raised it.
+    raised_by = issue.outlet_name or issue.staff_name or "Someone"
     try:
         create_notice(
             db,
@@ -434,7 +438,7 @@ def _notify_triage(db: Session, issue: MaintenanceIssue) -> None:
             type="maintenance_triage",
             title=f"New ticket to route{urgency}",
             body=(
-                f"{issue.outlet_name or 'An outlet'} raised a {issue.issue_type} issue "
+                f"{raised_by} raised a {issue.issue_type} issue "
                 f"at {issue.court_name or 'the court'}: {issue.description[:120]}"
             ),
             court_id=issue.court_id,
@@ -544,9 +548,14 @@ async def raise_ticket(
     • **Outlet manager/staff** — raise for their OWN outlet (resolved from
       membership); the ticket lands in the ops-head TRIAGE queue
       (triage_status='pending', no targets) to be routed.
+    • **Crownest Zone Manager** — raise for its OWN zone(s), court-level OR
+      outlet-level, but NEVER assigns a team: like an outlet raise it lands in
+      the ops-head TRIAGE queue (triage_status='pending') to be routed onward
+      (Azimuth vs Crownest Maintenance) by the Ops Head.
     """
     is_ops = user.is_ops_head
-    if not (is_ops or user.is_outlet_user):
+    is_zone_mgr = user.is_zone_manager
+    if not (is_ops or user.is_outlet_user or is_zone_mgr):
         raise HTTPException(status_code=403, detail="You cannot raise maintenance tickets.")
 
     scope = "outlet"
@@ -579,6 +588,37 @@ async def raise_ticket(
             court = db.query(Court).filter(Court.id == outlet.court_id).first()
             if not court:
                 raise HTTPException(status_code=404, detail="Associated court not found.")
+    elif is_zone_mgr:
+        # Zone manager → court-level OR outlet-level ticket, but ONLY within its
+        # assigned zone(s). It never sets a target team; the ticket is triaged to
+        # the Crownest Ops Head (triage_status='pending' below) to be routed.
+        if not user.court_ids:
+            raise HTTPException(status_code=403, detail="No zone assigned to your account.")
+        allowed = set(user.court_ids)
+        scope = (body.scope or "outlet").lower()
+        if scope not in ("general", "outlet"):
+            raise HTTPException(status_code=400, detail="scope must be 'general' or 'outlet'.")
+        is_urgent = bool(body.is_urgent)
+
+        if scope == "general":
+            if body.court_id is None:
+                raise HTTPException(status_code=400, detail="court_id (zone) is required for a general ticket.")
+            if body.court_id not in allowed:
+                raise HTTPException(status_code=403, detail="You can only raise tickets for your own zone(s).")
+            court = db.query(Court).filter(Court.id == body.court_id, Court.is_active == 1).first()
+            if not court:
+                raise HTTPException(status_code=404, detail="Court (zone) not found.")
+        else:  # outlet-specific — the outlet must sit inside one of its zones
+            if body.outlet_id is None:
+                raise HTTPException(status_code=400, detail="outlet_id is required for an outlet ticket.")
+            outlet = db.query(Outlet).filter(Outlet.id == body.outlet_id, Outlet.is_active == 1).first()
+            if not outlet:
+                raise HTTPException(status_code=404, detail="Outlet not found or inactive.")
+            court = db.query(Court).filter(Court.id == outlet.court_id).first()
+            if not court:
+                raise HTTPException(status_code=404, detail="Associated court not found.")
+            if court.id not in allowed:
+                raise HTTPException(status_code=403, detail="That outlet is not in your zone(s).")
     else:
         # Outlet user → their OWN outlet, resolved from membership (never trusted
         # blindly): single-outlet caller may omit outlet_id; a multi-outlet owner
@@ -644,7 +684,8 @@ async def raise_ticket(
             db.commit()
         _dispatch_routed_notifications(db, issue)
     else:
-        # Outlet-raised: lands in the Crownest Ops Head triage queue to be routed.
+        # Outlet- OR zone-manager-raised: lands in the Crownest Ops Head triage
+        # queue (no target team yet) to be routed onward.
         _notify_triage(db, issue)
     return _to_out(issue)
 
