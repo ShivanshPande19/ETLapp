@@ -404,7 +404,7 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                               _InfoTile(
                                 icon: Icons.verified_rounded,
                                 label: 'App Version',
-                                value: '1.0.0 (Phase 1)',
+                                value: '1.0.3 (Phase 1)',
                                 valueColor: AppTheme.success,
                               ),
                               _GroupDivider(),
