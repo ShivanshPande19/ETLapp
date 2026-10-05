@@ -150,6 +150,10 @@ class SalesNotifier extends Notifier<SalesState> {
     int periodOffset = 0, // 0 = this, 1 = previous week/month/year, …
     String? customDateFrom,
     String? customDateTo,
+    // Pull-to-refresh self-heal: when true, re-sync this scope + day(s) from the
+    // POS BEFORE re-reading the cache, so a day stuck at ₹0 (POS posted after
+    // the scheduled sync) corrects itself. Default false → normal cache read.
+    bool syncFirst = false,
   }) async {
     final nextCourtId = allCourts ? null : courtId;
     final periodStr = _periodStr(period);
@@ -213,6 +217,24 @@ class SalesNotifier extends Notifier<SalesState> {
     }
 
     final repo = ref.read(salesRepositoryProvider);
+
+    // 1.5) Self-heal (pull-to-refresh only): re-sync this exact scope + window
+    //      from the POS first, then fall through to re-read the (now-healed)
+    //      cache below. Best-effort — if the POS sync fails or times out we
+    //      still read the cache, so a refresh never leaves the screen stuck.
+    if (syncFirst) {
+      try {
+        await repo.refreshFromPos(
+          courtId: nextCourtId,
+          outletId: outletId,
+          dateFrom: df,
+          dateTo: dt,
+        );
+      } catch (_) {
+        // ignore — a failed heal just means we show the existing cached numbers
+      }
+      if (reqId != _reqCounter) return; // a newer request superseded us
+    }
 
     // 2) Fire summary + trend in parallel. Trend is best-effort. Both use the
     //    same effective window (df/dt), so the chart matches the selection —

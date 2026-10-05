@@ -1,10 +1,11 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...core.query_utils import now_ist
 from ...schemas.sale import (
     SalesSummaryResponse, VendorHistoryResponse, SalesTrendResponse, SalesCompareResponse,
 )
@@ -301,3 +302,110 @@ async def resync_outlet(
         db.rollback()
         raise HTTPException(status_code=502, detail="Resync failed — check POS credentials / connectivity.")
     return result
+
+
+# ─── Self-healing on-demand refresh (any in-scope user) ──────────────────────
+#
+# Pull-to-refresh on the Sales screen triggers this. It re-fetches the caller's
+# CURRENT scope + day(s) straight from the POS and recomputes DailySaleCache, so
+# a day that read ₹0 (because the scheduled sync ran before the POS had posted)
+# self-corrects immediately instead of waiting for the next scheduled sync.
+#
+# Unlike /sync and /resync (ETL-manager-only, whole-court/arbitrary-range tools),
+# this is available to EVERY authenticated user but strictly scoped by
+# _scope_outlets — you can only refresh outlets you can already read. Caps keep a
+# user-initiated refresh cheap (one POS call per day per outlet).
+
+# Caps so a refresh can never fan out into a huge POS job.
+_REFRESH_MAX_OUTLETS = 40
+_REFRESH_MAX_DAYS = 7
+
+
+def _refresh_target_outlets(
+    db: Session,
+    court_id: Optional[int],
+    outlet_id: Optional[int],
+    outlet_ids: Optional[list[int]],
+) -> list[Outlet]:
+    """Active outlets to re-sync, from the already scope-checked tuple returned
+    by _scope_outlets (so this can never widen the caller's scope)."""
+    q = db.query(Outlet).filter(Outlet.is_active == 1)
+    if outlet_id is not None:
+        q = q.filter(Outlet.id == outlet_id)
+    elif outlet_ids is not None:
+        if not outlet_ids:
+            return []
+        q = q.filter(Outlet.id.in_(outlet_ids))
+    elif court_id is not None:
+        q = q.filter(Outlet.court_id == court_id)
+    # else: ETL manager, whole company → every active outlet.
+    return q.all()
+
+
+def _refresh_date_window(
+    date_from: Optional[str], date_to: Optional[str]
+) -> tuple[date, date]:
+    """Day(s) to re-sync. Defaults to IST 'yesterday' (the day most likely to be
+    stale at ₹0); honours an explicit window but caps the span so a refresh stays
+    cheap (one POS call per day per outlet)."""
+    if date_from and date_to:
+        try:
+            d_from = date.fromisoformat(date_from)
+            d_to = date.fromisoformat(date_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD")
+        if d_from > d_to:
+            d_from, d_to = d_to, d_from
+        # Only heal the most recent window — clamp to the last N days.
+        if (d_to - d_from).days > _REFRESH_MAX_DAYS - 1:
+            d_from = d_to - timedelta(days=_REFRESH_MAX_DAYS - 1)
+        return d_from, d_to
+    # A preset (yesterday/week/month/…) sends no explicit window → heal yesterday.
+    yesterday = now_ist().date() - timedelta(days=1)
+    return yesterday, yesterday
+
+
+@router.post("/refresh")
+async def refresh_sales(
+    court_id: Optional[int] = Query(None),
+    outlet_id: Optional[int] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Self-healing POS re-sync for the caller's current scope + day(s).
+
+    Scope is resolved with the SAME rules as /summary (_scope_outlets): a user
+    can only ever refresh outlets it can already read — no privilege escalation.
+    Each outlet syncs in its own transaction (one failure never aborts the rest),
+    and resync_outlet_range's safety means a transient POS failure can never
+    blank a good day to ₹0.
+    """
+    s_court_id, s_outlet_id, s_outlet_ids = _scope_outlets(user, court_id, outlet_id, db)
+    outlets = _refresh_target_outlets(db, s_court_id, s_outlet_id, s_outlet_ids)
+    d_from, d_to = _refresh_date_window(date_from, date_to)
+
+    capped = len(outlets) > _REFRESH_MAX_OUTLETS
+    outlets = outlets[:_REFRESH_MAX_OUTLETS]
+
+    synced = 0
+    failed = 0
+    for outlet in outlets:
+        try:
+            await resync_outlet_range(
+                db=db, outlet=outlet, date_from=d_from, date_to=d_to, purge=True
+            )
+            synced += 1
+        except Exception:
+            db.rollback()
+            failed += 1
+
+    return {
+        "outlets": len(outlets),
+        "synced": synced,
+        "failed": failed,
+        "date_from": d_from.isoformat(),
+        "date_to": d_to.isoformat(),
+        "capped": capped,
+    }
