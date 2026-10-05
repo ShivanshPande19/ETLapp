@@ -21,7 +21,22 @@ class AuthRepository {
     await TokenStorage.saveRole(data['role']);
     await TokenStorage.saveZone(data['zone']?.toString());
     await TokenStorage.saveOutletId(data['outlet_id']?.toString());
+    // Assigned zone (court) ids for a zone-scoped role (crownest_zone_manager),
+    // so the app can hide every other zone's chips/options client-side.
+    await TokenStorage.saveCourtIds(_parseCourtIds(data['court_ids']));
     return data;
+  }
+
+  /// Parse the login response's `court_ids` (a JSON list, or null) into a
+  /// clean `List<int>`. Returns [] when absent/empty/malformed.
+  List<int> _parseCourtIds(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .map((e) => e is int ? e : int.tryParse(e.toString()))
+          .whereType<int>()
+          .toList();
+    }
+    return const [];
   }
 
   Future<void> logout() async {

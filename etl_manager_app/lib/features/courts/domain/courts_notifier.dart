@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/courts_repository.dart';
+import '../../auth/domain/auth_notifier.dart';
 
 class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
   @override
@@ -13,7 +14,17 @@ class CourtsNotifier extends Notifier<AsyncValue<List<Court>>> {
   Future<void> fetchCourts() async {
     state = const AsyncValue.loading();
     try {
-      final courts = await ref.read(courtsRepositoryProvider).getCourts();
+      var courts = await ref.read(courtsRepositoryProvider).getCourts();
+      // Belt-and-braces zone scoping: a view-only Crownest Zone Manager must
+      // NEVER see an unassigned zone's chip/option anywhere in the app. The
+      // backend already scopes /courts/, but we also hard-filter here so a
+      // single missed endpoint can't re-expose other zones. (No-op for
+      // full-access management, whose courtIds is empty → sees every zone.)
+      final auth = ref.read(authNotifierProvider);
+      if (auth.isCrownestZoneManager && auth.courtIds.isNotEmpty) {
+        final allowed = auth.courtIds.toSet();
+        courts = courts.where((c) => allowed.contains(c.id)).toList();
+      }
       state = AsyncValue.data(courts);
     } catch (e, st) {
       state = AsyncValue.error(e, st);

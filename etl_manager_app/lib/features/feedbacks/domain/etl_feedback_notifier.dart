@@ -324,12 +324,25 @@ class EtlFeedbackNotifier extends Notifier<AsyncValue<EtlFeedbackData>> {
         SimpleOutlet.fromJson,
       );
 
+      // Belt-and-braces zone scoping: for a view-only Crownest Zone Manager,
+      // hide every unassigned zone's court chip AND its outlets from the filter
+      // (backend already scopes these, but never rely on a single layer).
+      final auth = ref.read(authNotifierProvider);
+      final scoped = auth.isCrownestZoneManager && auth.courtIds.isNotEmpty;
+      final allowedCourtIds = auth.courtIds.toSet();
+      final scopedCourts = scoped
+          ? courts.where((c) => allowedCourtIds.contains(c.id)).toList()
+          : courts;
+      final scopedOutlets = scoped
+          ? outlets.where((o) => allowedCourtIds.contains(o.courtId)).toList()
+          : outlets;
+
       state = AsyncValue.data(
         EtlFeedbackData(
           feedbacks: firstPage,
           analytics: analytics,
-          courts: courts,
-          outlets: outlets,
+          courts: scopedCourts,
+          outlets: scopedOutlets,
           selectedCourtId: courtId,
           selectedOutletId: outletId,
           selectedDate: date,
