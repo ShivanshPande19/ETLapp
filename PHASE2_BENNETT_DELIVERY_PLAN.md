@@ -159,15 +159,23 @@ Confirm current MDR slabs with the chosen aggregator before going live.
 ### 6.1 The honest constraint
 Our existing POS adapters are **read-only** (they *pull* completed sales for
 `DailySaleCache`). **Pushing a new order INTO a POS is a different API and is
-POS-specific:**
+POS-specific.** Researched capability (Oct 2026):
 
-| POS | Order-push into POS? |
-|---|---|
-| Petpooja | Yes — has an order/"save order" API (can inject into POS/KDS). Per-outlet setup. |
-| Rista | Likely yes (has APIs) — needs credentials/verification. |
-| Royal POS | The API we use is read-only completed-orders; order-push **not confirmed** (treat as "no push"). |
+| POS | Order-push into POS? | How |
+|---|---|---|
+| **Petpooja** | ✅ **Yes** | Online Ordering / Orders API — `POST /save_order` "push a new order into the Petpooja POS" (the same mechanism Swiggy/Zomato use); Stores API for store on/off + item stock. Auth: `access-token` header, per outlet. Must be enabled as an integration partner per outlet. |
+| **Rista** | ✅ **Yes** | REST API `api.ristaapps.com/v1` with `sale` (orders), `catalog` (menu), `inventory` (stock) resources (JSON). Per-outlet API key required. |
+| **Royal POS** | ⚠️ **Not confirmed (treat as no push)** | Only the read-only `get_completed_orders_item_wise_dynamic` endpoint is known. No public order-push API found (small POS, Swiftomatics). Must confirm with the vendor; until then, Royal outlets use the in-app fallback. |
 
-So POS-push **cannot be a hard dependency** — not every outlet supports it.
+So POS-push **cannot be a hard dependency** — Petpooja & Rista can receive pushed
+orders; Royal (for now) cannot.
+
+**Two operational prerequisites for push (Petpooja/Rista):**
+1. **Partner enablement** — the online-ordering API must be enabled + credentials
+   issued **per outlet** (like becoming a Swiggy/Zomato partner). One-time setup.
+2. **Menu-ID mapping** — `save_order` references the POS's own item IDs, so for
+   Petpooja/Rista outlets we **import the menu from the POS** (ids + prices) and
+   students order against those ids. Royal outlets get a manual in-app menu.
 
 ### 6.2 Two-layer design (works for ALL outlets)
 1. **Primary (universal): in-app order management.** The outlet-manager app gets
@@ -183,10 +191,15 @@ Our sales sync **pulls completed orders** from the POS into `DailySaleCache`. If
 delivery order is **also** pushed into the POS, it would be counted **twice**
 (once as a delivery order in our DB, once via the POS pull).
 
-**Decision needed (see §15):** cleanest model is to treat **delivery revenue as a
-separate stream** (`source = "etl_delivery"`) in our own tables and show it
-distinctly from POS/dine-in sales; if we push to POS *for the kitchen only*, mark
-those rows so the sales pull can exclude/reconcile them.
+**Refined by the POS research:**
+- **Push outlets (Petpooja/Rista):** a pushed delivery order becomes a POS order,
+  so the **existing sales sync already captures it** in `DailySaleCache` — POS is
+  the single source of truth. Do **not** separately add these to delivery revenue
+  (tag them so reporting doesn't double-count).
+- **Non-push outlets (Royal):** the delivery order lives only in our system, so we
+  **do** count its revenue from our own tables (`source = "etl_delivery"`).
+
+So the double-count rule follows the push flag per outlet, not a blanket choice.
 
 ---
 
