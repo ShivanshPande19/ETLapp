@@ -4,7 +4,8 @@ This is the flow The Momo Box already runs on, moved verbatim behind the adapter
 interface. Behaviour is intentionally **identical** to the pre-refactor
 ``petpooja_service`` code:
 
-* auth via JSON body + ``Cookie: PETPOOJA_API=<cookie>``;
+* auth via JSON body + ``Cookie: PETPOOJA_API=<cookie>``, sent as a **POST**
+  (Petpooja's edge started rejecting GET-with-body on 7 Oct 2026; see fetch_raw);
 * per-outlet creds with fallback to global settings;
 * business day taken from each bill's own ``order_date`` field (Petpooja already
   files post-midnight bills under the previous operational day), falling back to
@@ -59,10 +60,16 @@ async def fetch_raw(
 
     logger.info(f"[PETPOOJA FETCH START] rest_id={rest_id} order_date={order_date}")
 
+    # POST, not GET. This used to send the JSON body on a GET request. Around
+    # 7 Oct 2026 Petpooja's edge (CloudFront) began rejecting GET-with-body with
+    # an HTML 403 "The request could not be satisfied". fetch_normalized_orders
+    # catches that per date, so every generic outlet silently synced 0 bills and
+    # the day stayed frozen at its last good snapshot. The same endpoint accepts
+    # POST with the identical JSON body (verified: POST reaches Petpooja's
+    # credential check, while GET-with-body is blocked at the edge).
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.request(
-            method="GET",
-            url=PETPOOJA_URL,
+        resp = await client.post(
+            PETPOOJA_URL,
             headers=headers,
             json=payload,
         )
