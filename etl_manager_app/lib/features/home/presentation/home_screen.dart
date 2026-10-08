@@ -13,6 +13,7 @@ import '../../../core/utils/token_storage.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../notices/presentation/notice_bell.dart';
+import '../../staff/domain/attendance_notifier.dart';
 import 'home_providers.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -91,6 +92,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _cardsCtrl.forward();
 
     _loadName();
+
+    // Crownest Zone Manager marks its own attendance from this screen, so load
+    // today's status (checked in / out) to drive the attendance card.
+    if (ref.read(authNotifierProvider).canMarkOwnAttendance) {
+      Future.microtask(
+        () => ref.read(attendanceNotifierProvider.notifier).loadToday(),
+      );
+    }
   }
 
   @override
@@ -123,6 +132,75 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       homeFeedbacksProvider,
     ); // 🟢 FIX: Updated to Feedbacks Provider
     ref.invalidate(homeMaintenanceProvider);
+    if (ref.read(authNotifierProvider).canMarkOwnAttendance) {
+      ref.read(attendanceNotifierProvider.notifier).loadToday();
+    }
+  }
+
+  // ─── Zone Manager self-attendance ───────────────────────────────────────────
+  // MarkAttendanceScreen only CAPTURES the selfie + location and pops them back;
+  // the caller must SUBMIT them (exactly like StaffHomeScreen and
+  // MaintenanceHomeScreen do). Previously this card only opened the camera and
+  // discarded the result, so the photo was taken but never uploaded.
+  Future<void> _onAttendanceTap() async {
+    HapticFeedback.selectionClick();
+    final att = ref.read(attendanceNotifierProvider);
+    if (att.status == AttendanceStatus.loading) return;
+    if (att.isCheckedOut) {
+      _toast('Your shift for today is already complete.');
+      return;
+    }
+    final checkingOut = att.isCheckedIn;
+
+    final result = await context.push('/staff/mark-attendance');
+    if (!mounted || result is! Map) return;
+
+    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
+    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
+    final imagePath = result['image_path'] as String?;
+    final accuracy = (result['accuracy'] as num?)?.toDouble();
+    final isMocked = result['is_mocked'] == true;
+    if (lat == 0.0 && lng == 0.0) {
+      _toast('Could not capture location. Try again.', isError: true);
+      return;
+    }
+
+    final notifier = ref.read(attendanceNotifierProvider.notifier);
+    if (checkingOut) {
+      await notifier.checkOut(
+        lat: lat,
+        lng: lng,
+        imagePath: imagePath,
+        accuracy: accuracy,
+        isMocked: isMocked,
+      );
+    } else {
+      if (imagePath == null) {
+        _toast('Could not capture photo. Try again.', isError: true);
+        return;
+      }
+      await notifier.markAttendance(
+        lat: lat,
+        lng: lng,
+        imagePath: imagePath,
+        accuracy: accuracy,
+        isMocked: isMocked,
+      );
+    }
+  }
+
+  void _toast(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor:
+              isError ? const Color(0xFFEF4444) : const Color(0xFF22C55E),
+          content: Text(msg),
+        ),
+      );
   }
 
   String _fmt(double v) {
@@ -143,6 +221,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authNotifierProvider);
+
+    // Zone Manager attendance card state + result toasts.
+    final att = ref.watch(attendanceNotifierProvider);
+    ref.listen<AttendanceState>(attendanceNotifierProvider, (prev, next) {
+      if (!auth.canMarkOwnAttendance) return;
+      if (prev?.status == next.status) return;
+      if (next.status == AttendanceStatus.success) {
+        _toast(
+          next.isCheckedOut
+              ? 'Checked out. Shift complete!'
+              : 'Checked in successfully!',
+        );
+      } else if (next.status == AttendanceStatus.error) {
+        _toast(next.errorMessage ?? 'Something went wrong.', isError: true);
+        // Re-sync with the server so the card reflects the real state.
+        ref.read(attendanceNotifierProvider.notifier).loadToday();
+      }
+    });
+    final bool attBusy = att.status == AttendanceStatus.loading;
+    final String attTitle = att.isShiftActive ? 'Check Out' : 'Mark Attendance';
+    final String attSubtitle;
+    if (attBusy) {
+      attSubtitle = 'Uploading…';
+    } else if (att.loadingToday) {
+      attSubtitle = 'Loading today’s status…';
+    } else if (att.isCheckedOut) {
+      attSubtitle = 'Shift complete for today';
+    } else if (att.isCheckedIn && att.today.checkInTime != null) {
+      attSubtitle =
+          'Checked in at ${TimeOfDay.fromDateTime(att.today.checkInTime!).format(context)} · tap to check out';
+    } else {
+      attSubtitle = 'Tap to check in for your shift';
+    }
+
     final yesterdayAsync = ref.watch(homeYesterdaySalesProvider);
     final monthAsync = ref.watch(homeMonthSalesProvider);
     final courtsAsync = ref.watch(courtsNotifierProvider);
@@ -875,10 +987,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             _StaggerRow(
                               anim: _stagger(4),
                               child: GestureDetector(
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  context.push('/staff/mark-attendance');
-                                },
+                                onTap: attBusy ? null : _onAttendanceTap,
                                 child: Container(
                                   padding: const EdgeInsets.all(18),
                                   decoration: BoxDecoration(
@@ -903,11 +1012,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                           borderRadius:
                                               BorderRadius.circular(13),
                                         ),
-                                        child: const Icon(
-                                          Icons.how_to_reg_rounded,
-                                          color: Color(0xFF22C55E),
-                                          size: 24,
-                                        ),
+                                        child: attBusy
+                                            ? const Padding(
+                                                padding: EdgeInsets.all(13),
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Color(0xFF22C55E),
+                                                ),
+                                              )
+                                            : Icon(
+                                                att.isCheckedOut
+                                                    ? Icons.task_alt_rounded
+                                                    : (att.isShiftActive
+                                                        ? Icons.logout_rounded
+                                                        : Icons
+                                                            .how_to_reg_rounded),
+                                                color: const Color(0xFF22C55E),
+                                                size: 24,
+                                              ),
                                       ),
                                       const SizedBox(width: 14),
                                       Expanded(
@@ -916,7 +1039,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              'Mark Attendance',
+                                              attTitle,
                                               style: GoogleFonts.inter(
                                                 fontSize: 15,
                                                 fontWeight: FontWeight.w800,
@@ -925,7 +1048,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
-                                              'Check in / out for your zone',
+                                              attSubtitle,
                                               style: GoogleFonts.inter(
                                                 fontSize: 12,
                                                 color: Colors.white60,
