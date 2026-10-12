@@ -30,5 +30,15 @@ def distance_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float
 # a poor fix doesn't let someone mark attendance from far away.
 MAX_ACCURACY_BUFFER_M = 75.0
 
+# Beyond this reported accuracy a fix carries no information about whether the
+# device sits inside a ~150 m circle: it could be anywhere within a radius
+# larger than the zone itself. Such a fix must NOT be used to reject a check-in
+# as "outside your zone" (that produced a daily false rejection for staff
+# standing inside their court, usually because Android 12+ "Approximate
+# location" was granted, which reports accuracy in kilometres). The client
+# refuses to submit one and the server refuses to judge one — both say so
+# plainly instead.
+MAX_TRUSTED_ACCURACY_M = 200.0
+
 # Fallback radius used when a court has a location set but no explicit radius.
 DEFAULT_GEOFENCE_RADIUS_M = 150

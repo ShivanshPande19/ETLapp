@@ -19,6 +19,14 @@ class AttendanceToday {
   final String? checkOutAddress;
   final int? workDurationMinutes;
 
+  /// Checked out before the scheduled shift end (a notice was raised).
+  final bool earlyCheckout;
+
+  /// The hourly sweep closed a forgotten check-out. The API has always sent
+  /// these two flags; the client used to drop them, so staff could never see
+  /// why yesterday showed up orange on their calendar.
+  final bool autoClosed;
+
   const AttendanceToday({
     this.attendanceId,
     this.checkedIn = false,
@@ -29,6 +37,8 @@ class AttendanceToday {
     this.checkOutTime,
     this.checkOutAddress,
     this.workDurationMinutes,
+    this.earlyCheckout = false,
+    this.autoClosed = false,
   });
 
   const AttendanceToday.empty()
@@ -40,7 +50,9 @@ class AttendanceToday {
       checkedOut = false,
       checkOutTime = null,
       checkOutAddress = null,
-      workDurationMinutes = null;
+      workDurationMinutes = null,
+      earlyCheckout = false,
+      autoClosed = false;
 
   factory AttendanceToday.fromJson(Map<String, dynamic> json) {
     DateTime? parse(String? s) {
@@ -62,6 +74,8 @@ class AttendanceToday {
       checkOutTime: parse(json['check_out_time']?.toString()),
       checkOutAddress: json['check_out_address'],
       workDurationMinutes: json['work_duration_minutes'],
+      earlyCheckout: json['early_checkout'] == true,
+      autoClosed: json['auto_closed'] == true,
     );
   }
 }
@@ -107,6 +121,16 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
   @override
   AttendanceState build() => const AttendanceState();
 
+  /// A photo upload needs a longer leash than a JSON call: the global 30 s
+  /// send timeout used to abort a half-finished selfie on a weak 4G cell and
+  /// report "failed to check in" even though the punch was still in flight.
+  /// (The selfie is compressed before it gets here — see
+  /// PhotoUploadService.compressForUpload — so this is headroom, not the norm.)
+  static final Options _uploadOptions = Options(
+    sendTimeout: const Duration(seconds: 90),
+    receiveTimeout: const Duration(seconds: 60),
+  );
+
   // Fetch today's status so the home screen survives app restarts.
   Future<void> loadToday() async {
     state = state.copyWith(loadingToday: true);
@@ -141,7 +165,11 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
         'photo': await MultipartFile.fromFile(imagePath, filename: 'checkin.jpg'),
       });
 
-      final res = await dio.post('/attendance/check-in', data: formData);
+      final res = await dio.post(
+        '/attendance/check-in',
+        data: formData,
+        options: _uploadOptions,
+      );
       state = state.copyWith(
         status: AttendanceStatus.success,
         today: AttendanceToday.fromJson(res.data as Map<String, dynamic>),
@@ -181,6 +209,7 @@ class AttendanceNotifier extends Notifier<AttendanceState> {
       final res = await dio.post(
         '/attendance/check-out',
         data: FormData.fromMap(map),
+        options: _uploadOptions,
       );
       state = state.copyWith(
         status: AttendanceStatus.success,

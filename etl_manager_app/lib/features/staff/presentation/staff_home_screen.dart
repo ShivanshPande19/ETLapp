@@ -15,6 +15,7 @@ import 'package:collection/collection.dart';
 import '../../staff/domain/housekeeping_models.dart' as hk;
 import '../../staff/data/housekeeping_repository.dart';
 import '../domain/attendance_notifier.dart';
+import '../domain/attendance_flow.dart';
 import '../../feedbacks/domain/court_feedback_notifier.dart';
 import '../../feedbacks/presentation/staff_court_feedback_screen.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
@@ -201,55 +202,21 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
 
   // ─── Attendance flows ───────────────────────────────────────────────────────
 
-  Future<void> _startCheckIn() async {
-    HapticFeedback.selectionClick();
-    final result = await context.push('/staff/mark-attendance');
-    if (!mounted || result is! Map) return;
+  // Capture + submit both live in AttendanceFlow, shared with every other
+  // role's home screen, so this logic exists exactly once.
+  Future<void> _startCheckIn() => AttendanceFlow.run(
+        context,
+        ref,
+        AttendanceAction.checkIn,
+        notify: _toast,
+      );
 
-    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
-    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
-    final imagePath = result['image_path'] as String?;
-    if ((lat == 0.0 && lng == 0.0) || imagePath == null) {
-      _toast('Could not capture location/photo. Try again.', isError: true);
-      return;
-    }
-    final accuracy = (result['accuracy'] as num?)?.toDouble();
-    final isMocked = result['is_mocked'] == true;
-    await ref
-        .read(attendanceNotifierProvider.notifier)
-        .markAttendance(
-          lat: lat,
-          lng: lng,
-          imagePath: imagePath,
-          accuracy: accuracy,
-          isMocked: isMocked,
-        );
-  }
-
-  Future<void> _startCheckOut() async {
-    HapticFeedback.selectionClick();
-    final result = await context.push('/staff/mark-attendance');
-    if (!mounted || result is! Map) return;
-
-    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
-    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
-    final imagePath = result['image_path'] as String?;
-    if (lat == 0.0 && lng == 0.0) {
-      _toast('Could not capture location. Try again.', isError: true);
-      return;
-    }
-    final accuracy = (result['accuracy'] as num?)?.toDouble();
-    final isMocked = result['is_mocked'] == true;
-    await ref
-        .read(attendanceNotifierProvider.notifier)
-        .checkOut(
-          lat: lat,
-          lng: lng,
-          imagePath: imagePath,
-          accuracy: accuracy,
-          isMocked: isMocked,
-        );
-  }
+  Future<void> _startCheckOut() => AttendanceFlow.run(
+        context,
+        ref,
+        AttendanceAction.checkOut,
+        notify: _toast,
+      );
 
   void _toast(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).clearSnackBars();

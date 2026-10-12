@@ -14,7 +14,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -23,6 +22,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../domain/maintenance_notifier.dart';
 import '../../staff/domain/attendance_notifier.dart';
+import '../../staff/domain/attendance_flow.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
@@ -94,45 +94,21 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
   }
 
   // ─── Attendance (Crownest Maintenance Head only) ────────────────────────────
-  Future<void> _checkIn() async {
-    HapticFeedback.selectionClick();
-    final result = await context.push('/staff/mark-attendance');
-    if (!mounted || result is! Map) return;
-    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
-    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
-    final imagePath = result['image_path'] as String?;
-    if ((lat == 0.0 && lng == 0.0) || imagePath == null) {
-      _toast('Could not capture location/photo. Try again.', isError: true);
-      return;
-    }
-    await ref.read(attendanceNotifierProvider.notifier).markAttendance(
-          lat: lat,
-          lng: lng,
-          imagePath: imagePath,
-          accuracy: (result['accuracy'] as num?)?.toDouble(),
-          isMocked: result['is_mocked'] == true,
-        );
-  }
+  // Capture + submit live in AttendanceFlow, shared with every other role's
+  // home screen, so this logic exists exactly once.
+  Future<void> _checkIn() => AttendanceFlow.run(
+        context,
+        ref,
+        AttendanceAction.checkIn,
+        notify: _toast,
+      );
 
-  Future<void> _checkOut() async {
-    HapticFeedback.selectionClick();
-    final result = await context.push('/staff/mark-attendance');
-    if (!mounted || result is! Map) return;
-    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
-    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
-    final imagePath = result['image_path'] as String?;
-    if (lat == 0.0 && lng == 0.0) {
-      _toast('Could not capture location. Try again.', isError: true);
-      return;
-    }
-    await ref.read(attendanceNotifierProvider.notifier).checkOut(
-          lat: lat,
-          lng: lng,
-          imagePath: imagePath,
-          accuracy: (result['accuracy'] as num?)?.toDouble(),
-          isMocked: result['is_mocked'] == true,
-        );
-  }
+  Future<void> _checkOut() => AttendanceFlow.run(
+        context,
+        ref,
+        AttendanceAction.checkOut,
+        notify: _toast,
+      );
 
   @override
   Widget build(BuildContext context) {
