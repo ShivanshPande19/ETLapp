@@ -14,6 +14,7 @@ import '../../auth/domain/auth_notifier.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../notices/presentation/notice_bell.dart';
 import '../../staff/domain/attendance_notifier.dart';
+import '../../staff/domain/attendance_flow.dart';
 import 'home_providers.dart';
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -138,55 +139,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   // ─── Zone Manager self-attendance ───────────────────────────────────────────
-  // MarkAttendanceScreen only CAPTURES the selfie + location and pops them back;
-  // the caller must SUBMIT them (exactly like StaffHomeScreen and
-  // MaintenanceHomeScreen do). Previously this card only opened the camera and
-  // discarded the result, so the photo was taken but never uploaded.
+  // Capture + submit live in AttendanceFlow, shared with every other role's
+  // home screen. This card used to carry its own (broken) copy of the submit
+  // step, which is how the selfie got captured but never uploaded.
   Future<void> _onAttendanceTap() async {
-    HapticFeedback.selectionClick();
     final att = ref.read(attendanceNotifierProvider);
     if (att.status == AttendanceStatus.loading) return;
-    if (att.isCheckedOut) {
+
+    final action = AttendanceFlow.nextAction(att);
+    if (action == null) {
       _toast('Your shift for today is already complete.');
       return;
     }
-    final checkingOut = att.isCheckedIn;
-
-    final result = await context.push('/staff/mark-attendance');
-    if (!mounted || result is! Map) return;
-
-    final lat = (result['latitude'] as num?)?.toDouble() ?? 0.0;
-    final lng = (result['longitude'] as num?)?.toDouble() ?? 0.0;
-    final imagePath = result['image_path'] as String?;
-    final accuracy = (result['accuracy'] as num?)?.toDouble();
-    final isMocked = result['is_mocked'] == true;
-    if (lat == 0.0 && lng == 0.0) {
-      _toast('Could not capture location. Try again.', isError: true);
-      return;
-    }
-
-    final notifier = ref.read(attendanceNotifierProvider.notifier);
-    if (checkingOut) {
-      await notifier.checkOut(
-        lat: lat,
-        lng: lng,
-        imagePath: imagePath,
-        accuracy: accuracy,
-        isMocked: isMocked,
-      );
-    } else {
-      if (imagePath == null) {
-        _toast('Could not capture photo. Try again.', isError: true);
-        return;
-      }
-      await notifier.markAttendance(
-        lat: lat,
-        lng: lng,
-        imagePath: imagePath,
-        accuracy: accuracy,
-        isMocked: isMocked,
-      );
-    }
+    await AttendanceFlow.run(context, ref, action, notify: _toast);
   }
 
   void _toast(String msg, {bool isError = false}) {
@@ -222,23 +187,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget build(BuildContext context) {
     final auth = ref.watch(authNotifierProvider);
 
-    // Zone Manager attendance card state + result toasts.
+    // Zone Manager attendance card state. Result toasts (and the error
+    // re-sync) are raised by AttendanceFlow, so there's no listener here —
+    // having both produced two snackbars for one punch.
     final att = ref.watch(attendanceNotifierProvider);
-    ref.listen<AttendanceState>(attendanceNotifierProvider, (prev, next) {
-      if (!auth.canMarkOwnAttendance) return;
-      if (prev?.status == next.status) return;
-      if (next.status == AttendanceStatus.success) {
-        _toast(
-          next.isCheckedOut
-              ? 'Checked out. Shift complete!'
-              : 'Checked in successfully!',
-        );
-      } else if (next.status == AttendanceStatus.error) {
-        _toast(next.errorMessage ?? 'Something went wrong.', isError: true);
-        // Re-sync with the server so the card reflects the real state.
-        ref.read(attendanceNotifierProvider.notifier).loadToday();
-      }
-    });
     final bool attBusy = att.status == AttendanceStatus.loading;
     final String attTitle = att.isShiftActive ? 'Check Out' : 'Mark Attendance';
     final String attSubtitle;

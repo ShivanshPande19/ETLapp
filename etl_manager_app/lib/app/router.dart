@@ -27,6 +27,7 @@ import '../features/staff/presentation/staff_home_screen.dart';
 import '../features/staff/presentation/staff_checklist_screen.dart';
 
 import '../features/staff/presentation/outlet_staff_home_screen.dart';
+import '../features/staff/domain/attendance_flow.dart';
 import '../features/staff/presentation/mark_attendance_screen.dart';
 import '../features/staff/presentation/etl_roster_screen.dart';
 
@@ -244,7 +245,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _buildPage(
           context: context,
           state: state,
-          child: const MarkAttendanceScreen(),
+          // `?mode=in|out` tells the capture screen which half of the shift it
+          // is recording: the geofence gate is a check-IN rule only, and a
+          // check-OUT photo is optional. `state.matchedLocation` drops the
+          // query string, so the per-role redirect guards above keep matching
+          // on the bare '/staff/mark-attendance'.
+          child: MarkAttendanceScreen(
+            action: AttendanceFlow.actionFromQuery(
+              state.uri.queryParameters['mode'],
+            ),
+          ),
           slideFromRight: true,
         ),
       ),

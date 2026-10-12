@@ -56,6 +56,15 @@ class PhotoUploadService {
     }
   }
 
+  /// Shrink + re-encode a photo before it goes over mobile data.
+  ///
+  /// Attendance selfies used to be uploaded straight off the camera, which is
+  /// why "photo click karne ke baad" felt slow — it was the only photo flow in
+  /// the app that skipped this step (housekeeping and maintenance already used
+  /// it). Returns the original file untouched if compression fails, so an
+  /// upload is never lost to a codec hiccup.
+  static Future<File> compressForUpload(File file) => _compress(file);
+
   /// Best-effort reverse geocode (OpenStreetMap Nominatim). Falls back to
   /// formatted coordinates if the lookup fails or times out.
   static Future<String> reverseGeocode(double lat, double lng) async {

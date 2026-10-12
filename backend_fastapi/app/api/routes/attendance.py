@@ -1,9 +1,18 @@
 # app/api/routes/attendance.py
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    UploadFile,
+    File,
+    Form,
+    HTTPException,
+    status,
+)
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import httpx
@@ -11,7 +20,7 @@ import json
 import os
 import uuid
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.attendance import Attendance
 from app.models.staff import Staff
 from app.models.sale import Court, Outlet
@@ -29,6 +38,7 @@ from app.core.query_utils import (
 from app.core.geo import (
     distance_meters,
     MAX_ACCURACY_BUFFER_M,
+    MAX_TRUSTED_ACCURACY_M,
     DEFAULT_GEOFENCE_RADIUS_M,
 )
 from app.services.notice_service import create_notice
@@ -64,9 +74,18 @@ def _reject_if_mocked(is_mocked: Optional[bool]) -> None:
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+def _coords_label(lat: float, lng: float) -> str:
+    """The address we can produce instantly, with no network call."""
+    return f"Lat: {lat}, Lng: {lng}"
+
+
 async def get_address_from_coords(lat: float, lng: float) -> str:
     """Free reverse geocoding (OpenStreetMap Nominatim). Falls back to raw
-    coords if the service is unavailable/rate-limited."""
+    coords if the service is unavailable/rate-limited.
+
+    NOTE: never call this inside a check-in/check-out request — see
+    `_fill_address_later` for why.
+    """
     url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
     headers = {"User-Agent": "ETL_Manager_App/1.0"}
     try:
@@ -74,10 +93,40 @@ async def get_address_from_coords(lat: float, lng: float) -> str:
             response = await client.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json()
-                return data.get("display_name", f"Lat: {lat}, Lng: {lng}")
+                return data.get("display_name", _coords_label(lat, lng))
     except Exception:
         pass
-    return f"Lat: {lat}, Lng: {lng}"
+    return _coords_label(lat, lng)
+
+
+async def _fill_address_later(
+    attendance_id: int, lat: float, lng: float, column: str
+) -> None:
+    """Resolve the human-readable address AFTER the response has been sent.
+
+    This used to run INLINE: every check-in and check-out waited on a call to
+    nominatim.openstreetmap.org (up to 8 s, a public service with a rate limit
+    and no uptime promise) before the staff member's phone heard back. That was
+    the single biggest chunk of the "photo click karne ke baad bahut der lagti
+    hai" wait, and it delayed a punch that was already safely stored.
+
+    The row is written with coordinates immediately; this backfills the street
+    address a moment later. A failure here costs a nicer label, nothing more.
+    """
+    address = await get_address_from_coords(lat, lng)
+    if address == _coords_label(lat, lng):
+        return  # lookup failed — the placeholder already says this
+    db = SessionLocal()
+    try:
+        rec = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+        if rec is None:
+            return
+        setattr(rec, column, address)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 async def _save_selfie(photo: UploadFile, prefix: str) -> str:
@@ -136,7 +185,12 @@ def _assigned_courts(db: Session, staff: Staff) -> list[Court]:
     """Every zone a staff covers. A multi-zone role (Crownest Maintenance Head /
     Crownest Zone Manager) may be assigned to several (zone_court_ids); everyone
     else has their single court (via _staff_court, which also resolves an outlet
-    staff's outlet → court)."""
+    staff's outlet → court).
+
+    The list is returned in the SAME ORDER as `zone_court_ids`, so element 0 is
+    the staff's primary zone — callers rely on that for the single-zone
+    geofence payload and the `courts[0]` fallback.
+    """
     if _covers_multiple_zones(staff):
         ids: list[int] = []
         raw = getattr(staff, "zone_court_ids", None)
@@ -144,14 +198,23 @@ def _assigned_courts(db: Session, staff: Staff) -> list[Court]:
             try:
                 v = json.loads(raw)
                 if isinstance(v, list):
-                    ids = [int(x) for x in v]
+                    # dict.fromkeys dedupes while preserving order.
+                    ids = list(dict.fromkeys(int(x) for x in v))
             except Exception:
                 ids = []
         if not ids and staff.court_id:
             ids = [staff.court_id]
         if not ids:
             return []
-        return db.query(Court).filter(Court.id.in_(ids)).all()
+        rows = db.query(Court).filter(Court.id.in_(ids)).all()
+        by_id = {c.id: c for c in rows}
+        ordered = [by_id[i] for i in ids if i in by_id]
+        # Every assigned zone has since been deleted → fall back to the primary
+        # court column so the staff isn't left with no zone at all.
+        if not ordered and staff.court_id:
+            c = db.query(Court).filter(Court.id == staff.court_id).first()
+            return [c] if c else []
+        return ordered
     c = _staff_court(db, staff)
     return [c] if c else []
 
@@ -186,12 +249,38 @@ def _enforce_geofence(
         key=lambda c: distance_meters(lat, lng, c.latitude, c.longitude),
     )
     dist = distance_meters(lat, lng, nearest.latitude, nearest.longitude)
+
+    # A fix with a kilometre-wide error bar cannot place anyone inside a ~150 m
+    # circle, so saying "you are outside your zone" is simply false — it was
+    # the daily false rejection for staff standing INSIDE their court (an
+    # Android 12+ "Approximate location" grant reports accuracy in km, and the
+    # first fused fix is often 100s of metres). Name the real problem instead,
+    # so the message tells them something they can act on.
+    # `accuracy <= 0` is how some devices say "I don't know how good this is",
+    # which is no more trustworthy than a kilometre-wide fix.
+    if accuracy is None or accuracy <= 0 or accuracy > MAX_TRUSTED_ACCURACY_M:
+        measured = (
+            f" (your phone reported ±{int(round(accuracy))} m)"
+            if accuracy and accuracy > 0
+            else ""
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Your location isn't accurate enough to confirm you're in your "
+                f"zone{measured}. Turn on Precise location / high-accuracy GPS, "
+                f"switch off battery saver, step near a window or outside, then "
+                f"try again."
+            ),
+        )
+
     zone_names = ", ".join(c.name for c in configured)
     raise HTTPException(
         status_code=403,
         detail=(
-            f"You are about {int(round(dist))} m from {nearest.name}. You must "
-            f"be within one of your zones ({zone_names}) to mark attendance."
+            f"You are about {int(round(dist))} m from {nearest.name} "
+            f"(±{int(round(accuracy))} m). You must be within one of your zones "
+            f"({zone_names}) to mark attendance."
         ),
     )
 
@@ -258,7 +347,16 @@ def _status_from_record(rec: Optional[Attendance]) -> AttendanceStatusOut:
 
     duration = None
     if rec.check_in_time and rec.check_out_time:
-        delta = rec.check_out_time - rec.check_in_time
+        # `check_in_time` comes from the DB's own `now()` while `check_out_time`
+        # is written as a naive UTC value, and the columns are
+        # DateTime(timezone=True). On Postgres both read back aware, on SQLite
+        # both read back naive — but a mixed pair would raise TypeError and 500
+        # the whole status call. Normalise to aware UTC first (naive == UTC
+        # everywhere in this codebase) so the subtraction can never blow up.
+        def _aware(dt: datetime) -> datetime:
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+        delta = _aware(rec.check_out_time) - _aware(rec.check_in_time)
         duration = max(0, int(delta.total_seconds() // 60))
 
     return AttendanceStatusOut(
@@ -305,33 +403,34 @@ def my_geofence(
     if not configured:
         return {"has_geofence": False}
 
-    # A Maintenance Head with several located zones → return them all so the
-    # client can pre-check "within ANY of my zones".
-    if len(configured) > 1:
-        return {
-            "has_geofence": True,
-            "accuracy_buffer": MAX_ACCURACY_BUFFER_M,
-            "zones": [
-                {
-                    "court_id": c.id,
-                    "court_name": c.name,
-                    "latitude": c.latitude,
-                    "longitude": c.longitude,
-                    "geofence_radius": c.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M,
-                }
-                for c in configured
-            ],
-        }
-
-    court = configured[0]
+    # `zones` is ALWAYS sent, even for a single-zone staff member, so the client
+    # has exactly one shape to parse. It used to appear only when a staff had
+    # 2+ located zones, which meant the multi-zone roles (Maintenance Head,
+    # Zone Manager) silently switched payload shape depending on how many of
+    # their courts happened to have a location set. The flat primary-zone
+    # fields below are kept for older app builds.
+    primary = configured[0]
     return {
         "has_geofence": True,
-        "court_id": court.id,
-        "court_name": court.name,
-        "latitude": court.latitude,
-        "longitude": court.longitude,
-        "geofence_radius": court.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M,
         "accuracy_buffer": MAX_ACCURACY_BUFFER_M,
+        # Past this accuracy neither side will judge inside/outside.
+        "max_trusted_accuracy": MAX_TRUSTED_ACCURACY_M,
+        "zones": [
+            {
+                "court_id": c.id,
+                "court_name": c.name,
+                "latitude": c.latitude,
+                "longitude": c.longitude,
+                "geofence_radius": c.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M,
+            }
+            for c in configured
+        ],
+        # ── Back-compat (primary zone) ──
+        "court_id": primary.id,
+        "court_name": primary.name,
+        "latitude": primary.latitude,
+        "longitude": primary.longitude,
+        "geofence_radius": primary.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M,
     }
 
 
@@ -410,6 +509,7 @@ def outlet_calendar(
     status_code=status.HTTP_201_CREATED,
 )
 async def mark_attendance(
+    background: BackgroundTasks,
     lat: float = Form(...),
     lng: float = Form(...),
     accuracy: Optional[float] = Form(None),
@@ -463,8 +563,8 @@ async def mark_attendance(
     matched_court = _enforce_geofence(db, staff, lat, lng, accuracy)
 
     file_path = await _save_selfie(photo, "in")
-    real_address = await get_address_from_coords(lat, lng)
-
+    # Coordinates now, street address in the background — see
+    # `_fill_address_later`. The punch must not wait on a public geocoder.
     new_record = Attendance(
         staff_id=staff.id,
         outlet_id=staff.outlet_id,
@@ -472,7 +572,7 @@ async def mark_attendance(
         business_date=biz_date,
         check_in_lat=lat,
         check_in_lng=lng,
-        check_in_address=real_address,
+        check_in_address=_coords_label(lat, lng),
         check_in_photo_url=file_path,
     )
     db.add(new_record)
@@ -487,11 +587,15 @@ async def mark_attendance(
         )
     db.refresh(new_record)
 
+    background.add_task(
+        _fill_address_later, new_record.id, lat, lng, "check_in_address"
+    )
     return _status_from_record(new_record)
 
 
 @router.post("/check-out", response_model=AttendanceStatusOut)
 async def check_out(
+    background: BackgroundTasks,
     lat: float = Form(...),
     lng: float = Form(...),
     accuracy: Optional[float] = Form(None),
@@ -526,13 +630,12 @@ async def check_out(
     # We still record the check-out coordinates + address below, so a manager
     # can always see where the shift was ended.
     photo_path = await _save_selfie(photo, "out") if photo is not None else None
-    real_address = await get_address_from_coords(lat, lng)
 
     checkout_at = datetime.utcnow()
     rec.check_out_time = checkout_at
     rec.check_out_lat = lat
     rec.check_out_lng = lng
-    rec.check_out_address = real_address
+    rec.check_out_address = _coords_label(lat, lng)
     rec.check_out_photo_url = photo_path
 
     # ⏰ Early-logout detection: did they check out before their shift ended?
@@ -545,6 +648,9 @@ async def check_out(
     if rec.early_checkout:
         _notify_early_logout(db, staff, rec, checkout_at)
 
+    background.add_task(
+        _fill_address_later, rec.id, lat, lng, "check_out_address"
+    )
     return _status_from_record(rec)
 
 
