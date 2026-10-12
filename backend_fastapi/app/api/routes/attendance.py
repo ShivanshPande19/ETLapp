@@ -274,15 +274,20 @@ def _enforce_geofence(
             ),
         )
 
-    zone_names = ", ".join(c.name for c in configured)
-    raise HTTPException(
-        status_code=403,
-        detail=(
-            f"You are about {int(round(dist))} m from {nearest.name} "
-            f"(±{int(round(accuracy))} m). You must be within one of your zones "
-            f"({zone_names}) to mark attendance."
-        ),
+    # Name the radius, not just the distance: "you are 300 m away" alone doesn't
+    # tell someone how far they have to walk. The client's own message already
+    # says it this way ("Move within 150 m…"); keep the two in step so a staff
+    # member sees the same instruction whichever side rejects them.
+    radius = int(nearest.geofence_radius or DEFAULT_GEOFENCE_RADIUS_M)
+    detail = (
+        f"You are about {int(round(dist))} m from {nearest.name} "
+        f"(±{int(round(accuracy))} m). Move within {radius} m of it to mark "
+        f"attendance."
     )
+    if len(configured) > 1:
+        zone_names = ", ".join(c.name for c in configured)
+        detail += f" Any of your zones works: {zone_names}."
+    raise HTTPException(status_code=403, detail=detail)
 
 
 def _staff_court(db: Session, staff: Staff) -> Optional[Court]:

@@ -95,6 +95,17 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen>
 
   // ── Geofence ──────────────────────────────────────────────────────────────
   final List<_Zone> _zones = [];
+
+  /// How much of the fix's error bar may be added to the geofence radius.
+  ///
+  /// MUST stay in step with the server's `MAX_ACCURACY_BUFFER_M` (it is sent as
+  /// `accuracy_buffer` by GET /attendance/geofence, and overwritten below).
+  /// If the client allowed MORE slack than the server, the banner would go
+  /// green, the shutter would unlock, the selfie would upload — and then the
+  /// server would reject the punch with a geofence 403. The default matches
+  /// the server constant so a failed geofence fetch can't widen it either.
+  double _accuracyBuffer = 75;
+
   bool _geofenceLoaded = false;
   _Zone? _nearestZone;
   double? _distanceToNearest;
@@ -263,7 +274,11 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen>
       final res = await ref.read(dioProvider).get('/attendance/geofence');
       final data = res.data;
       final parsed = <_Zone>[];
+      double buffer = _accuracyBuffer;
       if (data is Map && data['has_geofence'] == true) {
+        // Take the slack ceiling from the server so the two sides can never
+        // drift apart (it is MAX_ACCURACY_BUFFER_M there).
+        buffer = (data['accuracy_buffer'] as num?)?.toDouble() ?? buffer;
         // The backend always sends `zones` now; the flat single-zone shape is
         // still read as a fallback so an older backend keeps working.
         final raw = data['zones'];
@@ -287,6 +302,7 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen>
         _zones
           ..clear()
           ..addAll(parsed);
+        _accuracyBuffer = buffer;
         _geofenceLoaded = true;
       });
       _evaluateZone();
@@ -312,7 +328,10 @@ class _MarkAttendanceScreenState extends ConsumerState<MarkAttendanceScreen>
       return;
     }
 
-    final slack = fix.accuracy.clamp(0.0, AttendanceLocation.usableAccuracyM);
+    // Capped at the SERVER's buffer, never at our own `usableAccuracyM` — see
+    // `_accuracyBuffer`. A coarser fix than this is handled separately, by
+    // refusing to decide at all (`_blockedReason`), not by widening the circle.
+    final slack = fix.accuracy.clamp(0.0, _accuracyBuffer);
     double? nearestDist;
     _Zone? nearest;
     var within = false;

@@ -16,15 +16,16 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.routes.attendance import _assigned_courts, _enforce_geofence
-from app.core.geo import MAX_TRUSTED_ACCURACY_M
+from app.core.geo import MAX_ACCURACY_BUFFER_M, MAX_TRUSTED_ACCURACY_M
 from app.models.sale import Court
 from app.models.staff import Staff
 
-# Two points ~1.1 km apart, plus one essentially on top of the first.
+# Verified with app.core.geo.distance_meters (Haversine), which agrees with
+# Flutter's Geolocator.distanceBetween to within ~0.33 % at these scales.
 ZONE_A = (28.5000, 77.5000)
-ZONE_B = (28.5100, 77.5100)
-INSIDE_A = (28.50005, 77.50005)
-FAR_AWAY = (28.6000, 77.6000)  # ~14 km from both
+ZONE_B = (28.5100, 77.5100)   # ~1480 m from ZONE_A — well outside its radius
+INSIDE_A = (28.50005, 77.50005)  # ~7 m from ZONE_A's centre
+FAR_AWAY = (28.6000, 77.6000)  # ~14.8 km from ZONE_A, ~13.3 km from ZONE_B
 
 
 def _court(db, name, lat=None, lng=None, radius=150):
@@ -137,6 +138,26 @@ def test_accuracy_buffer_rescues_a_fix_just_outside_the_radius(db):
 
 # ─── _enforce_geofence — rejections ──────────────────────────────────────────
 
+def test_accuracy_buffer_is_capped_and_cannot_buy_unlimited_range(db):
+    """The buffer is capped at MAX_ACCURACY_BUFFER_M (75 m), so a mediocre fix
+    cannot stretch a 150 m zone to cover 300 m.
+
+    This invariant is what the CLIENT must mirror: mark_attendance_screen
+    clamps its slack to the server's `accuracy_buffer`, NOT to its own wider
+    `usableAccuracyM`. If the two drift apart the banner goes green, the
+    shutter unlocks, the selfie uploads — and then the server 403s the punch.
+    """
+    a = _court(db, "A", *ZONE_A, radius=150)
+    s = _zone_manager(db, [a])
+    # ~300 m north of centre, reported accuracy 190 m: trusted (<= 200) but
+    # 150 + min(190, 75) = 225 < 300, so it must still be refused.
+    lat = ZONE_A[0] + 0.0027
+    with pytest.raises(HTTPException) as err:
+        _enforce_geofence(db, s, lat, ZONE_A[1], 190.0)
+    assert "m from" in err.value.detail
+    assert MAX_ACCURACY_BUFFER_M == 75.0  # the cap this test is pinned to
+
+
 def test_genuinely_far_away_with_a_good_fix_is_a_zone_violation(db):
     """A precise fix that really is far away must still be rejected — and the
     message must name the distance and the zones."""
@@ -148,7 +169,36 @@ def test_genuinely_far_away_with_a_good_fix_is_a_zone_violation(db):
     assert err.value.status_code == 403
     detail = err.value.detail
     assert "m from" in detail
+    # A multi-zone role is told that ANY of its zones would do.
     assert "A" in detail and "B" in detail
+
+
+def test_rejection_tells_the_staff_how_close_they_must_get(db):
+    """The distance alone doesn't say how far to walk, so the message names the
+    zone's radius too — matching the wording the client already uses."""
+    a = _court(db, "A", *ZONE_A, radius=120)
+    s = _zone_manager(db, [a])
+    with pytest.raises(HTTPException) as err:
+        _enforce_geofence(db, s, FAR_AWAY[0], FAR_AWAY[1], 8.0)
+    detail = err.value.detail
+    assert "within 120 m" in detail
+    # Single-zone staff get no pointless "any of your zones" sentence.
+    assert "Any of your zones" not in detail
+
+
+def test_rejection_quotes_the_nearest_zones_own_radius(db):
+    """With several zones of different sizes, the radius quoted must belong to
+    the NEAREST zone (the one being suggested), not the primary one."""
+    # Primary zone A is far away and wide; B is nearer and tighter.
+    a = _court(db, "A", *ZONE_A, radius=500)
+    b = _court(db, "B", *ZONE_B, radius=90)
+    s = _zone_manager(db, [a, b])
+    # FAR_AWAY is ~13.3 km from B and ~14.8 km from A, so B is nearest.
+    with pytest.raises(HTTPException) as err:
+        _enforce_geofence(db, s, FAR_AWAY[0], FAR_AWAY[1], 8.0)
+    detail = err.value.detail
+    assert "from B" in detail
+    assert "within 90 m" in detail
 
 
 @pytest.mark.parametrize("accuracy", [MAX_TRUSTED_ACCURACY_M + 1, 1500.0, 3000.0])
