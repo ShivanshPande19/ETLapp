@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import '../../../core/utils/app_version.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/biometric_service.dart';
@@ -404,7 +406,9 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                               _InfoTile(
                                 icon: Icons.verified_rounded,
                                 label: 'App Version',
-                                value: '1.0.3 (Phase 1)',
+                                // Read from the bundle — see appVersionProvider.
+                                value:
+                                    ref.watch(appVersionProvider).value ?? '—',
                                 valueColor: AppTheme.success,
                               ),
                               _GroupDivider(),
@@ -450,7 +454,7 @@ class _StaffSettingsScreenState extends ConsumerState<StaffSettingsScreen>
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  'ETL Management App · Phase 1',
+                                  'Eat Truck Love',
                                   style: GoogleFonts.inter(
                                     fontSize: 11,
                                     color: _grey,
