@@ -795,7 +795,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
       // set-password link is emailed to the new address — and the manager who
       // just did it needs to be told that, plus whether the mail actually got
       // out. A hardcoded "Owner details updated." hid all of it.
-      final emailChanged = res['email_changed'] == true;
+      final emailChanged = res['login_reissued'] == true;
       final mailSent = res['email_sent'] == true;
       final msg = (res['message'] as String?)?.trim();
       ScaffoldMessenger.of(context)

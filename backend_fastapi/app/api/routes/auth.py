@@ -202,7 +202,7 @@ async def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_
     link = f"{base}/auth/reset-password?token={token}"
     await send_email(
         to=email,
-        subject="Reset your ETL password",
+        subject="Reset your Eat Truck Love password",
         html=_reset_password_email_html(name or "there", link),
     )
     return generic
