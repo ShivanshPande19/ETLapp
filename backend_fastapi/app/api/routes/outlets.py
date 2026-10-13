@@ -342,10 +342,30 @@ def remove_outlet_manager(
 
 # ─── ETL admin: update an outlet's owner details ─────────────────────────────
 #
-# TEMPORARY/ADMIN: outlets onboarded with placeholder owner details need their
-# real name/email/phone filled in. Gated to ETL managers only. Updating the
-# email changes the owner's LOGIN — safe here because these accounts haven't
-# been used yet. Can be removed after the initial data cleanup if desired.
+# ADMIN: outlets onboarded with placeholder owner details need their real
+# name/email/phone filled in. Gated to ETL managers only.
+#
+# CHANGING THE EMAIL CHANGES THE OWNER'S LOGIN, so it is treated as handing the
+# account to a different address and is handled end-to-end:
+#
+#   1. the old password is INVALIDATED (replaced with an unguessable random
+#      hash, never an empty string — `verify_password` runs bcrypt.checkpw and
+#      would raise on a malformed hash, turning a wrong-password login into a
+#      500 instead of a 401)
+#   2. a fresh set-password link is minted for the NEW address and emailed
+#      there, so whoever owns it sets the password that from then on is the
+#      account's password
+#   3. the owner's live sessions die on their own: their JWT carries the OLD
+#      email as `sub`, and get_current_user resolves that against the DB on
+#      every request, so it 401s them out and the app sends them to login
+#
+# Editing only the name/phone — or re-saving the SAME email — touches neither
+# the password nor the inbox. That matters: a blanket reset on every save would
+# lock out an owner whose name was simply corrected.
+#
+# NOTE: one login can own several outlets, so this resets access to ALL of them,
+# not just the outlet it was edited from. That is inherent to it being a single
+# account, not a side effect of this endpoint.
 
 class UpdateOwnerRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=120)
@@ -354,13 +374,16 @@ class UpdateOwnerRequest(BaseModel):
 
 
 @router.patch("/{outlet_id}/owner")
-def update_outlet_owner(
+async def update_outlet_owner(
     body: UpdateOwnerRequest,
     outlet_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_etl_manager),
 ):
-    """ETL manager: correct an outlet owner's name / email / phone."""
+    """ETL manager: correct an outlet owner's name / email / phone.
+
+    A changed email re-issues the account: old password out, set-password link
+    emailed to the new address. See the block comment above."""
     outlet = db.query(Outlet).filter(Outlet.id == outlet_id).first()
     if not outlet:
         raise HTTPException(status_code=404, detail="Outlet not found.")
@@ -390,12 +413,18 @@ def update_outlet_owner(
         if name:
             mgr.name = name
 
+    # Normalised BEFORE comparing, so "Owner@Example.com " and
+    # "owner@example.com" count as the same address and don't trigger a reset.
+    old_email = (mgr.email or "").strip().lower()
     new_email = None
+    email_changed = False
     if body.email is not None:
         new_email = body.email.strip().lower()
         if "@" not in new_email or "." not in new_email.split("@")[-1]:
             raise HTTPException(status_code=400, detail="Please provide a valid email address.")
         # Uniqueness: no OTHER manager and no staff may already use this email.
+        # Every validation happens before ANY mutation, so a rejected request
+        # can never leave the owner with a half-changed login.
         clash_mgr = (
             db.query(Manager)
             .filter(Manager.email == new_email, Manager.id != mgr.id)
@@ -404,7 +433,16 @@ def update_outlet_owner(
         clash_staff = db.query(Staff).filter(Staff.email == new_email).first()
         if clash_mgr or clash_staff:
             raise HTTPException(status_code=409, detail="That email is already in use.")
-        mgr.email = new_email
+
+        email_changed = new_email != old_email
+        if email_changed:
+            mgr.email = new_email
+            # Retire the old password. A random hash rather than "" keeps the
+            # column a valid bcrypt digest, so a stale login attempt gets a
+            # clean 401 instead of raising inside bcrypt.checkpw.
+            mgr.hashed_password = hash_password(secrets.token_urlsafe(24))
+            # An inactive owner could never use the link we're about to send.
+            mgr.is_active = True
 
     # Keep the onboarding application record (what the ETL UI shows) in sync.
     appn = (
@@ -422,13 +460,83 @@ def update_outlet_owner(
 
     db.commit()
     db.refresh(mgr)
+
+    link: Optional[str] = None
+    email_sent = False
+    message = "Owner details updated."
+
+    if email_changed:
+        token = create_token(
+            {"sub": new_email, "purpose": "set_password", "mid": mgr.id},
+            _SET_PW_EXPIRY_MIN,
+        )
+        base = (settings.PUBLIC_BASE_URL or "").rstrip("/")
+        link = f"{base}/auth/set-password?token={token}"
+        try:
+            email_sent = await send_email(
+                to=new_email,
+                subject="Your outlet login email changed — set a new password",
+                html=_owner_email_changed_html(mgr.name, outlet.vendor_name, link),
+            )
+        except Exception as e:  # noqa: BLE001
+            # The account change is already committed and the link is in the
+            # response, so a mail outage must not fail the request.
+            logger.warning("owner email-change mail failed for outlet %s: %s", outlet_id, e)
+            email_sent = False
+
+        if email_sent:
+            message = (
+                f"Owner login moved to {new_email}. Their old password no longer "
+                f"works — a set-password link has been emailed to the new address."
+            )
+        else:
+            # `set_password_link` is returned either way, so the manager can
+            # always pass it on by hand. A later retry with the SAME address is
+            # a no-op by design, so the fallback for a lost link is
+            # POST /auth/forgot-password with the new email.
+            message = (
+                f"Owner login moved to {new_email}, and their old password no "
+                f"longer works — but the email could NOT be sent. Share the "
+                f"set-password link below with them, or have them use "
+                f"'forgot password' on the new address."
+            )
+
     return {
         "outlet_id": outlet_id,
         "manager_id": mgr.id,
         "name": mgr.name,
         "email": mgr.email,
-        "message": "Owner details updated.",
+        "email_changed": email_changed,
+        "password_reset": email_changed,
+        "set_password_link": link,
+        "email_sent": email_sent,
+        "message": message,
     }
+
+
+def _owner_email_changed_html(owner_name: str, outlet_name: str, link: str) -> str:
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+      <h2 style="color:#0A0A0A;">Set your new password</h2>
+      <p>Hi {owner_name},</p>
+      <p>The login email for your outlet <b>{outlet_name}</b> was updated to this
+         address. For security, the previous password has been removed — please
+         set a new one using the button below. From then on, this address and
+         the password you choose are your login.</p>
+      <p style="text-align:center; margin: 28px 0;">
+        <a href="{link}"
+           style="background:#D02128; color:#fff; padding:12px 28px;
+                  border-radius:8px; text-decoration:none; font-weight:bold;">
+           Set My Password
+        </a>
+      </p>
+      <p style="color:#888; font-size:13px;">This link is valid for 7 days. If
+         the button doesn't work, copy and paste this URL:</p>
+      <p style="color:#888; font-size:12px; word-break:break-all;">{link}</p>
+      <p style="color:#888; font-size:12px;">If you weren't expecting this,
+         contact your Eat Truck Love manager.</p>
+    </div>
+    """
 
 
 # ─── ETL admin: delete an outlet from a court ────────────────────────────────

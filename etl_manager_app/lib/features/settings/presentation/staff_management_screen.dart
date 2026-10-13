@@ -780,7 +780,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
     final email = emailCtrl.text.trim();
     final phone = phoneCtrl.text.trim();
     try {
-      await ref.read(outletsRepositoryProvider).updateOutletOwner(
+      final res = await ref.read(outletsRepositoryProvider).updateOutletOwner(
             o.outletId,
             name: name.isEmpty ? null : name,
             email: email.isEmpty ? null : email,
@@ -789,8 +789,32 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen>
       if (!mounted) return;
       ref.invalidate(courtOutletsProvider(widget.courtId));
       Navigator.of(context).pop(); // close the outlet sheet so it reopens fresh
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Owner details updated.')));
+
+      // Show the SERVER's message, not a fixed string. Changing the owner's
+      // email re-issues their login — the old password stops working and a
+      // set-password link is emailed to the new address — and the manager who
+      // just did it needs to be told that, plus whether the mail actually got
+      // out. A hardcoded "Owner details updated." hid all of it.
+      final emailChanged = res['email_changed'] == true;
+      final mailSent = res['email_sent'] == true;
+      final msg = (res['message'] as String?)?.trim();
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              msg?.isNotEmpty == true ? msg! : 'Owner details updated.',
+            ),
+            // A re-issued login is worth reading; a failed mail needs acting on.
+            duration: emailChanged
+                ? (mailSent
+                    ? const Duration(seconds: 6)
+                    : const Duration(seconds: 12))
+                : const Duration(seconds: 4),
+            backgroundColor:
+                emailChanged && !mailSent ? const Color(0xFFEF4444) : null,
+          ),
+        );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
