@@ -397,7 +397,7 @@ async def approve_application(
 
         email_sent = await send_email(
             to=existing_owner.email,
-            subject="A new outlet was added to your ETL account",
+            subject="A new outlet was added to your Eat Truck Love account",
             html=_outlet_added_email_html(existing_owner.name, app.outlet_name),
         )
         return ApproveResponse(
@@ -463,7 +463,7 @@ async def approve_application(
     # 4. Email the owner (graceful fallback if Resend not configured)
     email_sent = await send_email(
         to=manager.email,
-        subject="Welcome to ETL — set your password",
+        subject="Welcome to Eat Truck Love — set your password",
         html=_set_password_email_html(manager.name, app.outlet_name, link),
     )
 
@@ -596,14 +596,14 @@ def _rejection_email_html(
       <h2 style="color:#0A0A0A;">Update on your application</h2>
       <p>Hi {owner_name or 'there'},</p>
       <p>Thank you for your interest in opening <b>{outlet_name or 'an outlet'}</b>
-         with ETL Food Court.</p>
+         with Eat Truck Love.</p>
       <p>After reviewing your application, we are not able to move forward with
          it at this time.</p>
       {reason_block}
       <p>You are welcome to apply again with updated details. If you believe
          something was missed, simply reply to this email and we will take
          another look.</p>
-      <p style="color:#888; font-size:13px; margin-top:28px;">— ETL Food Court Team</p>
+      <p style="color:#888; font-size:13px; margin-top:28px;">— Eat Truck Love Team</p>
     </div>
     """
 
@@ -611,7 +611,7 @@ def _rejection_email_html(
 def _set_password_email_html(owner_name: str, outlet_name: str, link: str) -> str:
     return f"""
     <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
-      <h2 style="color:#0A0A0A;">Welcome to ETL Food Court 🎉</h2>
+      <h2 style="color:#0A0A0A;">Welcome to Eat Truck Love 🎉</h2>
       <p>Hi {owner_name},</p>
       <p>Your outlet <b>{outlet_name}</b> has been approved and onboarded.
          To access your Outlet Manager app, please set your password using the
@@ -644,6 +644,6 @@ def _outlet_added_email_html(owner_name: str, outlet_name: str) -> str:
       <p><b>{outlet_name}</b> has been approved and linked to your existing ETL
          account. You don't need a new login — just open the ETL Manager app and
          use the <b>outlet switcher</b> at the top to select it.</p>
-      <p style="color:#888; font-size:13px; margin-top:28px;">— ETL Food Court Team</p>
+      <p style="color:#888; font-size:13px; margin-top:28px;">— Eat Truck Love Team</p>
     </div>
     """

@@ -4,12 +4,18 @@ Changing the email changes the owner's LOGIN, so it is treated as handing the
 account to a different address: the old password is retired and a set-password
 link is emailed to the new one.
 
-The dangerous half of that is the blast radius. A blanket reset on every save
-would lock out an owner whose name was simply corrected, so these tests pin
-both directions:
+The trigger is SUBMITTING the email field — not whether the address differs.
+Re-saving the same address re-issues too, which doubles as "resend the welcome
+link". So these tests pin both directions:
 
-  • email actually changed  → password retired, link minted, mail sent
-  • anything else           → password and inbox untouched
+  • email field submitted (changed OR identical)
+        → password retired, link minted, welcome mail sent
+  • email field omitted (name/phone only)
+        → password and inbox untouched
+
+That second line is the only remaining escape hatch, and the app's edit sheet
+pre-fills the email box — so it is the one that stops an owner being locked out
+by an edit that never meant to touch their login.
 
 Plus the failure paths, because this endpoint can take an account's only
 credential away: nothing may mutate unless every validation passed, and a mail
@@ -109,9 +115,15 @@ def test_set_password_mail_goes_to_the_new_address_only(db, client_factory, sent
     assert sent[0]["to"] == "owner@new.com"
     assert "owner@old.com" not in sent[0]["to"]
     assert "/auth/set-password?token=" in sent[0]["html"]
+    # Deliberately the same welcome mail a brand-new owner gets, so the two
+    # flows cannot drift apart.
+    assert sent[0]["subject"] == "Welcome to Eat Truck Love — set your password"
+    assert "Set My Password" in sent[0]["html"]
+    assert "Coffee Vault" in sent[0]["html"]  # the outlet name
 
     body = r.json()
     assert body["email_changed"] is True
+    assert body["login_reissued"] is True
     assert body["password_reset"] is True
     assert body["email_sent"] is True
     assert "/auth/set-password?token=" in body["set_password_link"]
@@ -162,35 +174,49 @@ def test_editing_only_the_name_leaves_the_password_alone(db, client_factory, sen
     db.refresh(owner)
     assert verify_password(OWNER_PW, owner.hashed_password)
     assert sent == []
-    assert r.json()["email_changed"] is False
+    assert r.json()["login_reissued"] is False
     assert r.json()["set_password_link"] is None
 
 
-def test_resaving_the_same_email_is_a_no_op(db, client_factory, sent):
+def test_resaving_the_same_email_also_reissues(db, client_factory, sent):
+    """Re-saving the identical address is a deliberate "resend the link":
+    password retired, welcome mail sent again."""
     outlet, owner = _seed_owned_outlet(db, owner_email="owner@old.com")
     r = _etl(client_factory).patch(
         f"/outlets/{outlet.id}/owner", json={"email": "owner@old.com"}
     )
     assert r.status_code == 200
+
     db.refresh(owner)
-    assert verify_password(OWNER_PW, owner.hashed_password)
-    assert sent == []
+    assert owner.email == "owner@old.com"
+    assert not verify_password(OWNER_PW, owner.hashed_password)
+    assert [m["to"] for m in sent] == ["owner@old.com"]
+
+    body = r.json()
+    assert body["login_reissued"] is True
+    assert body["password_reset"] is True
+    # The address did not change, even though the login was re-issued.
+    assert body["email_changed"] is False
 
 
 @pytest.mark.parametrize("variant", ["Owner@Old.com", "  owner@old.com  ", "OWNER@OLD.COM"])
-def test_case_and_whitespace_variants_count_as_unchanged(
+def test_case_variants_reissue_but_are_not_reported_as_a_change(
     db, client_factory, sent, variant
 ):
-    """Normalisation happens before the comparison, so a differently-typed
-    version of the same address must not trigger a reset."""
+    """Normalisation still decides `email_changed` (so the message reads
+    correctly), but submitting the field at all re-issues the login."""
     outlet, owner = _seed_owned_outlet(db, owner_email="owner@old.com")
     r = _etl(client_factory).patch(
         f"/outlets/{outlet.id}/owner", json={"email": variant}
     )
     assert r.status_code == 200
+
     db.refresh(owner)
-    assert verify_password(OWNER_PW, owner.hashed_password)
-    assert sent == []
+    assert owner.email == "owner@old.com"  # normalised, not stored as typed
+    assert not verify_password(OWNER_PW, owner.hashed_password)
+    assert r.json()["email_changed"] is False
+    assert r.json()["login_reissued"] is True
+    assert len(sent) == 1
 
 
 def test_phone_only_edit_touches_nothing(db, client_factory, sent):
@@ -322,7 +348,7 @@ def test_a_mail_outage_does_not_fail_the_request(db, client_factory, mail_down):
 
     body = r.json()
     assert body["email_sent"] is False
-    assert body["email_changed"] is True
+    assert body["login_reissued"] is True
     assert "/auth/set-password?token=" in body["set_password_link"]
     assert "could NOT be sent" in body["message"]
 
