@@ -27,9 +27,17 @@ from ..api.routes.events import fire_notify
 from . import fcm_service
 from .push_targeting import resolve_notice_targets
 
-# Keep in sync with the Android channel created in the Flutter app
-# (core/services/push_service.dart).
-_ANDROID_CHANNEL_ID = "etl_default"
+# Android notification channel these pushes are posted to.
+#
+# MUST stay in step with BOTH:
+#   • android/app/src/main/kotlin/.../MainActivity.kt  (creates it, IMPORTANCE_HIGH)
+#   • android/app/src/main/AndroidManifest.xml         (default_notification_channel_id)
+#
+# The previous comment here pointed at core/services/push_service.dart as the
+# place that created the channel — it never did, so Android auto-created it at
+# IMPORTANCE_DEFAULT and heads-up banners never appeared. See MainActivity for
+# why the id now carries a `_v2` suffix.
+_ANDROID_CHANNEL_ID = "etl_default_v2"
 
 
 logger = logging.getLogger("notice")

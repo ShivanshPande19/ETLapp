@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- RELEASE builds (TestFlight + App Store) only.
+
+	     A store build is signed with a DISTRIBUTION provisioning profile, so its
+	     APNs device tokens live in the APNs *production* environment and this
+	     must say `production`. Debug and Profile builds use
+	     RunnerDebug.entitlements, which says `development`.
+
+	     This file previously said `development` and was wired to all three
+	     configurations, which is why OS banners never arrived on the production
+	     app: the store build handed FCM a sandbox token, and every production
+	     send against it is rejected by APNs. The in-app bell kept counting
+	     because it reads /notices over REST and never touches push. -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>
