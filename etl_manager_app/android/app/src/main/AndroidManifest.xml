@@ -56,11 +56,14 @@
 
         <!-- Default channel for notifications that arrive while the app is in
              the background. MUST match the `android_channel_id` the backend
-             sends (services/fcm_service.py -> _ANDROID_CHANNEL_ID) or Android
-             silently drops them into an unnamed low-importance channel. -->
+             sends (services/notice_service.py -> _ANDROID_CHANNEL_ID) AND the
+             channel MainActivity.createNotificationChannel() actually creates,
+             or Android silently drops them into an auto-created channel at
+             IMPORTANCE_DEFAULT — status-bar only, no heads-up banner.
+             The `_v2` suffix is deliberate; see MainActivity for why. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="etl_default" />
+            android:value="etl_default_v2" />
     </application>
 
     <queries>

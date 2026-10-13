@@ -172,7 +172,15 @@ def _build_message(
                 "notification": android_notif,
             },
             "apns": {
-                "headers": {"apns-priority": "10"},
+                "headers": {
+                    "apns-priority": "10",
+                    # Required by APNs for iOS 13+. FCM infers it for a message
+                    # carrying a `notification` block, but sending it explicitly
+                    # removes any doubt that this is a user-visible alert (and
+                    # not a silent background update, which iOS may throttle or
+                    # drop entirely when the app is not running).
+                    "apns-push-type": "alert",
+                },
                 "payload": {"aps": aps},
             },
         }
@@ -204,7 +212,10 @@ async def send_push(
     title: str,
     body: Optional[str] = None,
     data: Optional[Dict[str, Any]] = None,
-    android_channel_id: str = "etl_default",
+    # Default kept in step with notice_service._ANDROID_CHANNEL_ID and the
+    # channel MainActivity actually creates. A channel id Android does not
+    # know is dropped on API 26+, so these three must never drift.
+    android_channel_id: str = "etl_default_v2",
     badge: Optional[int] = None,
 ) -> Tuple[int, List[str]]:
     """Deliver to every token. Returns ``(sent_count, dead_tokens)``.

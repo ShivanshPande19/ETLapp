@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Debug + Profile builds only.
+
+	     These are signed with a DEVELOPMENT provisioning profile, so their APNs
+	     device tokens belong to the APNs *sandbox* and `aps-environment` must
+	     say `development` to match. Release/App Store builds use
+	     Runner.entitlements instead, which says `production`.
+
+	     Keeping one shared file for every configuration is what broke push on
+	     TestFlight/App Store builds: the store build registered a sandbox token,
+	     and FCM's production sends to it fail (APNs answers BadDeviceToken), so
+	     no banner was ever delivered — while the in-app notice bell kept working,
+	     because that is fed by the /notices REST API and not by push at all. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>
