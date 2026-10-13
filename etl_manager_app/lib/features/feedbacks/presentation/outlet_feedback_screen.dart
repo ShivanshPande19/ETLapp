@@ -6,6 +6,8 @@ import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import '../../../core/ui/motion.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/appear_fade.dart';
 
@@ -71,8 +73,20 @@ class OutletFeedbacksScreen extends ConsumerStatefulWidget {
 class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
     with TickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
-  late final AnimationController _listCtrl;
   late final Animation<double> _fadeAnim;
+
+  /// Bumped whenever the list's contents are replaced (date filter changed,
+  /// pull-to-refresh, filter cleared). It feeds the `StaggerIn` keys below, so
+  /// the rows genuinely re-cascade.
+  ///
+  /// This replaces an AnimationController that was created, reset and
+  /// forwarded in four places — and consumed by absolutely nothing. The intent
+  /// was there, the wiring never was, so the list simply snapped.
+  int _listEpoch = 0;
+
+  void _replayList() {
+    if (mounted) setState(() => _listEpoch++);
+  }
 
   // ✅ Drives infinite scroll — when the user nears the bottom we ask the
   // notifier for the next page.
@@ -84,19 +98,9 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
     );
-    _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _listCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
+    _fadeCtrl = AnimationController(vsync: this, duration: Motion.base);
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Motion.enter);
     _fadeCtrl.forward();
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (mounted) _listCtrl.forward();
-    });
 
     _scrollController.addListener(_onScroll);
   }
@@ -106,7 +110,6 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _fadeCtrl.dispose();
-    _listCtrl.dispose();
     super.dispose();
   }
 
@@ -131,9 +134,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
     if (picked != null) {
       HapticFeedback.selectionClick();
       notifier.setDateFilter(picked);
-      _listCtrl
-        ..reset()
-        ..forward();
+      _replayList();
     }
   }
 
@@ -217,9 +218,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                                           onTap: () {
                                             HapticFeedback.lightImpact();
                                             notifier.setDateFilter(null);
-                                            _listCtrl
-                                              ..reset()
-                                              ..forward();
+                                            _replayList();
                                           },
                                           child: Container(
                                             padding: const EdgeInsets.all(2),
@@ -245,9 +244,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                                 onTap: () {
                                   HapticFeedback.selectionClick();
                                   notifier.fetchFeedbacks(isRefresh: true);
-                                  _listCtrl
-                                    ..reset()
-                                    ..forward();
+                                  _replayList();
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.all(8),
@@ -314,9 +311,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
                     onRefresh: () async {
                       HapticFeedback.mediumImpact();
                       await notifier.fetchFeedbacks(isRefresh: true);
-                      _listCtrl
-                        ..reset()
-                        ..forward();
+                      _replayList();
                     },
                     child: feedbacksState.when(
                       loading: () => const SkeletonList(
@@ -349,12 +344,19 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
       children: [
         // ─── Analytics Card ───
         if (data.analytics != null) ...[
-          _AnalyticsCard(analytics: data.analytics!),
+          StaggerIn(
+            key: ValueKey('$_listEpoch-analytics'),
+            index: 0,
+            child: _AnalyticsCard(analytics: data.analytics!),
+          ),
           const SizedBox(height: 28),
         ],
 
         // ─── List header ───
-        Row(
+        StaggerIn(
+          key: ValueKey('$_listEpoch-heading'),
+          index: 1,
+          child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
@@ -388,6 +390,7 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
               ),
             ),
           ],
+          ),
         ),
         const SizedBox(height: 16),
 
@@ -395,7 +398,17 @@ class _OutletFeedbacksScreenState extends ConsumerState<OutletFeedbacksScreen>
         if (data.feedbacks.isEmpty)
           _EmptyState(hasDateFilter: data.selectedDate != null)
         else
-          ...data.feedbacks.map((f) => _FeedbackCard(feedback: f)),
+          // Keyed by epoch + index: a new filter or refresh rebuilds these, so
+          // the cascade replays. Items appended by infinite scroll get fresh
+          // keys of their own and fade in without disturbing the rows above
+          // (StaggerIn caps its delay, so page 3 doesn't crawl).
+          ...data.feedbacks.indexed.map(
+            (entry) => StaggerIn(
+              key: ValueKey('$_listEpoch-fb-${entry.$1}'),
+              index: 2 + entry.$1,
+              child: _FeedbackCard(feedback: entry.$2),
+            ),
+          ),
 
         // ─── Pagination footer ───
         _PaginationFooter(
