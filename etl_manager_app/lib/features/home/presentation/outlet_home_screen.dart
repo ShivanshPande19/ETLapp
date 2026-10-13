@@ -12,6 +12,7 @@ import '../../staff/presentation/view_roster_screen.dart';
 import 'home_providers.dart';
 import 'weekly_insights_screen.dart';
 import '../../../core/widgets/skeleton.dart';
+import '../../../core/ui/motion.dart';
 import '../../../core/ui/nav_visibility.dart'; // hide nav bar over full-screen report
 import '../../outlets/presentation/outlet_switcher.dart'; // multi-outlet switcher
 
@@ -36,47 +37,19 @@ class OutletHomeScreen extends ConsumerStatefulWidget {
 
 class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
     with TickerProviderStateMixin {
-  late final AnimationController _fadeCtrl;
-  late final Animation<double> _fadeAnim;
-  late final AnimationController _listCtrl;
-
   @override
   void initState() {
     super.initState();
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
     );
-    _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
-    _fadeCtrl.forward();
-
-    // Staggered entrance for the content sections (replays on every tab switch).
-    _listCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-    _listCtrl.forward();
   }
 
-  // Per-section staggered fade+slide animation.
-  Animation<double> _itemAnim(int i) => CurvedAnimation(
-    parent: _listCtrl,
-    curve: Interval(
-      (i * 0.15).clamp(0.0, 0.6),
-      ((i * 0.15) + 0.5).clamp(0.0, 1.0),
-      curve: Curves.easeOutCubic,
-    ),
-  );
-
-  @override
-  void dispose() {
-    _fadeCtrl.dispose();
-    _listCtrl.dispose();
-    super.dispose();
-  }
+  // Entrance motion is handled per-section by `StaggerIn`, which owns its own
+  // controller. This screen used to run a 400 ms full-screen fade with a 900 ms
+  // staggered reveal layered on top — so the last card landed about 1.1 s after
+  // the tab was tapped, every single time. The sections now settle in roughly
+  // 0.45 s, and nothing gates the header behind a fade.
 
   String _fmt(double v) {
     if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
@@ -94,15 +67,19 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
 
     return Scaffold(
       backgroundColor: _bg,
-      body: FadeTransition(
-        opacity: _fadeAnim,
-        child: SafeArea(
+      body: SafeArea(
           bottom: false,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ─── Header (Dark Area) ──────────────────────────────────────
-              _buildHeader(firstName, ref.watch(currentOutletNameProvider).value),
+              StaggerIn(
+                index: 0,
+                child: _buildHeader(
+                  firstName,
+                  ref.watch(currentOutletNameProvider).value,
+                ),
+              ),
 
               // ─── White Card Area ─────────────────────────────────────────
               Expanded(
@@ -133,8 +110,8 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                       ),
                       children: [
                         // ─── 1. REAL SALES DATA ─────────────────────────────
-                        _Stagger(
-                          anim: _itemAnim(0),
+                        StaggerIn(
+                          index: 1,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -154,22 +131,27 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              dashboardState.when(
-                                loading: () => _skeletonCard(120),
-                                error: (_, __) =>
-                                    _errorCard('Sales data unavailable'),
-                                data: (data) {
-                                  final rev = (data['revenue'] as num)
-                                      .toDouble();
-                                  final bills = (data['orders'] as num).toInt();
-                                  final avg = bills > 0 ? rev / bills : 0.0;
-                                  return _SalesCard(
-                                    rev: rev,
-                                    bills: bills,
-                                    avg: avg,
-                                    fmt: _fmt,
-                                  );
-                                },
+                              // Skeleton dissolves into the loaded card rather
+                              // than being swapped in a single frame.
+                              MotionSwitcher(
+                                child: dashboardState.when(
+                                  loading: () => _skeletonCard(120),
+                                  error: (_, __) =>
+                                      _errorCard('Sales data unavailable'),
+                                  data: (data) {
+                                    final rev =
+                                        (data['revenue'] as num).toDouble();
+                                    final bills =
+                                        (data['orders'] as num).toInt();
+                                    final avg = bills > 0 ? rev / bills : 0.0;
+                                    return _SalesCard(
+                                      rev: rev,
+                                      bills: bills,
+                                      avg: avg,
+                                      fmt: _fmt,
+                                    );
+                                  },
+                                ),
                               ),
                             ],
                           ),
@@ -178,19 +160,19 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                         const SizedBox(height: 32),
 
                         // ─── 2. STAFF ROSTER (Now WIRED to DB) ────────────────
-                        _Stagger(
-                          anim: _itemAnim(1),
+                        StaggerIn(
+                          index: 2,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _sectionTitle('Staff & Attendance'),
                               const SizedBox(height: 12),
-                              _PressableScale(
+                              Pressable(
                                 onTap: () {
                                   HapticFeedback.selectionClick();
                                   Navigator.push(
                                     context,
-                                    _fadeSlideRoute(const ViewRosterScreen()),
+                                    motionRoute(const ViewRosterScreen()),
                                   );
                                 },
                                 child: AbsorbPointer(
@@ -204,14 +186,14 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                         const SizedBox(height: 32),
 
                         // ─── 3. BUSINESS INSIGHTS (Now WIRED to DB) ───────────
-                        _Stagger(
-                          anim: _itemAnim(2),
+                        StaggerIn(
+                          index: 3,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _sectionTitle('Weekly Highlights'),
                               const SizedBox(height: 12),
-                              _PressableScale(
+                              Pressable(
                                 onTap: () async {
                                   HapticFeedback.selectionClick();
                                   // Hide the floating nav bar ONLY while the
@@ -225,7 +207,7 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
                                   navBar.hide();
                                   await Navigator.push(
                                     context,
-                                    _fadeSlideRoute(
+                                    motionRoute(
                                       const WeeklyInsightsScreen(),
                                     ),
                                   );
@@ -246,7 +228,6 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
             ],
           ),
         ),
-      ),
     );
   }
 
@@ -355,83 +336,9 @@ class _OutletHomeScreenState extends ConsumerState<OutletHomeScreen>
   );
 }
 
-// ─── Staggered entrance wrapper (fade + slide-up) ───────────────────────────
-class _Stagger extends StatelessWidget {
-  final Animation<double> anim;
-  final Widget child;
-  const _Stagger({required this.anim, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: anim,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.08),
-          end: Offset.zero,
-        ).animate(anim),
-        child: child,
-      ),
-    );
-  }
-}
-
-// ─── Smooth fade + slide route (for pushed screens) ─────────────────────────
-Route _fadeSlideRoute(Widget page) {
-  return PageRouteBuilder(
-    transitionDuration: const Duration(milliseconds: 350),
-    reverseTransitionDuration: const Duration(milliseconds: 280),
-    pageBuilder: (_, __, ___) => page,
-    transitionsBuilder: (_, animation, __, child) {
-      final curved = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-      );
-      return FadeTransition(
-        opacity: curved,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.04),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        ),
-      );
-    },
-  );
-}
-
-// ─── Reusable press-scale wrapper (tactile tap feedback) ────────────────────
-class _PressableScale extends StatefulWidget {
-  final Widget child;
-  final VoidCallback onTap;
-  const _PressableScale({required this.child, required this.onTap});
-
-  @override
-  State<_PressableScale> createState() => _PressableScaleState();
-}
-
-class _PressableScaleState extends State<_PressableScale> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onTap();
-      },
-      onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: widget.child,
-      ),
-    );
-  }
-}
+// Entrance wrapper, press-scale and the push route all now come from
+// core/ui/motion.dart (StaggerIn / Pressable / motionRoute), so every screen
+// shares one set of timings instead of three private copies.
 
 // ─── Profile Button (Animated) ──────────────────────────────────────────────
 class _ProfileButton extends StatefulWidget {
@@ -507,21 +414,24 @@ class _SalesCard extends StatelessWidget {
         children: [
           _StatBox(
             label: 'Revenue',
-            value: '₹${fmt(rev)}',
+            count: rev,
+            format: (v) => '₹${fmt(v)}',
             icon: Icons.currency_rupee_rounded,
             color: _ok,
           ),
           _vDiv(),
           _StatBox(
             label: 'Total Bills',
-            value: '$bills',
+            count: bills.toDouble(),
+            format: (v) => v.round().toString(),
             icon: Icons.receipt_long_rounded,
             color: _blue,
           ),
           _vDiv(),
           _StatBox(
             label: 'Avg Bill',
-            value: '₹${fmt(avg)}',
+            count: avg,
+            format: (v) => '₹${fmt(v)}',
             icon: Icons.analytics_outlined,
             color: _warn,
           ),
@@ -539,12 +449,22 @@ class _SalesCard extends StatelessWidget {
 }
 
 class _StatBox extends StatelessWidget {
-  final String label, value;
+  final String label;
+
+  /// The raw figure. Taken as a number rather than a pre-formatted string so
+  /// it can count up to its value — a freshly loaded card used to snap from
+  /// skeleton straight to a static number, which read as "nothing happened".
+  final double count;
+
+  /// Formats the in-flight value (currency symbol, K/L shortening, rounding).
+  final String Function(double) format;
+
   final IconData icon;
   final Color color;
   const _StatBox({
     required this.label,
-    required this.value,
+    required this.count,
+    required this.format,
     required this.icon,
     required this.color,
   });
@@ -554,9 +474,16 @@ class _StatBox extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          value,
-          style: GoogleFonts.antonSc(fontSize: 22, color: _black, height: 1.0),
+        AnimatedCount(
+          value: count,
+          builder: (context, v) => Text(
+            format(v),
+            style: GoogleFonts.antonSc(
+              fontSize: 22,
+              color: _black,
+              height: 1.0,
+            ),
+          ),
         ),
         const SizedBox(height: 4),
         Row(

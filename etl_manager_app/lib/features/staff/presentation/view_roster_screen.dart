@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 
 import '../../home/presentation/home_providers.dart';
 import '../../../app/dio_provider.dart'; // baseUrl for selfie images
+import '../../../core/ui/motion.dart';
 
 // ─── Premium Palette ─────────────────────────────────────────────────────────
 const _bg = Color(0xFF080808);
@@ -22,6 +23,11 @@ const _blue = Color(0xFF60A5FA);
 const _cardBg = Color(0xFFFAFAFA);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Stable per-day key, so a date change rebuilds the staggered rows instead of
+/// reusing their State (which would skip the entrance animation).
+String _ymdKey(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 String _formatTime(String? isoString) {
   if (isoString == null || isoString.isEmpty) return '';
@@ -49,32 +55,11 @@ class ViewRosterScreen extends ConsumerStatefulWidget {
   ConsumerState<ViewRosterScreen> createState() => _ViewRosterScreenState();
 }
 
-class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _animCtrl;
-  late final Animation<double> _fadeAnim;
-  late final Animation<Offset> _slideAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _animCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
-    _animCtrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _animCtrl.dispose();
-    super.dispose();
-  }
+class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen> {
+  // Entrance motion is per-row (`StaggerIn`), not one 600 ms fade over the
+  // whole list. The old version moved every staff card as a single block, so a
+  // 15-person roster arrived as one slab and took 600 ms to do it; the rows now
+  // cascade and the list reads top-to-bottom as it settles.
 
   DateTime get _selectedDate =>
       ref.watch(selectedRosterDateProvider) ?? DateTime.now();
@@ -85,9 +70,8 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
     // Never allow the future.
     final clamped = d.isAfter(today) ? today : d;
     ref.read(selectedRosterDateProvider.notifier).setDate(clamped);
-    _animCtrl
-      ..reset()
-      ..forward();
+    // The rows re-cascade on their own: each StaggerIn is keyed by the selected
+    // date, so a new date builds fresh widgets that animate in.
   }
 
   Future<void> _pickDate() async {
@@ -211,11 +195,8 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
                         );
                       });
 
-                    return FadeTransition(
-                      opacity: _fadeAnim,
-                      child: SlideTransition(
-                        position: _slideAnim,
-                        child: RefreshIndicator(
+                    final dateKey = _ymdKey(_selectedDate);
+                    return RefreshIndicator(
                           color: _black,
                           backgroundColor: _white,
                           strokeWidth: 2,
@@ -235,13 +216,20 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
                               MediaQuery.of(context).padding.bottom + 40,
                             ),
                             children: [
-                              _RosterSummaryCard(
-                                present: present,
-                                absent: absent,
-                                total: total,
+                              StaggerIn(
+                                key: ValueKey('$dateKey-summary'),
+                                index: 0,
+                                child: _RosterSummaryCard(
+                                  present: present,
+                                  absent: absent,
+                                  total: total,
+                                ),
                               ),
                               const SizedBox(height: 32),
-                              Row(
+                              StaggerIn(
+                                key: ValueKey('$dateKey-heading'),
+                                index: 1,
+                                child: Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
@@ -268,34 +256,43 @@ class _ViewRosterScreenState extends ConsumerState<ViewRosterScreen>
                                     ),
                                   ),
                                 ],
+                                ),
                               ),
                               const SizedBox(height: 20),
                               if (staffList.isEmpty)
                                 _EmptyStaff()
                               else
-                                ...staffList.map((s) {
+                                ...staffList.indexed.map((entry) {
+                                  final (i, s) = entry;
                                   final isPresent =
                                       (s['status'] ?? '').toString() ==
                                       'present';
-                                  return _StaffCard(
-                                    name: (s['name'] ?? 'Unknown').toString(),
-                                    isPresent: isPresent,
-                                    checkInStr: _formatTime(
-                                      s['check_in_time']?.toString(),
+                                  return StaggerIn(
+                                    // Keyed by date so switching days replays
+                                    // the cascade instead of silently swapping
+                                    // the rows under the same State objects.
+                                    key: ValueKey('$dateKey-staff-$i'),
+                                    index: 2 + i,
+                                    child: _StaffCard(
+                                      name: (s['name'] ?? 'Unknown').toString(),
+                                      isPresent: isPresent,
+                                      checkInStr: _formatTime(
+                                        s['check_in_time']?.toString(),
+                                      ),
+                                      checkOutStr: _formatTime(
+                                        s['check_out_time']?.toString(),
+                                      ),
+                                      selfieUrl: _fullSelfieUrl(
+                                        s['selfie_url'],
+                                      ),
+                                      onTap: isPresent
+                                          ? () => _showStaffDetail(context, s)
+                                          : null,
                                     ),
-                                    checkOutStr: _formatTime(
-                                      s['check_out_time']?.toString(),
-                                    ),
-                                    selfieUrl: _fullSelfieUrl(s['selfie_url']),
-                                    onTap: isPresent
-                                        ? () => _showStaffDetail(context, s)
-                                        : null,
                                   );
                                 }),
                             ],
                           ),
-                        ),
-                      ),
                     );
                   },
                 ),

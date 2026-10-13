@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../core/ui/motion.dart';
+
 import '../domain/sales_notifier.dart';
 import '../data/sales_repository.dart'; // SalesTrendPoint for the range-aware chart
 import '../../../core/widgets/skeleton.dart';
@@ -58,26 +60,27 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
       SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
     );
 
-    _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
+    // Normalised to the shared motion vocabulary (core/ui/motion.dart). This
+    // screen previously mixed 200/250/300/600/700/900/1000 ms animations, so
+    // nothing on it moved at the same speed as anything else — which is most of
+    // why it felt unpolished rather than any single animation being wrong.
+    _fadeCtrl = AnimationController(vsync: this, duration: Motion.base);
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Motion.enter);
     _fadeCtrl.forward();
 
     _switchCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 440),
     );
     // Staggered entrance: rings come in first, the trend graph slightly after.
     // Replays on mount AND on every chip switch (via _triggerFade).
     _ringsIn = CurvedAnimation(
       parent: _switchCtrl,
-      curve: const Interval(0.0, 0.7, curve: Curves.easeOutCubic),
+      curve: const Interval(0.0, 0.7, curve: Motion.enter),
     );
     _graphIn = CurvedAnimation(
       parent: _switchCtrl,
-      curve: const Interval(0.3, 1.0, curve: Curves.easeOutCubic),
+      curve: const Interval(0.3, 1.0, curve: Motion.enter),
     );
     _switchCtrl.value = 1.0;
 
@@ -332,7 +335,7 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                                 ),
                                 const SizedBox(width: 8),
                                 AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 300),
+                                  duration: Motion.base,
                                   child: Text(
                                     salesState.rangeLabel ??
                                         _periodLabel(
@@ -388,8 +391,8 @@ class _OutletSalesScreenState extends ConsumerState<OutletSalesScreen>
                               begin: 0,
                               end: summary?.totalSales ?? 0,
                             ),
-                            duration: const Duration(milliseconds: 900),
-                            curve: Curves.easeOutCubic,
+                            duration: Motion.count,
+                            curve: Motion.enter,
                             builder: (_, val, __) => FittedBox(
                               fit: BoxFit.scaleDown,
                               alignment: Alignment.centerLeft,
@@ -572,8 +575,8 @@ class _PeriodTab extends StatelessWidget {
         onTap();
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
+        duration: Motion.quick,
+        curve: Motion.enter,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected ? _black : const Color(0xFFF9F9FB),
@@ -663,8 +666,8 @@ class _VisualDataRings extends StatelessWidget {
                   children: [
                     TweenAnimationBuilder<double>(
                       tween: Tween(begin: 0, end: bills.toDouble()),
-                      duration: const Duration(milliseconds: 1000),
-                      curve: Curves.easeOutCubic,
+                      duration: Motion.count,
+                      curve: Motion.enter,
                       builder: (_, val, __) => FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
@@ -737,8 +740,8 @@ class _VisualDataRings extends StatelessWidget {
                   children: [
                     TweenAnimationBuilder<double>(
                       tween: Tween(begin: 0, end: avgBill),
-                      duration: const Duration(milliseconds: 1000),
-                      curve: Curves.easeOutCubic,
+                      duration: Motion.count,
+                      curve: Motion.enter,
                       builder: (_, val, __) => FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
@@ -877,7 +880,7 @@ class _InteractiveTrendGraphState
                   ),
                   const SizedBox(height: 4),
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 200),
+                    duration: Motion.quick,
                     child: Text(
                       active.label,
                       key: ValueKey('lbl_${active.label}'),
@@ -892,7 +895,7 @@ class _InteractiveTrendGraphState
               ),
             ),
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 250),
+              duration: Motion.quick,
               child: Column(
                 key: ValueKey(activeIndex),
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -970,8 +973,8 @@ class _InteractiveTrendGraphState
                     else
                       const SizedBox(height: 18),
                     AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeOutCubic,
+                      duration: Motion.base,
+                      curve: Motion.enter,
                       width: isSelected ? 28 : 22,
                       height: 110 * val,
                       decoration: BoxDecoration(
@@ -990,7 +993,7 @@ class _InteractiveTrendGraphState
                     ),
                     const SizedBox(height: 12),
                     AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 200),
+                      duration: Motion.quick,
                       style: GoogleFonts.inter(
                         fontSize: 10,
                         fontWeight:
@@ -1038,7 +1041,7 @@ class _PremiumSkeletonState extends State<_PremiumSkeleton>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: Motion.count,
     )..repeat(reverse: true);
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
   }
