@@ -37,6 +37,8 @@ from ...models.outlet_membership import (
     MEMBERSHIP_MANAGER,
 )
 from ...services.email_service import send_email
+# Same welcome + set-password mail a newly-onboarded owner receives.
+from .onboarding import _set_password_email_html
 from ...services.notice_service import create_notice
 from ..deps import get_current_user, require_etl_manager, CurrentUser
 
@@ -119,7 +121,7 @@ def _add_manager_email_html(name: str, outlet_name: str, link: Optional[str]) ->
       <p>Hi {name or 'there'},</p>
       <p>You now have manager access to <b>{outlet_name}</b> on ETL.</p>
       {cta}
-      <p style="color:#888; font-size:13px; margin-top:28px;">— ETL Food Court Team</p>
+      <p style="color:#888; font-size:13px; margin-top:28px;">— Eat Truck Love Team</p>
     </div>
     """
 
@@ -359,9 +361,14 @@ def remove_outlet_manager(
 #      email as `sub`, and get_current_user resolves that against the DB on
 #      every request, so it 401s them out and the app sends them to login
 #
-# Editing only the name/phone — or re-saving the SAME email — touches neither
-# the password nor the inbox. That matters: a blanket reset on every save would
-# lock out an owner whose name was simply corrected.
+# The trigger is SUBMITTING the email field at all — not whether the address
+# differs. Re-saving the same address deliberately re-issues the login too, so
+# this doubles as "resend the welcome link" for an owner who lost theirs.
+#
+# CONSEQUENCE, by design: the app's edit sheet pre-fills the email box, so an
+# ETL manager who opens it and saves — even after changing only the phone —
+# retires that owner's password. Omitting the field entirely (name/phone only)
+# is the way to edit without re-issuing.
 #
 # NOTE: one login can own several outlets, so this resets access to ALL of them,
 # not just the outlet it was edited from. That is inherent to it being a single
@@ -418,6 +425,7 @@ async def update_outlet_owner(
     old_email = (mgr.email or "").strip().lower()
     new_email = None
     email_changed = False
+    reissue = False
     if body.email is not None:
         new_email = body.email.strip().lower()
         if "@" not in new_email or "." not in new_email.split("@")[-1]:
@@ -435,14 +443,15 @@ async def update_outlet_owner(
             raise HTTPException(status_code=409, detail="That email is already in use.")
 
         email_changed = new_email != old_email
-        if email_changed:
-            mgr.email = new_email
-            # Retire the old password. A random hash rather than "" keeps the
-            # column a valid bcrypt digest, so a stale login attempt gets a
-            # clean 401 instead of raising inside bcrypt.checkpw.
-            mgr.hashed_password = hash_password(secrets.token_urlsafe(24))
-            # An inactive owner could never use the link we're about to send.
-            mgr.is_active = True
+        # Re-issue whenever the field was submitted, same address or not.
+        reissue = True
+        mgr.email = new_email
+        # Retire the old password. A random hash rather than "" keeps the
+        # column a valid bcrypt digest, so a stale login attempt gets a
+        # clean 401 instead of raising inside bcrypt.checkpw.
+        mgr.hashed_password = hash_password(secrets.token_urlsafe(24))
+        # An inactive owner could never use the link we're about to send.
+        mgr.is_active = True
 
     # Keep the onboarding application record (what the ETL UI shows) in sync.
     appn = (
@@ -465,7 +474,7 @@ async def update_outlet_owner(
     email_sent = False
     message = "Owner details updated."
 
-    if email_changed:
+    if reissue:
         token = create_token(
             {"sub": new_email, "purpose": "set_password", "mid": mgr.id},
             _SET_PW_EXPIRY_MIN,
@@ -473,21 +482,27 @@ async def update_outlet_owner(
         base = (settings.PUBLIC_BASE_URL or "").rstrip("/")
         link = f"{base}/auth/set-password?token={token}"
         try:
+            # Deliberately the SAME mail a newly-onboarded owner receives —
+            # imported rather than copied, so there is one welcome template to
+            # maintain and both flows can never drift apart.
             email_sent = await send_email(
                 to=new_email,
-                subject="Your outlet login email changed — set a new password",
-                html=_owner_email_changed_html(mgr.name, outlet.vendor_name, link),
+                subject="Welcome to Eat Truck Love — set your password",
+                html=_set_password_email_html(
+                    mgr.name, outlet.vendor_name, link
+                ),
             )
         except Exception as e:  # noqa: BLE001
             # The account change is already committed and the link is in the
             # response, so a mail outage must not fail the request.
-            logger.warning("owner email-change mail failed for outlet %s: %s", outlet_id, e)
+            logger.warning("owner re-issue mail failed for outlet %s: %s", outlet_id, e)
             email_sent = False
 
         if email_sent:
+            moved = "moved to" if email_changed else "reset for"
             message = (
-                f"Owner login moved to {new_email}. Their old password no longer "
-                f"works — a set-password link has been emailed to the new address."
+                f"Owner login {moved} {new_email}. Their old password no longer "
+                f"works — a set-password link has been emailed to that address."
             )
         else:
             # `set_password_link` is returned either way, so the manager can
@@ -495,10 +510,9 @@ async def update_outlet_owner(
             # a no-op by design, so the fallback for a lost link is
             # POST /auth/forgot-password with the new email.
             message = (
-                f"Owner login moved to {new_email}, and their old password no "
-                f"longer works — but the email could NOT be sent. Share the "
-                f"set-password link below with them, or have them use "
-                f"'forgot password' on the new address."
+                f"{new_email}'s old password no longer works — but the email "
+                f"could NOT be sent. Share the set-password link below with "
+                f"them, or have them use 'forgot password' on that address."
             )
 
     return {
@@ -506,37 +520,16 @@ async def update_outlet_owner(
         "manager_id": mgr.id,
         "name": mgr.name,
         "email": mgr.email,
+        # Did the address actually change…
         "email_changed": email_changed,
-        "password_reset": email_changed,
+        # …vs. was the login re-issued (password retired + link sent), which
+        # now happens on any submission of the email field.
+        "login_reissued": reissue,
+        "password_reset": reissue,
         "set_password_link": link,
         "email_sent": email_sent,
         "message": message,
     }
-
-
-def _owner_email_changed_html(owner_name: str, outlet_name: str, link: str) -> str:
-    return f"""
-    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
-      <h2 style="color:#0A0A0A;">Set your new password</h2>
-      <p>Hi {owner_name},</p>
-      <p>The login email for your outlet <b>{outlet_name}</b> was updated to this
-         address. For security, the previous password has been removed — please
-         set a new one using the button below. From then on, this address and
-         the password you choose are your login.</p>
-      <p style="text-align:center; margin: 28px 0;">
-        <a href="{link}"
-           style="background:#D02128; color:#fff; padding:12px 28px;
-                  border-radius:8px; text-decoration:none; font-weight:bold;">
-           Set My Password
-        </a>
-      </p>
-      <p style="color:#888; font-size:13px;">This link is valid for 7 days. If
-         the button doesn't work, copy and paste this URL:</p>
-      <p style="color:#888; font-size:12px; word-break:break-all;">{link}</p>
-      <p style="color:#888; font-size:12px;">If you weren't expecting this,
-         contact your Eat Truck Love manager.</p>
-    </div>
-    """
 
 
 # ─── ETL admin: delete an outlet from a court ────────────────────────────────
