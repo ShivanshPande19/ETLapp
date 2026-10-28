@@ -323,9 +323,29 @@ async def approve_application(
             status_code=400,
             detail="Petpooja rest_id is required to connect sales sync.",
         )
-    if db.query(Outlet).filter(Outlet.rest_id == rest_id).first():
+    # Two outlets are the same outlet when they are the same outlet AT THE SAME
+    # POS: same adapter, same id, same account. `rest_id` on its own is not
+    # enough — Royal POS numbers `restaurant_id` per brand and Rista's branch
+    # codes are per-account, so the same `rest_id` under different credentials
+    # is a genuinely different outlet. Mirrors `uq_outlet_pos_identity`, down to
+    # treating a NULL key and an empty one as the same account.
+    pos_source = (data.pos_source or "").strip() or "petpooja_generic"
+    pp_app_key = data.pp_app_key or None
+    if (
+        db.query(Outlet)
+        .filter(
+            Outlet.rest_id == rest_id,
+            Outlet.pos_source == pos_source,
+            func.coalesce(Outlet.pp_app_key, "") == (pp_app_key or ""),
+        )
+        .first()
+    ):
         raise HTTPException(
-            status_code=409, detail="An outlet with this rest_id already exists."
+            status_code=409,
+            detail=(
+                "An outlet with this rest_id already exists on this POS "
+                "account."
+            ),
         )
     # MULTI-OUTLET: an existing account with this email is NO LONGER an error.
     # The same owner can run outlets across several courts under ONE login, so
@@ -344,11 +364,11 @@ async def approve_application(
         vendor_name=app.outlet_name,
         rest_id=rest_id,
         is_active=1,
-        pp_app_key=(data.pp_app_key or None),
+        pp_app_key=pp_app_key,
         pp_app_secret=(data.pp_app_secret or None),
         pp_access_token=(data.pp_access_token or None),
         pp_cookie=(data.pp_cookie or None),
-        pos_source=((data.pos_source or "").strip() or "petpooja_generic"),
+        pos_source=pos_source,
     )
     db.add(outlet)
     db.flush()  # get outlet.id

@@ -70,7 +70,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_staff_columns, ensure_manager_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, ensure_maintenance_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref, backfill_role_split
+    from .database import Base, engine, ensure_attendance_columns, ensure_outlet_columns, ensure_outlet_pos_identity_unique, ensure_staff_columns, ensure_manager_columns, ensure_hk_columns, ensure_court_columns, ensure_notice_columns, ensure_device_token_columns, ensure_feedback_columns, ensure_maintenance_columns, backfill_sales_orders, backfill_outlet_memberships, backfill_outlet_documents, migrate_generic_sales_external_ref, backfill_role_split
 
     Base.metadata.create_all(bind=engine)
     print("[DB] All tables verified / created ✓")
@@ -82,6 +82,12 @@ async def lifespan(app: FastAPI):
     # ✅ Add per-outlet Petpooja credential columns + pos_source + doc columns
     ensure_outlet_columns()
     print("[DB] Outlet schema ensured ✓")
+
+    # ✅ Swap the global UNIQUE(rest_id) for a (pos_source, rest_id, app_key)
+    #    one — Royal POS/Rista ids are only unique within an account. Must run
+    #    AFTER ensure_outlet_columns, which adds the columns it spans.
+    ensure_outlet_pos_identity_unique()
+    print("[DB] Outlet POS-identity uniqueness ensured ✓")
 
     # ✅ Seed outlet doc columns from the linked onboarding application (only
     #    fills NULLs, so it never clobbers a doc changed via the new endpoints).

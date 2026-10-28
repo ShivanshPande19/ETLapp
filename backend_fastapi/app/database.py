@@ -202,6 +202,87 @@ def ensure_outlet_columns() -> None:
         print(f"[MIGRATION] backfill outlets.pos_source skipped: {e}")
 
 
+def ensure_outlet_pos_identity_unique() -> None:
+    """Replace the global ``UNIQUE (rest_id)`` with a per-POS composite one.
+
+    `rest_id` is each adapter's own identifier for the outlet, and only the
+    Petpooja ones are globally unique. Royal POS numbers `restaurant_id` PER
+    BRAND and Rista's branch codes are per-account, so two outlets on different
+    accounts can legitimately carry the same `rest_id` — the old constraint
+    rejected the second one as a duplicate outlet. See the comment on
+    ``Outlet.__table_args__`` for the full reasoning.
+
+    Order matters: the replacement index is created BEFORE the old constraint
+    is dropped, so a failure part-way through leaves the table guarded by the
+    STRICTER of the two rather than by nothing.
+
+    Best-effort + idempotent, like the other ensure_* helpers. `create_all`
+    builds a fresh DB with the composite index already in place, so this only
+    does work on a database that predates it.
+    """
+    try:
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if "outlets" not in insp.get_table_names():
+                return  # fresh DB — create_all builds the right index itself
+            cols = {c["name"] for c in insp.get_columns("outlets")}
+            # The index spans pos_source/pp_app_key; without them (a DB that
+            # has not run ensure_outlet_columns yet) there is nothing to do.
+            if not {"pos_source", "pp_app_key"} <= cols:
+                return
+            have = {i["name"] for i in insp.get_indexes("outlets")}
+    except Exception as e:
+        print(f"[MIGRATION] outlet pos-identity inspect skipped: {e}")
+        return
+
+    if "uq_outlet_pos_identity" not in have:
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX uq_outlet_pos_identity ON outlets "
+                        "(pos_source, rest_id, COALESCE(pp_app_key, ''))"
+                    )
+                )
+            print("[MIGRATION] outlets composite POS-identity index created ✓")
+        except Exception as e:
+            # Leave the old constraint in place — do NOT fall through to the
+            # drop below, or the table would end up with no uniqueness at all.
+            print(f"[MIGRATION] outlet pos-identity index skipped: {e}")
+            return
+
+    # SQLite cannot drop a column-level UNIQUE without rebuilding the table.
+    # Only the dev DB is SQLite (prod is Postgres, tests build fresh from the
+    # model), so it keeps the stricter old constraint and that is fine: the
+    # composite index above is the one the code now relies on.
+    if _is_sqlite:
+        return
+
+    try:
+        with engine.begin() as conn:
+            # Drop whatever unique constraint/index covers rest_id ALONE,
+            # whatever Postgres happened to name it.
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT con.conname
+                      FROM pg_constraint con
+                      JOIN pg_class rel ON rel.oid = con.conrelid
+                     WHERE rel.relname = 'outlets'
+                       AND con.contype = 'u'
+                       AND pg_get_constraintdef(con.oid) = 'UNIQUE (rest_id)'
+                    """
+                )
+            ).fetchall()
+            for (name,) in rows:
+                conn.execute(
+                    text(f'ALTER TABLE outlets DROP CONSTRAINT "{name}"')
+                )
+                print(f"[MIGRATION] dropped global UNIQUE(rest_id) ({name}) ✓")
+    except Exception as e:
+        print(f"[MIGRATION] drop global UNIQUE(rest_id) skipped: {e}")
+
+
 def backfill_sales_orders() -> None:
     """One-time, idempotent copy of ``petpooja_orders`` → ``sales_orders``.
 

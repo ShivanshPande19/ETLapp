@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -68,7 +69,9 @@ class Outlet(Base):
     id = Column(Integer, primary_key=True, index=True)
     court_id = Column(Integer, ForeignKey("courts.id"), nullable=False, index=True)
     vendor_name = Column(String, nullable=False)
-    rest_id = Column(String, unique=True, nullable=False)
+    # The outlet's identifier AT ITS POS. NOT globally unique on its own — see
+    # `uq_outlet_pos_identity` in __table_args__ below for why.
+    rest_id = Column(String, nullable=False, index=True)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -97,6 +100,36 @@ class Outlet(Base):
 
     court = relationship("Court", back_populates="outlets")
     sales_cache = relationship("DailySaleCache", back_populates="outlet", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        # An outlet's identity at its POS is (which POS, which id, under which
+        # account) — NOT `rest_id` alone.
+        #
+        # `rest_id` used to carry a plain `unique=True`, which encodes a
+        # Petpooja-only assumption: a Petpooja `restID` really is unique across
+        # the whole of Petpooja. Every other adapter reads the column
+        # differently, and for two of them it is only unique WITHIN an account:
+        #
+        #   • royal_pos → `restaurant_id`, numbered per BRAND. Two different
+        #     brands both legitimately have restaurant_id "1", told apart by
+        #     `pp_app_key` (the Royal brand_id). This is not hypothetical: it
+        #     is exactly why "The Chatpata Affair (Sec-1)" (1 / thech722) could
+        #     not be onboarded alongside "The Chatpata Affair BU" (1 / thech899)
+        #     — the global constraint rejected it as a duplicate outlet.
+        #   • rista     → a branch code like "GNO", unique per Rista account.
+        #
+        # COALESCE(pp_app_key, '') rather than the bare column so that NULL and
+        # '' are the SAME key: Postgres treats NULLs as distinct in a unique
+        # index, which would have quietly let two credential-less Petpooja
+        # outlets share one restID and so lost the guard for the common case.
+        Index(
+            "uq_outlet_pos_identity",
+            "pos_source",
+            "rest_id",
+            text("COALESCE(pp_app_key, '')"),
+            unique=True,
+        ),
+    )
 
 
 class DailySaleCache(Base):
