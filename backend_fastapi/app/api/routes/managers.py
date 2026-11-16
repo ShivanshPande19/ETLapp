@@ -292,6 +292,7 @@ _CREATABLE_ROLES = {
     "azimuth_management":        "manager",
     "crownest_ops_head":         "manager",
     "crownest_head":             "manager",
+    "operations_office":         "manager",
     # view-only, zone-scoped — a STAFF row so it can mark its own attendance +
     # appear in the roster (reuses the maintenance-head attendance/roster path).
     "crownest_zone_manager":     "staff",
@@ -302,6 +303,7 @@ _ROLE_LABELS = {
     "azimuth_management":        "Azimuth Management",
     "crownest_ops_head":         "Crownest Ops Head",
     "crownest_head":             "Crownest Head",
+    "operations_office":         "Operations - Office",
     "crownest_zone_manager":     "Crownest Zone Manager",
     "azimuth_maintenance":       "Azimuth Maintenance",
     "crownest_maintenance_head": "Crownest Maintenance Head",
@@ -314,6 +316,7 @@ _ORG_BY_ROLE = {
     "azimuth_maintenance":       "azimuth",
     "crownest_ops_head":         "crownest",
     "crownest_head":             "crownest",
+    "operations_office":         "crownest",
     "crownest_zone_manager":     "crownest",
     "crownest_maintenance_head": "crownest",
 }

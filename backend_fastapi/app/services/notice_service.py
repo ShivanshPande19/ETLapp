@@ -91,7 +91,9 @@ def _dispatch_push(db: Session, notice: Notice) -> None:
             "court_id": notice.court_id,
             "outlet_id": notice.outlet_id,
             # Consumed by the Flutter tap handler to deep-link into the app.
-            "route": "/notices",
+            # A notice with its own screen (a team task) opens that; everything
+            # else opens the inbox, as before.
+            "route": notice.route or "/notices",
         }
 
         def _factory():
@@ -155,6 +157,7 @@ def create_notice(
     target_roles: Optional[list] = None,       # for audience="role": role keys to deliver to
     recipient_manager_id: Optional[int] = None,  # for audience="role": an individual manager mention
     push: bool = True,                         # set False for low-value/noisy notices
+    route: Optional[str] = None,               # deep link, e.g. "/tasks/42"; None = inbox
 ) -> Notice:
     notice = Notice(
         audience=audience,
@@ -168,6 +171,7 @@ def create_notice(
         # Stored as a JSON string so it works identically on SQLite + Postgres.
         target_roles=(json.dumps(list(target_roles)) if target_roles else None),
         recipient_manager_id=recipient_manager_id,
+        route=route,
         is_read=False,
     )
     db.add(notice)

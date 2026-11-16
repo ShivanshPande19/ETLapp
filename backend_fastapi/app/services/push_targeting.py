@@ -67,6 +67,7 @@ ETL_MANAGER_ROLES = (
     "azimuth_management",
     "crownest_ops_head",
     "crownest_head",
+    "operations_office",
 )
 STAFF_ROLES = ("etl_staff", "staff", "outlet_staff")
 

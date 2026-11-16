@@ -449,6 +449,8 @@ def ensure_notice_columns() -> None:
         # ROLE SPLIT: role-based targeting (audience="role").
         "target_roles": "TEXT",
         "recipient_manager_id": "INTEGER",
+        # Deep link for the notice (e.g. "/tasks/42"); NULL = open the inbox.
+        "route": "VARCHAR",
     }
     try:
         with engine.begin() as conn:

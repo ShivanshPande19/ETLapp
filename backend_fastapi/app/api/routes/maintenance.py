@@ -421,7 +421,7 @@ def _ticket_label(issue: MaintenanceIssue) -> str:
 # (they behave identically). The Ops Head raises tickets and is not separately
 # alerted for its own. Immediate alerts are fired here; the 6h reminders and
 # 2d/4d escalations are driven by the scheduler (services/scheduler_service.py).
-MANAGEMENT_TIER_ROLES = ["azimuth_management", "crownest_head"]
+MANAGEMENT_TIER_ROLES = ["azimuth_management", "crownest_head", "operations_office"]
 
 
 def _notify_triage(db: Session, issue: MaintenanceIssue) -> None:

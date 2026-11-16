@@ -35,6 +35,7 @@ from .api.routes import devices
 from .api.routes import legal
 from .api.routes import outlets as outlets_routes
 from .api.routes import managers as managers_routes
+from .api.routes import team_tasks as team_tasks_routes
 
 from .models import sale as _sale_models
 from .models import housekeeping as _hk_models
@@ -47,6 +48,9 @@ from .models import onboarding as _onboarding_models
 from .models import notice as _notice_models
 from .models import device_token as _device_token_models
 from .models import outlet_membership as _outlet_membership_models
+# Imported so create_all builds team_tasks / team_task_events on boot. Both
+# are brand-new tables, so no ensure_* migration is needed for them.
+from .models import team_task as _team_task_models
 
 from .services import fcm_service
 from .services.scheduler_service import start_scheduler, stop_scheduler
@@ -328,3 +332,4 @@ app.include_router(legal.router,                                tags=["Legal"])
 app.include_router(outlets_routes.router, prefix="/outlets",    tags=["Outlets"])
 # ETL-manager account administration (create/list/deactivate other ETL managers).
 app.include_router(managers_routes.router, prefix="/managers",  tags=["Managers"])
+app.include_router(team_tasks_routes.router, prefix="/tasks",   tags=["Team tasks"])
