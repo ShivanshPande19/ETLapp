@@ -14,6 +14,7 @@ import '../../features/feedbacks/domain/etl_feedback_notifier.dart';
 import '../../features/feedbacks/domain/court_feedback_notifier.dart';
 import '../../features/feedbacks/domain/feedback_notifier.dart';
 import '../../features/home/presentation/home_providers.dart';
+import '../../features/tasks/domain/team_tasks_notifier.dart';
 
 class SSEService {
   final Ref _ref;
@@ -107,6 +108,14 @@ class SSEService {
       _ref.invalidate(feedbackNotifierProvider); // outlet manager/staff
       _ref.invalidate(courtFeedbackNotifierProvider); // ETL staff: court feedback
       _ref.invalidate(homeFeedbacksProvider); // ETL home count
+    }
+
+    // ✅ Team task update — carries ids only; each client re-reads its own
+    // tasks through the party-scoped endpoints.
+    if (type == 'task_update') {
+      debugPrint('[SSE] Task update — task #${data['task_id']}');
+      _ref.read(teamTasksNotifierProvider.notifier).refresh();
+      _ref.invalidate(teamTaskDetailProvider);
     }
 
     // ✅ Notice update (shift change / early logout / auto-close) — refresh

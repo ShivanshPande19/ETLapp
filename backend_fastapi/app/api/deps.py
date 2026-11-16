@@ -30,6 +30,9 @@ MANAGEMENT_ROLES = frozenset({
     "azimuth_management",
     "crownest_ops_head",
     "crownest_head",
+    # "Operations - Office": same access as Crownest Head in every respect —
+    # only the designation differs.
+    "operations_office",
     "etl_manager",   # legacy full-access — treat as management until reassigned
     "manager",       # legacy alias created by /auth/seed
 })

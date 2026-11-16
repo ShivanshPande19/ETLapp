@@ -573,6 +573,23 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     }
   }
 
+  // ── Pull-to-refresh ───────────────────────────────────────────────────────
+
+  Future<void> _pullToRefresh() async {
+    HapticFeedback.selectionClick();
+    // Past dates read their own provider; drop it so it refetches too.
+    ref.invalidate(_dayStatusProvider);
+    await ref.read(housekeepingNotifierProvider.notifier).refresh();
+  }
+
+  /// A pull needs something to scroll. A message alone isn't scrollable, so a
+  /// short or empty sheet would otherwise ignore the pull.
+  Widget _pullable(Widget child) => ListView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    padding: EdgeInsets.zero,
+    children: [child],
+  );
+
   // ── Read-only history list (for past dates) ────────────────────────────────
 
   Widget _buildHistoryList(String? shiftKey, double bottomPad) {
@@ -588,10 +605,12 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
         tileHeight: 64,
         padding: EdgeInsets.fromLTRB(20, 18, 20, 20),
       ),
-      error: (_, __) => const _HistoryMessage(
-        icon: Icons.wifi_off_rounded,
-        title: 'Could not load',
-        subtitle: 'Switch dates and try again.',
+      error: (_, __) => _pullable(
+        const _HistoryMessage(
+          icon: Icons.wifi_off_rounded,
+          title: 'Could not load',
+          subtitle: 'Pull down to try again.',
+        ),
       ),
       data: (status) {
         // Find this court + shift for the selected date.
@@ -604,14 +623,17 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
         final doneCount = tasks.where((t) => t.isDone).length;
 
         if (tasks.isEmpty) {
-          return const _HistoryMessage(
-            icon: Icons.event_busy_rounded,
-            title: 'No records',
-            subtitle: 'No checklist data for this day.',
+          return _pullable(
+            const _HistoryMessage(
+              icon: Icons.event_busy_rounded,
+              title: 'No records',
+              subtitle: 'No checklist data for this day.',
+            ),
           );
         }
 
         return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.fromLTRB(20, 18, 20, bottomPad),
           children: [
             Container(
@@ -858,19 +880,44 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
                       top: Radius.circular(28),
                     ),
                   ),
-                  child: !hasShifts
-                      ? const _HistoryMessage(
-                          icon: Icons.checklist_rtl_rounded,
-                          title: 'No checklist yet',
-                          subtitle:
-                              'This court has no housekeeping checklist configured.',
-                        )
-                      : isToday
-                      ? _buildTodayList(hkState, dailyTasks, navBarClearance)
-                      : _buildHistoryList(
-                          hkState.currentShiftKey,
-                          navBarClearance,
-                        ),
+                  // Pull-to-refresh: this screen used to have no way to
+                  // reload at all, so a checklist that failed to load once
+                  // stayed broken until the app was killed.
+                  child: RefreshIndicator(
+                    color: _black,
+                    onRefresh: _pullToRefresh,
+                    child: !hasShifts
+                        // "Couldn't load" and "nothing configured" are
+                        // different answers. Folding a failed load into the
+                        // second told staff their court had no checklist when
+                        // it had a full one.
+                        ? (hkState.loadFailed
+                              ? _pullable(
+                                  _LoadFailedMessage(
+                                    message: hkState.loadError,
+                                    retrying: hkState.loading,
+                                    onRetry: () => ref
+                                        .read(
+                                          housekeepingNotifierProvider.notifier,
+                                        )
+                                        .refresh(),
+                                  ),
+                                )
+                              : _pullable(
+                                  const _HistoryMessage(
+                                    icon: Icons.checklist_rtl_rounded,
+                                    title: 'No checklist yet',
+                                    subtitle:
+                                        'This court has no housekeeping checklist configured.',
+                                  ),
+                                ))
+                        : isToday
+                        ? _buildTodayList(hkState, dailyTasks, navBarClearance)
+                        : _buildHistoryList(
+                            hkState.currentShiftKey,
+                            navBarClearance,
+                          ),
+                  ),
                 ),
               ),
             ],
@@ -888,6 +935,7 @@ class _StaffChecklistScreenState extends ConsumerState<StaffChecklistScreen>
     final shiftActive = hkState.currentShiftActive;
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(20, 20, 20, navBarClearance),
       children: [
         // Daily tasks
@@ -2194,6 +2242,77 @@ class _HistoryMessage extends StatelessWidget {
             subtitle,
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(fontSize: 13, color: _grey),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown instead of "No checklist yet" when the checklist couldn't be loaded.
+class _LoadFailedMessage extends StatelessWidget {
+  final String? message;
+  final bool retrying;
+  final VoidCallback onRetry;
+
+  const _LoadFailedMessage({
+    required this.message,
+    required this.retrying,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 80, left: 32, right: 32),
+      child: Column(
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 40, color: _grey),
+          const SizedBox(height: 14),
+          Text(
+            "Couldn't load your checklist",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: _black,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message ?? 'Check your internet and try again.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(fontSize: 13, color: _grey),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: retrying ? null : onRetry,
+            style: FilledButton.styleFrom(
+              backgroundColor: _black,
+              foregroundColor: _white,
+              // Explicit, so the busy state stays visible instead of falling
+              // back to the theme's near-invisible disabled colours.
+              disabledBackgroundColor: _black.withValues(alpha: 0.7),
+              disabledForegroundColor: _white,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: retrying
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _white,
+                    ),
+                  )
+                : const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(
+              retrying ? 'Checking…' : 'Retry',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),

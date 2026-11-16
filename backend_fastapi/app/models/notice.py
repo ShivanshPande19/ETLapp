@@ -56,6 +56,12 @@ class Notice(Base):
     title = Column(String, nullable=False)
     body = Column(String, nullable=True)
 
+    # Where tapping this notice should take the user, e.g. "/tasks/42". NULL for
+    # every notice that has no screen of its own — those open the inbox, as
+    # before. Sent in the push payload too, so the OS banner and the inbox row
+    # land on the same screen.
+    route = Column(String, nullable=True)
+
     is_read = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime, server_default=func.now())
 

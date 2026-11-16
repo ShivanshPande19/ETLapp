@@ -18,6 +18,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -47,36 +48,43 @@ def register_device(
 
     Idempotent: the app calls this on every login and on every token refresh.
     """
-    existing = (
-        db.query(DeviceToken)
-        .filter(DeviceToken.fcm_token == body.fcm_token)
-        .first()
-    )
-
     now = datetime.utcnow()
+
+    def _find():
+        return (
+            db.query(DeviceToken)
+            .filter(DeviceToken.fcm_token == body.fcm_token)
+            .first()
+        )
+
+    def _claim(row: DeviceToken) -> bool:
+        """Hand an existing token row to the caller. Returns True when it
+        belonged to somebody else (the shared-device transfer)."""
+        moved = not (row.user_type == user.user_type and row.user_id == user.id)
+        if moved:
+            logger.info(
+                "token transferred %s:%s -> %s:%s",
+                row.user_type, row.user_id, user.user_type, user.id,
+            )
+        row.user_type = user.user_type
+        row.user_id = user.id
+        row.email = user.email
+        row.role = user.role
+        row.court_id = user.court_id
+        row.outlet_id = user.outlet_id
+        row.platform = body.platform or row.platform
+        row.app_version = body.app_version or row.app_version
+        row.is_active = True
+        row.last_seen_at = now
+        return moved
+
     transferred = False
+    existing = _find()
 
     if existing is not None:
         # Same token, possibly a different person than last time.
-        transferred = not (
-            existing.user_type == user.user_type and existing.user_id == user.id
-        )
-        if transferred:
-            logger.info(
-                "token transferred %s:%s -> %s:%s",
-                existing.user_type, existing.user_id, user.user_type, user.id,
-            )
-
-        existing.user_type = user.user_type
-        existing.user_id = user.id
-        existing.email = user.email
-        existing.role = user.role
-        existing.court_id = user.court_id
-        existing.outlet_id = user.outlet_id
-        existing.platform = body.platform or existing.platform
-        existing.app_version = body.app_version or existing.app_version
-        existing.is_active = True
-        existing.last_seen_at = now
+        transferred = _claim(existing)
+        db.commit()
     else:
         db.add(
             DeviceToken(
@@ -93,8 +101,20 @@ def register_device(
                 last_seen_at=now,
             )
         )
-
-    db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # The app registers on sign-in AND on every token refresh, and the
+            # two can arrive together. Both saw "no row", both inserted, and
+            # the UNIQUE index rejected the second one — which used to surface
+            # as a 500. The row now exists, so claim it instead: the outcome is
+            # the same as if this request had simply arrived a moment later.
+            db.rollback()
+            existing = _find()
+            if existing is None:
+                raise
+            transferred = _claim(existing)
+            db.commit()
 
     return DeviceRegisterOut(
         status="ok",

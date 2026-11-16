@@ -21,6 +21,8 @@ class NoticeOut(BaseModel):
     staff_id: Optional[int] = None
     title: str
     body: Optional[str] = None
+    # Deep link, e.g. "/tasks/42". None = this notice has no screen of its own.
+    route: Optional[str] = None
     is_read: bool
     created_at: Optional[datetime] = None
 

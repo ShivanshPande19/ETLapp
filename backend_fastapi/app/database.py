@@ -168,6 +168,10 @@ def ensure_outlet_columns() -> None:
         # Which POS adapter fetches this outlet. DEFAULT backfills existing rows
         # via the DDL itself so every legacy outlet keeps the generic flow.
         "pos_source": "VARCHAR DEFAULT 'petpooja_generic'",
+        # Date the outlet stopped trading; NULL = open. No DEFAULT on purpose —
+        # every existing row must backfill as NULL (i.e. still open), which is
+        # exactly the pre-column behaviour.
+        "closed_on": "DATE",
         # Onboarding documents (managed post-onboarding, source of truth on the
         # outlet). Backfilled from outlet_applications by backfill_outlet_documents.
         "gst_url": "VARCHAR",
@@ -445,6 +449,8 @@ def ensure_notice_columns() -> None:
         # ROLE SPLIT: role-based targeting (audience="role").
         "target_roles": "TEXT",
         "recipient_manager_id": "INTEGER",
+        # Deep link for the notice (e.g. "/tasks/42"); NULL = open the inbox.
+        "route": "VARCHAR",
     }
     try:
         with engine.begin() as conn:

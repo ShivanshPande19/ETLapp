@@ -30,6 +30,7 @@ from ...core.security import create_token, hash_password, verify_password
 from ...models.manager import Manager
 from ...models.staff import Staff
 from ...models.sale import Outlet, Court
+from ...core.query_utils import outlet_is_trading
 from ...models.onboarding import OutletApplication
 from ...models.outlet_membership import (
     OutletMembership,
@@ -145,7 +146,12 @@ def my_outlets(
         .join(Court, Court.id == Outlet.court_id)
         .filter(
             OutletMembership.manager_id == user.id,
-            Outlet.is_active == 1,
+            # A CLOSED outlet is dropped from the switcher: picking it would
+            # scope every sales view to a window it no longer trades in and
+            # come back empty. Its history stays readable through the owner's
+            # "all my outlets" aggregate and in ETL reporting, both of which
+            # include it for any window reaching back to its trading days.
+            outlet_is_trading(),
         )
         .order_by(Court.name, Outlet.vendor_name)
         .all()

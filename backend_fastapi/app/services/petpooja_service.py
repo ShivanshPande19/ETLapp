@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import func, or_
 
 from ..models.sale import Outlet, DailySaleCache, Court, SalesOrder
+from ..core.query_utils import outlet_is_trading
 from .sales_sources import get_adapter
 
 logger = logging.getLogger("sales.sync")
@@ -307,7 +308,9 @@ async def sync_court_by_fetch_date(
 
     # The 3-Day Deep Sync Window
     dates_to_fetch = [fetch_for_date, fetch_for_date - timedelta(days=1), fetch_for_date - timedelta(days=2)]
-    outlets = db.query(Outlet).filter(Outlet.court_id == court.id, Outlet.is_active == 1).all()
+    # A CLOSED outlet has nothing left to fetch — skip it rather than call
+    # its POS every run for an empty answer.
+    outlets = db.query(Outlet).filter(Outlet.court_id == court.id, outlet_is_trading()).all()
 
     results = []
     failed = 0
@@ -351,7 +354,7 @@ async def sync_all_active_outlets_by_fetch_date(
     # The 3-Day Deep Sync Window Automatically applied
     dates_to_fetch = [fetch_for_date, fetch_for_date - timedelta(days=1), fetch_for_date - timedelta(days=2)]
 
-    outlets = db.query(Outlet).filter(Outlet.is_active == 1).all()
+    outlets = db.query(Outlet).filter(outlet_is_trading()).all()
     results = []
     failed = 0
 

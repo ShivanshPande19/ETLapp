@@ -20,7 +20,7 @@ VERIFICATION_WINDOW_HOURS = 24
 # reminders. The management tier for escalations = Azimuth Management + Crownest
 # Head (per the locked notification matrix).
 _MAINT_OPEN_STATUSES = ("RAISED", "ASSIGNED", "DISPUTED")
-_MAINT_MGMT_TIER = ["azimuth_management", "crownest_head"]
+_MAINT_MGMT_TIER = ["azimuth_management", "crownest_head", "operations_office"]
 _MAINT_REMINDER_GAP = timedelta(hours=6)
 _MAINT_QUIET_START = 21   # 21:00 IST — reminders pause
 _MAINT_QUIET_END = 9      # 09:00 IST — reminders resume
@@ -366,6 +366,26 @@ async def maintenance_escalations():
         db.close()
 
 
+async def team_task_reminders():
+    """Due-soon and overdue nudges for team tasks. Each fires once per task —
+    see team_task_service.run_task_reminders."""
+    from .team_task_service import run_task_reminders
+
+    db: Session = SessionLocal()
+    try:
+        result = run_task_reminders(db)
+        if result["due_soon"] or result["overdue"]:
+            logger.info(
+                "[TASK REMINDER] due soon: %s, overdue: %s",
+                result["due_soon"], result["overdue"],
+            )
+    except Exception:
+        db.rollback()
+        logger.exception("[TASK REMINDER] error")
+    finally:
+        db.close()
+
+
 def start_scheduler():
     if scheduler.running:
         return
@@ -406,6 +426,16 @@ def start_scheduler():
         maintenance_escalations,
         trigger="cron", minute=20,
         id="maintenance_escalations", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+
+    # ✅ Team tasks: "due soon" + "overdue" nudges. Every 15 minutes so a
+    #    deadline is noticed promptly; the job itself sends each at most once
+    #    per task.
+    scheduler.add_job(
+        team_task_reminders,
+        trigger="cron", minute="5,20,35,50",
+        id="team_task_reminders", replace_existing=True,
         max_instances=1, coalesce=True,
     )
 

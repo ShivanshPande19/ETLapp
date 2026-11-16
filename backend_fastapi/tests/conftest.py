@@ -41,6 +41,7 @@ from app.models import (  # noqa: F401
     housekeeping,
     onboarding,
     vendor,
+    team_task,
 )
 from app.api.deps import CurrentUser, get_current_user
 
@@ -78,8 +79,12 @@ def client_factory(db):
     from app.api.routes import feedback as feedback_routes
     from app.api.routes import outlets as outlet_routes
     from app.api.routes import notices as notice_routes
+    from app.api.routes import team_tasks as team_task_routes
+    from app.api.routes import devices as device_routes
 
     app = FastAPI()
+    app.include_router(team_task_routes.router, prefix="/tasks")
+    app.include_router(device_routes.router, prefix="/devices")
     app.include_router(feedback_routes.router, prefix="/feedback")
     app.include_router(outlet_routes.router, prefix="/outlets")
     app.include_router(notice_routes.router, prefix="/notices")

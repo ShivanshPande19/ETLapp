@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/widgets/appear_fade.dart';
@@ -281,12 +282,33 @@ class _NoticeCard extends StatelessWidget {
       case 'shift_changed':
         return Icons.schedule_rounded;
       default:
+        if (notice.type.startsWith('task_')) {
+          return Icons.assignment_turned_in_rounded;
+        }
         return Icons.notifications_rounded;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final route = notice.openableRoute;
+    final card = _card(context, showChevron: route != null);
+    if (route == null) return card;
+    // A notice with its own screen (a team task) opens it.
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          context.push(route);
+        },
+        child: card,
+      ),
+    );
+  }
+
+  Widget _card(BuildContext context, {required bool showChevron}) {
     final unread = !notice.isRead;
     return Container(
       padding: const EdgeInsets.all(16),
@@ -355,6 +377,13 @@ class _NoticeCard extends StatelessWidget {
               ],
             ),
           ),
+          if (showChevron) ...[
+            const SizedBox(width: 6),
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Icon(Icons.chevron_right_rounded, size: 20, color: _grey),
+            ),
+          ],
         ],
       ),
     );

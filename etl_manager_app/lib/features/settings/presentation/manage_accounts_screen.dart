@@ -72,6 +72,12 @@ const List<_RoleOption> _roleOptions = [
     hint: 'Full management access. Owns the Crownest org.',
   ),
   _RoleOption(
+    'operations_office',
+    'Operations - Office',
+    'management',
+    hint: 'Full management access — same as Crownest Head.',
+  ),
+  _RoleOption(
     'crownest_zone_manager',
     'Crownest Zone Manager',
     'management',

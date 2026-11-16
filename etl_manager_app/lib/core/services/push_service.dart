@@ -26,6 +26,7 @@ import '../../features/home/presentation/home_providers.dart';
 import '../../features/maintenance/domain/maintenance_notifier.dart';
 import '../../features/notices/domain/notices_notifier.dart';
 import '../../features/notifications/data/device_token_repository.dart';
+import '../../features/tasks/domain/team_tasks_notifier.dart';
 
 /// Called with the route a tapped notification wants to open.
 typedef PushNavigator = void Function(String route);
@@ -267,6 +268,13 @@ class PushService {
     if (type.startsWith('maintenance')) {
       _ref.invalidate(maintenanceNotifierProvider);
       _ref.invalidate(homeMaintenanceProvider);
+    }
+
+    if (type.startsWith('task_')) {
+      // Re-read rather than invalidate: invalidating would blank the list for
+      // a moment, while refresh() keeps it on screen until the answer lands.
+      _ref.read(teamTasksNotifierProvider.notifier).refresh();
+      _ref.invalidate(teamTaskDetailProvider);
     }
 
     if (type.startsWith('feedback')) {

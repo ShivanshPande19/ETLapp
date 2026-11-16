@@ -35,6 +35,9 @@ import '../features/notices/presentation/notices_screen.dart';
 
 import '../features/maintenance/presentation/maintenance_home_screen.dart';
 
+import '../features/tasks/presentation/tasks_screen.dart';
+import '../features/tasks/presentation/task_detail_screen.dart';
+
 import 'shell_screen.dart';
 import 'biometric_gate.dart';
 import 'splash_screen.dart';
@@ -137,6 +140,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         // deep-links here, so without this an etl_staff tapping a notification
         // would be bounced to /staff/home and never see what they tapped.
         if (_roleAgnosticRoutes.contains(loc)) return null;
+
+        // ── Team tasks: the heads and the field tier (zone manager and the two
+        //    maintenance roles). A task notification deep-links to /tasks/<id>,
+        //    so this is decided BEFORE the per-role rules below, which bounce
+        //    any location they don't recognise back home. Everyone else (ETL
+        //    staff, outlet accounts — the backend 403s them) is sent to their
+        //    own landing page.
+        if (loc == '/tasks' || loc.startsWith('/tasks/')) {
+          return authState.canUseTeamTasks ? null : authState.landingRoute;
+        }
 
         // ── ROLE SPLIT: maintenance workers (Azimuth Maintenance / Crownest
         //    Maintenance Head) get a single tickets-only home. Crownest
@@ -278,6 +291,35 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const NoticesScreen(),
+          slideFromRight: true,
+        ),
+      ),
+
+      // Team tasks — full-screen, so a notification tap lands on the task
+      // whichever shell the user normally lives in.
+      GoRoute(
+        path: '/tasks',
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: const TasksScreen(),
+          slideFromRight: true,
+        ),
+      ),
+      GoRoute(
+        path: '/tasks/:id',
+        // A link with a non-numeric id (should never happen) opens the list
+        // instead of a broken detail page.
+        redirect: (context, state) =>
+            int.tryParse(state.pathParameters['id'] ?? '') == null
+                ? '/tasks'
+                : null,
+        pageBuilder: (context, state) => _buildPage(
+          context: context,
+          state: state,
+          child: TaskDetailScreen(
+            taskId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
           slideFromRight: true,
         ),
       ),

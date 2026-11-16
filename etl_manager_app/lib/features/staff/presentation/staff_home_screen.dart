@@ -16,6 +16,7 @@ import '../../staff/domain/housekeeping_models.dart' as hk;
 import '../../staff/data/housekeeping_repository.dart';
 import '../domain/attendance_notifier.dart';
 import '../domain/attendance_flow.dart';
+import 'attendance_status_widgets.dart';
 import '../../feedbacks/domain/court_feedback_notifier.dart';
 import '../../feedbacks/presentation/staff_court_feedback_screen.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
@@ -616,23 +617,42 @@ class _StaffHomeScreenState extends ConsumerState<StaffHomeScreen>
   }
 
   Widget _buildAttendance(AttendanceState attendance) {
-    if (attendance.loadingToday ||
-        attendance.status == AttendanceStatus.loading) {
-      return const _SkeletonCard(height: 150);
+    void reload() => ref.read(attendanceNotifierProvider.notifier).loadToday();
+    switch (attendance.view) {
+      case AttendanceView.busy:
+        return const _SkeletonCard(height: 150);
+      case AttendanceView.unknown:
+        return AttendanceStatusUnknownCard(
+          dark: true,
+          retrying: attendance.loadingToday,
+          onRetry: reload,
+        );
+      case AttendanceView.checkIn:
+        return _MarkAttendanceCard(onTap: _startCheckIn);
+      case AttendanceView.shift:
+        final card = _ActiveShiftCard(
+          checkInTime: _fmtTime(attendance.today.checkInTime),
+          checkInAt: attendance.today.checkInTime,
+          address: attendance.today.checkInAddress ?? 'Location saved',
+          checkedOut: attendance.isCheckedOut,
+          checkOutTime: _fmtTime(attendance.today.checkOutTime),
+          durationLabel: _durationLabel(attendance.today.workDurationMinutes),
+          onEndShift:
+              attendance.isShiftActive ? () => _startCheckOut() : null,
+        );
+        if (!attendance.showingSavedShift) return card;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SavedShiftNote(
+              dark: true,
+              refreshing: attendance.loadingToday,
+              onRefresh: reload,
+            ),
+            card,
+          ],
+        );
     }
-    if (attendance.isCheckedIn) {
-      return _ActiveShiftCard(
-        checkInTime: _fmtTime(attendance.today.checkInTime),
-        checkInAt: attendance.today.checkInTime,
-        address: attendance.today.checkInAddress ?? 'Location saved',
-        checkedOut: attendance.isCheckedOut,
-        checkOutTime: _fmtTime(attendance.today.checkOutTime),
-        durationLabel: _durationLabel(attendance.today.workDurationMinutes),
-        onEndShift:
-            attendance.isShiftActive ? () => _startCheckOut() : null,
-      );
-    }
-    return _MarkAttendanceCard(onTap: _startCheckIn);
   }
 }
 

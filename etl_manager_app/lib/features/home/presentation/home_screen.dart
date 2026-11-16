@@ -13,6 +13,7 @@ import '../../../core/utils/token_storage.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../../courts/domain/courts_notifier.dart';
 import '../../notices/presentation/notice_bell.dart';
+import '../../tasks/presentation/tasks_entry.dart';
 import '../../staff/domain/attendance_notifier.dart';
 import '../../staff/domain/attendance_flow.dart';
 import 'home_providers.dart';
@@ -854,6 +855,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                           const SizedBox(height: 24),
 
+                          // ── Team tasks (what is waiting on me) ────────
+                          _StaggerRow(
+                            anim: _stagger(4),
+                            child: const TasksHomeCard(),
+                          ),
+                          const SizedBox(height: 12),
+
                           // ── Staff Attendance roster entry ─────────────
                           _StaggerRow(
                             anim: _stagger(4),
@@ -1114,6 +1122,8 @@ class _TopRowState extends State<_TopRow> {
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const TasksBell(),
+          const SizedBox(width: 10),
           const NoticeBell(),
           const SizedBox(width: 10),
           GestureDetector(

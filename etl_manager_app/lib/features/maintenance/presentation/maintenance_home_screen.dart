@@ -25,6 +25,7 @@ import '../../staff/domain/attendance_notifier.dart';
 import '../../staff/domain/attendance_flow.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
+import '../../tasks/presentation/tasks_entry.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
 
 // ─── Palette (matches the app theme) ──────────────────────────────────────────
@@ -191,6 +192,8 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
+                  const TasksBell(),
+                  const SizedBox(width: 10),
                   _CircleBtn(
                     child: Consumer(
                       builder: (context, ref, _) {
@@ -280,6 +283,9 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
                           state: ref.watch(attendanceNotifierProvider),
                           onCheckIn: _checkIn,
                           onCheckOut: _checkOut,
+                          onRetry: () => ref
+                              .read(attendanceNotifierProvider.notifier)
+                              .loadToday(),
                         ),
                         const SizedBox(height: 26),
                       ],
@@ -651,18 +657,21 @@ class _AttendanceCard extends StatelessWidget {
   final AttendanceState state;
   final VoidCallback onCheckIn;
   final VoidCallback onCheckOut;
+  final VoidCallback onRetry;
   const _AttendanceCard({
     required this.state,
     required this.onCheckIn,
     required this.onCheckOut,
+    required this.onRetry,
   });
 
   @override
   Widget build(BuildContext context) {
-    final loading = state.loadingToday || state.status == AttendanceStatus.loading;
+    // Same decision as every other home screen — see AttendanceState.view.
+    final view = state.view;
 
     Widget body;
-    if (loading) {
+    if (view == AttendanceView.busy) {
       body = const SizedBox(
         height: 44,
         child: Center(
@@ -673,10 +682,40 @@ class _AttendanceCard extends StatelessWidget {
           ),
         ),
       );
-    } else if (state.isCheckedIn) {
+    } else if (view == AttendanceView.unknown) {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(
+            "Couldn't load your shift",
+            style: GoogleFonts.inter(
+                fontSize: 14, fontWeight: FontWeight.w800, color: _black),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Check your internet and try again. If you already started your '
+            'shift, it is still running.',
+            style: GoogleFonts.inter(fontSize: 12.5, color: _grey),
+          ),
+          const SizedBox(height: 14),
+          _wideBtn(
+            state.loadingToday ? 'Checking…' : 'Retry',
+            state.loadingToday ? () {} : onRetry,
+            filled: true,
+          ),
+        ],
+      );
+    } else if (view == AttendanceView.shift) {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (state.showingSavedShift) ...[
+            Text(
+              'Offline — showing your saved shift',
+              style: GoogleFonts.inter(fontSize: 11.5, color: _grey),
+            ),
+            const SizedBox(height: 6),
+          ],
           Row(
             children: [
               Icon(

@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart';
 import '../../auth/domain/auth_notifier.dart';
 import '../domain/attendance_notifier.dart';
 import '../domain/attendance_flow.dart';
+import 'attendance_status_widgets.dart';
 // ✅ IMPORT FOR REAL DATABASE FEEDBACKS
 import '../../feedbacks/domain/feedback_notifier.dart';
 import '../../home/presentation/home_providers.dart';
@@ -252,50 +253,7 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
 
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 400),
-                            child:
-                                (attendanceState.loadingToday ||
-                                    attendanceState.status ==
-                                        AttendanceStatus.loading)
-                                ? const Center(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(24.0),
-                                      child: CircularProgressIndicator(
-                                        color: _black,
-                                      ),
-                                    ),
-                                  )
-                                : attendanceState.isCheckedIn
-                                ? _ActiveShiftCard(
-                                    checkInTime: _fmtTime(
-                                      context,
-                                      attendanceState.today.checkInTime,
-                                    ),
-                                    checkInAt:
-                                        attendanceState.today.checkInTime,
-                                    address:
-                                        attendanceState.today.checkInAddress ??
-                                        'Location saved',
-                                    checkedOut: attendanceState.isCheckedOut,
-                                    checkOutTime: _fmtTime(
-                                      context,
-                                      attendanceState.today.checkOutTime,
-                                    ),
-                                    durationLabel: _durationLabel(
-                                      attendanceState
-                                          .today
-                                          .workDurationMinutes,
-                                    ),
-                                    onViewTap: () => _showAttendanceDetails(
-                                      context,
-                                      attendanceState.today,
-                                    ),
-                                    onEndShift: attendanceState.isShiftActive
-                                        ? () => _startCheckOut(context)
-                                        : null,
-                                  )
-                                : _MarkAttendanceCard(
-                                    onTap: () => _startCheckIn(context),
-                                  ),
+                            child: _attendanceCard(context, attendanceState),
                           ),
 
                           const SizedBox(height: 40),
@@ -426,6 +384,56 @@ class _OutletStaffHomeScreenState extends ConsumerState<OutletStaffHomeScreen>
         ),
       ),
     );
+  }
+
+  /// Same decision as every other home screen — see [AttendanceState.view].
+  Widget _attendanceCard(BuildContext context, AttendanceState attendanceState) {
+    void reload() => ref.read(attendanceNotifierProvider.notifier).loadToday();
+    switch (attendanceState.view) {
+      case AttendanceView.busy:
+        return const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: CircularProgressIndicator(color: _black),
+          ),
+        );
+      case AttendanceView.unknown:
+        return AttendanceStatusUnknownCard(
+          retrying: attendanceState.loadingToday,
+          onRetry: reload,
+        );
+      case AttendanceView.checkIn:
+        return _MarkAttendanceCard(onTap: () => _startCheckIn(context));
+      case AttendanceView.shift:
+        final card = _ActiveShiftCard(
+          checkInTime: _fmtTime(context, attendanceState.today.checkInTime),
+          checkInAt: attendanceState.today.checkInTime,
+          address: attendanceState.today.checkInAddress ?? 'Location saved',
+          checkedOut: attendanceState.isCheckedOut,
+          checkOutTime: _fmtTime(context, attendanceState.today.checkOutTime),
+          durationLabel: _durationLabel(
+            attendanceState.today.workDurationMinutes,
+          ),
+          onViewTap: () => _showAttendanceDetails(
+            context,
+            attendanceState.today,
+          ),
+          onEndShift: attendanceState.isShiftActive
+              ? () => _startCheckOut(context)
+              : null,
+        );
+        if (!attendanceState.showingSavedShift) return card;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SavedShiftNote(
+              refreshing: attendanceState.loadingToday,
+              onRefresh: reload,
+            ),
+            card,
+          ],
+        );
+    }
   }
 
   // ─── Check-in / check-out ────────────────────────────────────────────────
