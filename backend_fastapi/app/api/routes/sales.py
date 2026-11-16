@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from ...database import get_db
-from ...core.query_utils import now_ist
+from ...core.query_utils import now_ist, outlet_is_trading
 from ...schemas.sale import (
     SalesSummaryResponse, VendorHistoryResponse, SalesTrendResponse, SalesCompareResponse,
 )
@@ -329,7 +329,9 @@ def _refresh_target_outlets(
 ) -> list[Outlet]:
     """Active outlets to re-sync, from the already scope-checked tuple returned
     by _scope_outlets (so this can never widen the caller's scope)."""
-    q = db.query(Outlet).filter(Outlet.is_active == 1)
+    # Closed outlets are excluded: there is nothing further to pull for them,
+    # and their existing history is already cached.
+    q = db.query(Outlet).filter(outlet_is_trading())
     if outlet_id is not None:
         q = q.filter(Outlet.id == outlet_id)
     elif outlet_ids is not None:

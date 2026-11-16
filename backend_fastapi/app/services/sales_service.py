@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from ..core.query_utils import now_ist
+from ..core.query_utils import now_ist, outlet_traded_on_or_after
 from ..models.sale import Outlet, DailySaleCache
 from ..schemas.sale import (
     SalesSummaryResponse,
@@ -87,8 +87,12 @@ async def get_sales_summary(
 ) -> SalesSummaryResponse:
     start_date, end_date = _get_date_range(period, date_from, date_to)
 
-    # Base query on Outlet
-    query = db.query(Outlet).filter(Outlet.is_active == 1)
+    # Base query on Outlet. `outlet_traded_on_or_after` keeps a CLOSED outlet
+    # in any window reaching back to its trading days (so its history still
+    # reports) while dropping it from windows that begin after it closed, where
+    # it would otherwise appear as a dead ₹0 vendor row. Identical to the old
+    # `is_active == 1` for every outlet that is still open.
+    query = db.query(Outlet).filter(outlet_traded_on_or_after(start_date))
 
     # ✓ Priority: explicit outlet_ids set (multi-outlet owner) > single
     #   outlet_id > court_id. An empty set means "no accessible outlets" and

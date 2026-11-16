@@ -111,3 +111,45 @@ def business_day_end_utc(biz_date: date, cutoff_hour: int = 0) -> datetime:
     """
     end_ist = datetime.combine(biz_date + timedelta(days=1), time(hour=cutoff_hour), tzinfo=IST)
     return end_ist.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+# ─── Outlet lifecycle predicates ──────────────────────────────────────────────
+#
+# `Outlet.is_active` is a hard on/off: it hides the outlet from every query
+# that filters on it, the historical ones included, because each
+# `daily_sale_cache` read is scoped by an outlet list already narrowed to
+# is_active == 1. Switching a CLOSED outlet off therefore erases its past sales
+# from the app too — wrong, because those months really did trade.
+#
+# So a closed outlet keeps `is_active = 1` and carries `closed_on` instead.
+# These two predicates are the only places that distinguish the cases, and both
+# are no-ops when `closed_on IS NULL` — i.e. an outlet that has never closed
+# behaves exactly as it did before the column existed.
+
+def outlet_is_trading():
+    """Outlets that are OPEN RIGHT NOW.
+
+    For things that only ever concern a live outlet: the POS sync (a closed
+    outlet has nothing left to fetch) and the pickers that offer an outlet to
+    act on today.
+    """
+    from ..models.sale import Outlet
+    return (Outlet.is_active == 1) & (Outlet.closed_on.is_(None))
+
+
+def outlet_traded_on_or_after(start: date):
+    """Outlets still trading on `start`, or at some point after it.
+
+    For the date-scoped sales views: an outlet that closed on 3 Oct belongs in
+    a September report and in any window reaching back to it, but not in
+    today's list, where it would otherwise show up as a dead ₹0 row.
+
+    Only the window's START is compared. A closed outlet needs no upper bound —
+    its `daily_sale_cache` rows simply stop on its last trading day, so a
+    window that begins before it closed sums the real figures and one that
+    begins after excludes it outright.
+    """
+    from ..models.sale import Outlet
+    return (Outlet.is_active == 1) & (
+        Outlet.closed_on.is_(None) | (Outlet.closed_on >= start)
+    )

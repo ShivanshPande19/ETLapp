@@ -72,6 +72,24 @@ class Outlet(Base):
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # ✅ The date the outlet stopped trading, or NULL while it is still open.
+    #
+    # `is_active` is a hard on/off and hides the outlet from EVERY query that
+    # filters on it — including the historical ones, because each
+    # `daily_sale_cache` read is scoped by an outlet list that was already
+    # filtered to is_active == 1. So switching a closed outlet off also erases
+    # its past sales from the app, which is wrong: the outlet traded, the
+    # numbers are real, and the months it was open must keep reporting.
+    #
+    # `closed_on` is the date-aware version. A closed outlet keeps
+    # `is_active = 1` so every history path works untouched, and this column
+    # takes it out of the things that only concern a TRADING outlet: the sync,
+    # and the current sales list.
+    #
+    # NULL is the default and means "open", so an outlet that has never been
+    # closed behaves exactly as it did before this column existed.
+    closed_on = Column(Date, nullable=True)
+
     # ✅ Per-outlet Petpooja credentials (nullable). If null, the sync falls
     # back to the global keys in settings/.env. This supports both a single
     # shared ETL Petpooja account AND outlets that carry their own creds.
