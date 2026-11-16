@@ -94,17 +94,29 @@ class HousekeepingRepository {
 
   // ── Full status for staff/manager screens (config-driven) ─────────────────
 
+  /// Like [getFullStatus], but a failure THROWS instead of reading as null.
+  ///
+  /// The staff checklist needs to tell "couldn't load" from "nothing
+  /// configured". Folding both into null is what made a failed load show
+  /// "This court has no housekeeping checklist configured" to staff whose
+  /// court had a full checklist.
+  Future<FullStatusResponse> fetchFullStatus({String? date, int? courtId}) async {
+    final today = date ?? DateTime.now().toIso8601String().substring(0, 10);
+    final res = await dio.get(
+      '/housekeeping/status',
+      queryParameters: {
+        'date': today,
+        if (courtId != null) 'court_id': courtId,
+      },
+    );
+    return FullStatusResponse.fromJson(res.data);
+  }
+
+  /// Null on any failure. Kept for the screens that only need best-effort
+  /// data (home widgets, manager view, history); see [fetchFullStatus].
   Future<FullStatusResponse?> getFullStatus({String? date, int? courtId}) async {
     try {
-      final today = date ?? DateTime.now().toIso8601String().substring(0, 10);
-      final res = await dio.get(
-        '/housekeeping/status',
-        queryParameters: {
-          'date': today,
-          if (courtId != null) 'court_id': courtId,
-        },
-      );
-      return FullStatusResponse.fromJson(res.data);
+      return await fetchFullStatus(date: date, courtId: courtId);
     } catch (e) {
       debugPrint('getFullStatus error: $e');
       return null;

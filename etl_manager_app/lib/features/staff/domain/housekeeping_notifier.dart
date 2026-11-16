@@ -7,12 +7,15 @@
 // staff's court. Nothing is hardcoded — a court can have any number of shifts
 // (with any names/timings) and any number of weekly/monthly tasks.
 
+import 'dart:async';
 import 'dart:io';
 import 'package:collection/collection.dart';
-import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import '../data/housekeeping_repository.dart';
+import '../../auth/domain/auth_notifier.dart';
 import '../../../core/utils/token_storage.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/photo_upload_service.dart';
@@ -45,6 +48,19 @@ class HousekeepingState {
   // Per recurring-task loading, keyed by task id.
   final Set<String> loadingRecurring;
 
+  /// A status load is in flight (first open, refresh, retry).
+  final bool loading;
+
+  /// The last status load failed. NOT the same as an empty checklist: the
+  /// screen says "couldn't load" for this, and "no checklist yet" only when
+  /// the server actually returned no shifts.
+  final bool loadFailed;
+
+  /// What to tell staff when [loadFailed] — the server's own reason when it
+  /// gave one (e.g. "No court assigned to your account."). Only meaningful
+  /// while [loadFailed] is true.
+  final String? loadError;
+
   const HousekeepingState({
     this.courtId,
     this.courtName = '',
@@ -63,6 +79,9 @@ class HousekeepingState {
     this.lockedTasks = const <String>{},
     this.loadingTasks = const <String>{},
     this.loadingRecurring = const <String>{},
+    this.loading = false,
+    this.loadFailed = false,
+    this.loadError,
   });
 
   // ── Current shift ──────────────────────────────────────────────────────────
@@ -111,6 +130,9 @@ class HousekeepingState {
     Set<String>? lockedTasks,
     Set<String>? loadingTasks,
     Set<String>? loadingRecurring,
+    bool? loading,
+    bool? loadFailed,
+    String? loadError,
   }) {
     return HousekeepingState(
       courtId: courtId ?? this.courtId,
@@ -130,6 +152,9 @@ class HousekeepingState {
       lockedTasks: lockedTasks ?? this.lockedTasks,
       loadingTasks: loadingTasks ?? this.loadingTasks,
       loadingRecurring: loadingRecurring ?? this.loadingRecurring,
+      loading: loading ?? this.loading,
+      loadFailed: loadFailed ?? this.loadFailed,
+      loadError: loadError ?? this.loadError,
     );
   }
 }
@@ -137,89 +162,227 @@ class HousekeepingState {
 // ─── Notifier ─────────────────────────────────────────────────────────────────
 
 class HousekeepingNotifier extends Notifier<HousekeepingState> {
+  /// Gaps between automatic retries of a failed load. A blip on the court's
+  /// signal heals itself; a real outage stops after the last one and leaves
+  /// pull-to-refresh and the Retry button.
+  @visibleForTesting
+  static const retryDelays = [
+    Duration(seconds: 3),
+    Duration(seconds: 10),
+    Duration(seconds: 30),
+  ];
+
+  /// Who this state belongs to.
+  String? _owner;
+
+  /// Bumped on every [build] — every account switch, and every SSE
+  /// invalidate. Async work remembers the generation it started in and drops
+  /// its result if that has moved on.
+  int _generation = 0;
+
+  Future<void>? _inFlight;
+  Timer? _retryTimer;
+  int _retryAttempt = 0;
+
   @override
   HousekeepingState build() {
-    Future.microtask(_init);
+    // SHARED PHONES: staff without a phone log in on a colleague's. Watching
+    // the signed-in identity re-runs this build when it changes, so each
+    // person starts clean. Before, this state lived for the whole app process:
+    // a logout/login did not reset it, so the next person could see the
+    // previous person's court, and a checklist that failed to load once stayed
+    // broken until the app was killed.
+    //
+    // On the Riverpod in use (3.2.1) a rebuild re-runs build on the SAME
+    // instance with `ref.mounted` still true (verified for AttendanceNotifier,
+    // same mechanism). The generation bump and resets below are what actually
+    // stop the previous build's requests from writing into this one — which
+    // also covers the SSE `invalidate` that used to race a running load.
+    _owner = ref.watch(authNotifierProvider.select((s) => s.managerEmail));
+    _generation++;
+    _inFlight = null;
+    _retryTimer?.cancel();
+    _retryAttempt = 0;
+
+    final lifecycle = AppLifecycleListener(onResume: _onResume);
+    ref.onDispose(() {
+      _retryTimer?.cancel();
+      lifecycle.dispose();
+    });
+
+    // Signed out: there is no checklist to load (the screen isn't reachable).
+    if (_owner != null) Future.microtask(_init);
     return HousekeepingState(date: _today);
   }
+
+  bool _stale(int generation) => !ref.mounted || generation != _generation;
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> _init() async {
-    final zone = await TokenStorage.getZone();
-    final name = await TokenStorage.getManagerName();
-    final courtId = _parseZone(zone);
+    final gen = _generation;
+    String? zone;
+    String? name;
+    try {
+      zone = await TokenStorage.getZone();
+      name = await TokenStorage.getManagerName();
+    } catch (_) {
+      // Secure storage hiccup: carry on — the court comes from the server.
+    }
+    if (_stale(gen)) return;
 
     state = state.copyWith(
-      courtId: courtId,
+      courtId: _parseZone(zone),
       courtName: name ?? 'Staff',
       userName: name ?? 'Staff',
     );
 
-    if (courtId != null) {
-      await _rehydrateFromBackend(courtId);
-    }
-
-    state = state.copyWith(isInitialized: true);
+    await _load();
   }
 
-  Future<void> refresh() async {
-    if (state.courtId != null) {
-      await _rehydrateFromBackend(state.courtId!);
+  /// Reload config + today's completions. Never throws; the outcome lands in
+  /// state ([HousekeepingState.loadFailed]). Concurrent calls share one load.
+  Future<void> refresh() => _load();
+
+  void _onResume() {
+    if (!ref.mounted || _owner == null) return;
+    // Only when stuck. Every task photo goes through the system camera, which
+    // pauses and resumes the app — reloading on each of those would be waste.
+    if (state.loadFailed) _load();
+  }
+
+  Future<void> _load() {
+    final existing = _inFlight;
+    if (existing != null) return existing;
+    late final Future<void> mine;
+    mine = _doLoad().whenComplete(() {
+      // Only clear our own slot: by now it may belong to the next person.
+      if (identical(_inFlight, mine)) _inFlight = null;
+    });
+    return _inFlight = mine;
+  }
+
+  Future<void> _doLoad() async {
+    _retryTimer?.cancel();
+    final gen = _generation;
+    state = state.copyWith(loading: true);
+    try {
+      await _rehydrateFromBackend(gen);
+      if (_stale(gen)) return;
+      _retryAttempt = 0;
+      state = state.copyWith(
+        loading: false,
+        loadFailed: false,
+        isInitialized: true,
+      );
+    } catch (e) {
+      debugPrint('_rehydrateFromBackend error: $e');
+      if (_stale(gen)) return;
+      // Keep whatever was already on screen; just say the refresh failed.
+      state = state.copyWith(
+        loading: false,
+        loadFailed: true,
+        loadError: _loadErrorMessage(e),
+        isInitialized: true,
+      );
+      _scheduleRetry(e, gen);
     }
+  }
+
+  void _scheduleRetry(Object error, int gen) {
+    // A 4xx is an answer, not an outage (e.g. "No court assigned"): retrying
+    // won't change it. Same for a response we couldn't parse.
+    if (error is! DioException) return;
+    final code = error.response?.statusCode;
+    if (code != null && code < 500) return;
+    if (_retryAttempt >= retryDelays.length) return;
+    final delay = retryDelays[_retryAttempt++];
+    _retryTimer?.cancel();
+    _retryTimer = Timer(delay, () {
+      if (!_stale(gen)) _load();
+    });
+  }
+
+  String _loadErrorMessage(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['detail'] is String) return data['detail'] as String;
+      if (e.response == null) return 'Check your internet and try again.';
+    }
+    return 'Something went wrong. Please try again.';
   }
 
   // ── Rehydrate from backend (config + completions) ───────────────────────────
 
-  Future<void> _rehydrateFromBackend(int courtId) async {
-    try {
-      final status = await ref
-          .read(housekeepingRepoProvider)
-          .getFullStatus(date: _today, courtId: courtId);
-      if (status == null) return;
+  /// Throws on failure, leaving state untouched — [_doLoad] decides what the
+  /// staff sees.
+  Future<void> _rehydrateFromBackend(int gen) async {
+    final status = await ref
+        .read(housekeepingRepoProvider)
+        .fetchFullStatus(date: _today, courtId: state.courtId);
+    if (_stale(gen)) return;
 
-      final court = status.courtById(courtId);
-      final shifts = court?.shifts ?? const <hk.ShiftStatus>[];
-      final weekly = status.weeklyFor(courtId);
-      final monthly = status.monthlyFor(courtId);
+    final court = _courtFor(status, state.courtId);
+    final courtId = court?.courtId ?? state.courtId;
+    final shifts = court?.shifts ?? const <hk.ShiftStatus>[];
+    final weekly = courtId == null
+        ? const <hk.RecurringTaskStatus>[]
+        : status.weeklyFor(courtId);
+    final monthly = courtId == null
+        ? const <hk.RecurringTaskStatus>[]
+        : status.monthlyFor(courtId);
 
-      // Build daily completion maps from the configured tasks.
-      final doneMap = <String, bool>{};
-      final lockedSet = <String>{};
-      final photoUrls = <String, String?>{};
-      final doneBy = <String, String?>{};
+    // Build daily completion maps from the configured tasks.
+    final doneMap = <String, bool>{};
+    final lockedSet = <String>{};
+    final photoUrls = <String, String?>{};
+    final doneBy = <String, String?>{};
 
-      for (final sh in shifts) {
-        for (final t in sh.tasks) {
-          if (t.isDone) {
-            final key = '${sh.shiftKey}_${t.taskId}';
-            doneMap[key] = true;
-            lockedSet.add(key);
-            if (t.photoUrl != null) photoUrls[key] = t.photoUrl;
-            if (t.doneByName != null) doneBy[key] = t.doneByName;
-          }
+    for (final sh in shifts) {
+      for (final t in sh.tasks) {
+        if (t.isDone) {
+          final key = '${sh.shiftKey}_${t.taskId}';
+          doneMap[key] = true;
+          lockedSet.add(key);
+          if (t.photoUrl != null) photoUrls[key] = t.photoUrl;
+          if (t.doneByName != null) doneBy[key] = t.doneByName;
         }
       }
-
-      // Keep the current shift if still valid, else auto-select by timings.
-      final shiftKey = _pickShift(shifts, keep: state.currentShiftKey);
-
-      state = state.copyWith(
-        shifts: shifts,
-        currentShiftKey: shiftKey,
-        weekly: weekly,
-        monthly: monthly,
-        courtName: (court?.courtName.isNotEmpty ?? false)
-            ? court!.courtName
-            : state.courtName,
-        taskDoneMap: doneMap,
-        lockedTasks: lockedSet,
-        photoUrlMap: photoUrls,
-        doneByMap: doneBy,
-      );
-    } catch (e) {
-      debugPrint('_rehydrateFromBackend error: $e');
     }
+
+    // Keep the current shift if still valid, else auto-select by timings.
+    final shiftKey = _pickShift(shifts, keep: state.currentShiftKey);
+
+    state = state.copyWith(
+      courtId: courtId,
+      shifts: shifts,
+      currentShiftKey: shiftKey,
+      weekly: weekly,
+      monthly: monthly,
+      courtName: (court?.courtName.isNotEmpty ?? false)
+          ? court!.courtName
+          : state.courtName,
+      taskDoneMap: doneMap,
+      lockedTasks: lockedSet,
+      photoUrlMap: photoUrls,
+      doneByMap: doneBy,
+    );
+  }
+
+  /// The staff member's court in [status].
+  ///
+  /// The SERVER is the authority here, not the court id the phone stored at
+  /// login: for ETL staff it ignores the requested court and returns exactly
+  /// their own (see `GET /housekeeping/status`). So when the stored id is
+  /// missing or doesn't match, the single court returned is the right one.
+  /// Relying on the stored id alone is how a phone with no saved court showed
+  /// "no checklist" for a court that had one.
+  hk.CourtDayStatus? _courtFor(hk.FullStatusResponse status, int? storedId) {
+    if (storedId != null) {
+      final match = status.courtById(storedId);
+      if (match != null) return match;
+    }
+    return status.courts.length == 1 ? status.courts.single : null;
   }
 
   // ── Shift auto-selection ────────────────────────────────────────────────────
@@ -304,6 +467,9 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       return false;
     }
     final courtId = state.courtId!;
+    // If the phone changes hands mid-upload, this task belongs to the person
+    // who started it — never write it into the next person's checklist.
+    final gen = _generation;
 
     if (kind == hk.HkTaskKind.daily && state.currentShiftKey == null) {
       state = state.copyWith(error: 'No shift selected.');
@@ -348,6 +514,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
         lat: lat,
         lng: lng,
       );
+      if (_stale(gen)) return false;
 
       if (photoUrl == null) {
         _clearLoading(taskId, kind);
@@ -365,6 +532,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
           taskId: taskId,
           photoUrl: photoUrl,
         );
+        if (_stale(gen)) return false;
         _applyRecurringDone(taskId, photoUrl, isWeekly: true);
         return true;
       }
@@ -375,6 +543,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
           taskId: taskId,
           photoUrl: photoUrl,
         );
+        if (_stale(gen)) return false;
         _applyRecurringDone(taskId, photoUrl, isWeekly: false);
         return true;
       }
@@ -388,6 +557,7 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
         taskTitle: taskTitle,
         photoUrl: photoUrl,
       );
+      if (_stale(gen)) return false;
 
       final key = state._k(taskId);
       if (ok) {
@@ -411,11 +581,13 @@ class HousekeepingNotifier extends Notifier<HousekeepingState> {
       }
     } catch (e) {
       debugPrint('confirmTask error: $e');
+      if (_stale(gen)) return false;
       _clearLoading(taskId, kind);
 
       // Backend cooldown — re-fetch to surface the accurate countdown.
       if (_isCooldownError(e)) {
-        await _rehydrateFromBackend(courtId);
+        await _load();
+        if (_stale(gen)) return false;
         state = state.copyWith(error: null);
         return false;
       }
