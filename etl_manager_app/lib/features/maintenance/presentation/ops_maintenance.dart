@@ -39,6 +39,7 @@ const _targetTeams = <(String, String)>[
 const _mentionRoles = <(String, String)>[
   ('azimuth_management', 'Azimuth Management'),
   ('crownest_head', 'Crownest Head'),
+  ('operations_office', 'Operations - Office'),
   ('azimuth_maintenance', 'Azimuth Maintenance'),
   ('crownest_maintenance_head', 'Crownest Maintenance Head'),
 ];

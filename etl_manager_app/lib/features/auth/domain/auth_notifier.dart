@@ -49,6 +49,10 @@ class AuthState {
   bool get isAzimuthManagement => role == 'azimuth_management';
   bool get isCrownestOpsHead => role == 'crownest_ops_head';
   bool get isCrownestHead => role == 'crownest_head';
+
+  /// "Operations - Office": identical to Crownest Head in access — only the
+  /// designation differs. Folded into [isManagement] below.
+  bool get isOperationsOffice => role == 'operations_office';
   bool get isAzimuthMaintenance => role == 'azimuth_maintenance';
   bool get isCrownestMaintenanceHead => role == 'crownest_maintenance_head';
 
@@ -66,6 +70,7 @@ class AuthState {
       role == 'azimuth_management' ||
       role == 'crownest_ops_head' ||
       role == 'crownest_head' ||
+      role == 'operations_office' ||
       // Zone manager rides the SAME management app shell/routing/nav, but the
       // backend scopes its data to its zone(s) and `isReadOnly` (below) hides
       // every write control from it.
@@ -90,6 +95,17 @@ class AuthState {
 
   /// Only Crownest Ops Head may RAISE / route maintenance tickets.
   bool get isOpsHead => role == 'crownest_ops_head';
+
+  /// Team tasks — the inter-team task assigner. Two tiers take part:
+  ///   • heads (Azimuth Management, Crownest Head, Crownest Ops Head) give
+  ///     tasks to each other and to the field tier;
+  ///   • the field tier (Crownest Zone Manager, Crownest Maintenance Head,
+  ///     Azimuth Maintenance) gives tasks to the Crownest Ops Head only.
+  /// ETL staff and outlet accounts take no part. For the
+  /// zone manager this is a third deliberate carve-out from its view-only
+  /// rule. The backend enforces all of it (team_task_service.can_assign);
+  /// this only decides whether the entry points are shown.
+  bool get canUseTeamTasks => isManagement || isMaintenanceWorker;
 
   /// Narrow maintenance worker (tickets-only home).
   bool get isMaintenanceWorker =>

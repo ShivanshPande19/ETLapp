@@ -56,6 +56,20 @@ class PhotoUploadService {
     }
   }
 
+  /// Compress + upload a team-task proof photo (no watermark).
+  static Future<String?> uploadTaskPhoto({
+    required Dio dio,
+    required File photo,
+  }) async {
+    try {
+      final compressed = await _compress(photo);
+      return await _upload(dio, compressed, '/tasks/upload-photo');
+    } catch (e) {
+      debugPrint('uploadTaskPhoto error: $e');
+      return null;
+    }
+  }
+
   /// Shrink + re-encode a photo before it goes over mobile data.
   ///
   /// Attendance selfies used to be uploaded straight off the camera, which is

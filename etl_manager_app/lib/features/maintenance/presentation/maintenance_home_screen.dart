@@ -25,6 +25,7 @@ import '../../staff/domain/attendance_notifier.dart';
 import '../../staff/domain/attendance_flow.dart';
 import '../../notices/domain/notices_notifier.dart';
 import '../../notices/presentation/notices_screen.dart';
+import '../../tasks/presentation/tasks_entry.dart';
 import '../../settings/presentation/staff_settings_screen.dart';
 
 // ─── Palette (matches the app theme) ──────────────────────────────────────────
@@ -190,6 +191,8 @@ class _MaintenanceHomeScreenState extends ConsumerState<MaintenanceHomeScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 10),
+                  const TasksBell(),
                   const SizedBox(width: 10),
                   _CircleBtn(
                     child: Consumer(
