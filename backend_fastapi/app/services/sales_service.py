@@ -147,8 +147,18 @@ async def get_vendor_history(
     vendor_name: Optional[str] = None, # ✓ Made Optional
     court_id: Optional[int] = None,    # ✓ Made Optional
     outlet_id: Optional[int] = None,   # ✓ Added outlet_id
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
 ) -> VendorHistoryResponse:
-    
+    """One outlet's history for the vendor sheet.
+
+    The headline numbers (yesterday, last 7 vs previous 7 days, best day) are
+    always about the most recent week. `daily_history` is the last 7 days by
+    default; with `date_from` + `date_to` it is one row per day of that range
+    instead (the sheet's week/month breakdown), capped at yesterday so today's
+    in-progress sales never show, and zero-filled for days with no sales.
+    """
+
     # ✓ Smart routing: Agar outlet_id h toh seedha fetch, warna purana method
     if outlet_id:
         outlet = db.query(Outlet).filter(
@@ -204,6 +214,30 @@ async def get_vendor_history(
 
     best = max(history, key=lambda x: x.total_sales) if history else None
 
+    daily_history = history
+    if date_from is not None and date_to is not None:
+        end = min(date_to, today - timedelta(days=1))
+        rows = {
+            r.sale_date: r
+            for r in db.query(DailySaleCache).filter(
+                DailySaleCache.outlet_id == outlet.id,
+                DailySaleCache.sale_date >= date_from,
+                DailySaleCache.sale_date <= end,
+            )
+        }
+        daily_history = []
+        day = date_from
+        while day <= end:
+            r = rows.get(day)
+            daily_history.append(
+                DailySnapshot(
+                    date=str(day),
+                    total_sales=r.total_sales if r else 0.0,
+                    total_bills=r.bill_count if r else 0,
+                )
+            )
+            day += timedelta(days=1)
+
     latest_cache = db.query(DailySaleCache).filter(
         DailySaleCache.outlet_id == outlet.id,
         DailySaleCache.sale_date == today - timedelta(days=1),
@@ -219,7 +253,7 @@ async def get_vendor_history(
         week_total=week_total,
         last_week_total=previous_week_total,
         best_day=best.date if best else "",
-        daily_history=history,
+        daily_history=daily_history,
     )
 
 def _resolve_outlet_ids(db: Session, court_id: Optional[int], outlet_id: Optional[int]) -> list[int]:
