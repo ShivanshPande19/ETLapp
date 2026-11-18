@@ -200,18 +200,36 @@ async def vendor_history(
     vendor_name: Optional[str] = Query(None), # ✅ NAYA: Made optional
     court_id: Optional[int] = Query(None),    # ✅ NAYA: Made optional
     outlet_id: Optional[int] = Query(None),   # ✅ NAYA: Added outlet_id
+    date_from: Optional[str] = Query(None, description="Breakdown start, YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="Breakdown end, YYYY-MM-DD (inclusive)"),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
     court_id, outlet_id, vendor_name = _scope_single_outlet(
         user, court_id, outlet_id, vendor_name, db
     )
+    d_from = d_to = None
+    if date_from or date_to:
+        if not (date_from and date_to):
+            raise HTTPException(status_code=400, detail="Send both date_from and date_to.")
+        try:
+            d_from = date.fromisoformat(date_from)
+            d_to = date.fromisoformat(date_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD")
+        if d_from > d_to:
+            raise HTTPException(status_code=400, detail="date_from must be <= date_to")
+        # A month is the widest view the sheet asks for.
+        if (d_to - d_from).days > 31:
+            raise HTTPException(status_code=400, detail="Range too large (max 31 days).")
     try:
         return await get_vendor_history(
             db=db,
             vendor_name=vendor_name,
             court_id=court_id,
             outlet_id=outlet_id, # ✅ Service ko id pass kardi
+            date_from=d_from,
+            date_to=d_to,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

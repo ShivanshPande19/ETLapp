@@ -245,6 +245,37 @@ class SalesRepository {
     return VendorHistory.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// One row per day of [from]..[to] for one outlet (the vendor sheet's
+  /// week/month breakdown). The server stops at yesterday and zero-fills days
+  /// with no sales. Throws if the server ignored the range (an older backend
+  /// answers with the last 7 days instead), so the caller never shows the
+  /// wrong week under a period's label.
+  Future<List<DailySnapshot>> fetchVendorDaily({
+    required String vendorName,
+    required int courtId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    String iso(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final response = await _dio.get(
+      '/sales/vendor/history',
+      queryParameters: {
+        'vendor_name': vendorName,
+        'court_id': courtId,
+        'date_from': iso(from),
+        'date_to': iso(to),
+      },
+    );
+    final days = VendorHistory.fromJson(
+      response.data as Map<String, dynamic>,
+    ).dailyHistory;
+    if (days.isNotEmpty && days.first.date != iso(from)) {
+      throw StateError('Server did not return the requested range');
+    }
+    return days;
+  }
+
   /// Self-healing on-demand POS re-sync for the CURRENT scope + day(s). Called
   /// by the Sales screen's pull-to-refresh BEFORE re-reading the summary, so a
   /// day cached at ₹0 (POS posted after the scheduled sync) self-corrects.
